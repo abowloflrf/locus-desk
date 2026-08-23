@@ -1,0 +1,25 @@
+name: locus-desk
+
+services:
+  app:
+    image: locus-desk:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      network: host
+    network_mode: host
+    environment:
+      APP_ENV: production
+      APP_BIND: 0.0.0.0:7310
+      APP_DATA_DIR: /data
+      APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Singapore}
+      APP_ADMIN_USERNAME: ${APP_ADMIN_USERNAME:?Set APP_ADMIN_USERNAME}
+      APP_ADMIN_PASSWORD: ${APP_ADMIN_PASSWORD:?Set APP_ADMIN_PASSWORD}
+      APP_COOKIE_SECURE: ${APP_COOKIE_SECURE:-false}
+      RUST_LOG: ${RUST_LOG:-info}
+    volumes:
+      - locus-data:/data
+    restart: unless-stopped
+
+volumes:
+  locus-data:

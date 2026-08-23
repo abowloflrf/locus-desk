@@ -1,0 +1,11 @@
+/target/
+/var/
+/web/node_modules/
+/web/dist/*
+!/web/dist/.gitkeep
+
+.DS_Store
+*.log
+.env
+.env.*
+!env.example

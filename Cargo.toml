@@ -1,0 +1,24 @@
+[package]
+name = "locus-desk"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+description = "A local-first personal notes and tasks workspace"
+license = "MIT"
+
+[dependencies]
+axum = "0.8.9"
+mime_guess = "2.0.5"
+rust-embed = "8.12.0"
+serde = { version = "1.0.229", features = ["derive"] }
+tokio = { version = "1.53.1", features = ["macros", "net", "rt-multi-thread", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+[dev-dependencies]
+serde_json = "1.0"
+tower = { version = "0.5", features = ["util"] }
+
+[profile.release]
+lto = "thin"
+strip = "symbols"
