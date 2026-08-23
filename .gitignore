@@ -1,5 +1,6 @@
 /target/
 /var/
+/web/var/
 /web/node_modules/
 /web/dist/*
 !/web/dist/.gitkeep

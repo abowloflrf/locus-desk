@@ -18,7 +18,7 @@ install:
 	cd web && pnpm install --frozen-lockfile
 
 dev:
-	cd web && pnpm exec concurrently --kill-others --names api,web --prefix-colors green,blue "cargo run --manifest-path ../Cargo.toml" "vite"
+	web/node_modules/.bin/concurrently --kill-others --names api,web --prefix-colors green,blue "cargo run --locked" "pnpm --dir web exec vite"
 
 fmt:
 	cargo fmt
@@ -26,22 +26,23 @@ fmt:
 
 check:
 	cargo fmt --check
-	cargo clippy --all-targets --all-features -- -D warnings
+	cargo clippy --all-targets --all-features --locked -- -D warnings
 	cd web && pnpm format:check
 	cd web && pnpm check
 
 test:
-	cargo test
+	cargo test --all-targets --locked
+	cd web && pnpm test
 
 build:
 	cd web && pnpm build
-	cargo build --release
+	cargo build --release --locked
 
 docker-build:
-	docker build --network=host --tag locus-desk:local .
+	docker build --network=host --build-arg LOCUS_GIT_COMMIT="$$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)" --tag locus-desk:local .
 
 docker-up:
-	docker compose --file docker-compose.yml up --build
+	LOCUS_GIT_COMMIT="$$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)" docker compose --file docker-compose.yml up --build -d
 
 docker-down:
 	docker compose --file docker-compose.yml down

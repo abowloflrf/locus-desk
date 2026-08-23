@@ -1,6 +1,11 @@
 use std::error::Error;
 
-use locus_desk::config::Config;
+use locus_desk::{
+    commands::{self, Command},
+    config::Config,
+    db,
+    state::AppState,
+};
 use tokio::net::TcpListener;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
@@ -13,17 +18,40 @@ async fn main() -> Result<(), Box<dyn Error>> {
         )
         .init();
 
+    match commands::parse_environment()? {
+        Command::Serve => serve().await,
+        Command::Help => {
+            print!("{}", commands::HELP);
+            Ok(())
+        }
+        Command::Version => {
+            println!("{}", locus_desk::version::display());
+            Ok(())
+        }
+        command => commands::execute(command).await,
+    }
+}
+
+async fn serve() -> Result<(), Box<dyn Error>> {
     let config = Config::from_env()?;
     let listener = TcpListener::bind(config.bind()).await?;
+    let environment = config.environment();
+    let bind = config.bind();
+    let data_dir = config.data_dir().to_owned();
+    let state = AppState::initialize(config).await?;
+    let schema_version = db::schema_version(state.pool()).await?;
 
     info!(
-        environment = %config.environment(),
-        bind = %config.bind(),
+        environment = %environment,
+        bind = %bind,
+        data_dir = %data_dir.display(),
         version = env!("CARGO_PKG_VERSION"),
+        git_commit = locus_desk::version::GIT_COMMIT,
+        schema_version,
         "starting Locus Desk"
     );
 
-    axum::serve(listener, locus_desk::app())
+    axum::serve(listener, locus_desk::app(state))
         .with_graceful_shutdown(shutdown_signal())
         .await?;
 

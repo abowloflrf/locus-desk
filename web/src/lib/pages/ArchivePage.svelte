@@ -1,0 +1,274 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+
+  import { errorMessage } from '../api/client';
+  import { deleteNote, listNotes, updateNote } from '../api/notes';
+  import type { Note, SessionInfo } from '../api/types';
+  import ConfirmDialog from '../components/ConfirmDialog.svelte';
+  import Icon from '../components/Icon.svelte';
+  import NoteTimeline from '../components/NoteTimeline.svelte';
+  import StatusMessage from '../components/StatusMessage.svelte';
+  import { captureListFocus, restoreListFocus, type ListFocusSnapshot } from '../utils/focus';
+
+  let { session }: { session: SessionInfo } = $props();
+
+  let notes = $state<Note[]>([]);
+  let query = $state('');
+  let page = $state(1);
+  let total = $state(0);
+  let loading = $state(true);
+  let loadingMore = $state(false);
+  let loadError = $state<string | null>(null);
+  let operationError = $state<string | null>(null);
+  let actionStatus = $state<string | null>(null);
+  let busyUids = $state<Set<string>>(new Set());
+  let pendingDelete = $state<Note | null>(null);
+  let deleteBusy = $state(false);
+  let deleteError = $state<string | null>(null);
+  let pageElement = $state<HTMLElement>();
+  let controller: AbortController | null = null;
+  let searchTimer: ReturnType<typeof setTimeout> | null = null;
+  let deleteFocusSnapshot: ListFocusSnapshot | null = null;
+  let requestId = 0;
+
+  onMount(() => {
+    void loadArchive(true);
+    return () => {
+      controller?.abort();
+      if (searchTimer) clearTimeout(searchTimer);
+    };
+  });
+
+  async function loadArchive(reset: boolean): Promise<void> {
+    const nextPage = reset ? 1 : page + 1;
+    const id = ++requestId;
+    controller?.abort();
+    controller = new AbortController();
+    if (reset) loading = true;
+    else loadingMore = true;
+    loadError = null;
+    try {
+      const response = await listNotes(
+        { page: nextPage, pageSize: 30, q: query, status: 'ARCHIVED' },
+        controller.signal,
+      );
+      if (id !== requestId) return;
+      notes = reset ? response.items : [...notes, ...response.items];
+      page = response.page;
+      total = response.total;
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === 'AbortError') return;
+      if (id === requestId) loadError = errorMessage(cause, 'Unable to load the archive.');
+    } finally {
+      if (id === requestId) {
+        loading = false;
+        loadingMore = false;
+      }
+    }
+  }
+
+  function handleSearch(event: Event): void {
+    query = (event.currentTarget as HTMLInputElement).value;
+    if (searchTimer) clearTimeout(searchTimer);
+    invalidateArchiveRequest();
+    loading = true;
+    searchTimer = setTimeout(() => void loadArchive(true), 250);
+  }
+
+  async function handleRestore(note: Note): Promise<void> {
+    const focusSnapshot = captureListFocus(pageElement, note.uid);
+    invalidateArchiveRequest();
+    actionStatus = null;
+    const wasVisible = notes.some((item) => item.uid === note.uid);
+    notes = notes.filter((item) => item.uid !== note.uid);
+    if (wasVisible) total = Math.max(0, total - 1);
+    markBusy(note.uid, true);
+    operationError = null;
+    await restoreListFocus(pageElement, focusSnapshot);
+    try {
+      await updateNote(note.uid, { status: 'ACTIVE' });
+      const returnedDuringRequest = notes.some((item) => item.uid === note.uid);
+      notes = notes.filter((item) => item.uid !== note.uid);
+      if (returnedDuringRequest) total = Math.max(0, total - 1);
+      actionStatus = 'Note restored.';
+      void loadArchive(true);
+    } catch (cause) {
+      const matchesQuery =
+        !query.trim() ||
+        note.content.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
+      if (matchesQuery && !notes.some((item) => item.uid === note.uid)) {
+        notes = [...notes, note].sort((left, right) =>
+          right.createdAt.localeCompare(left.createdAt),
+        );
+        total += 1;
+      }
+      operationError = errorMessage(cause, 'Unable to restore the note.');
+      void loadArchive(true);
+    } finally {
+      markBusy(note.uid, false);
+    }
+  }
+
+  async function handleSave(note: Note, content: string): Promise<void> {
+    const focusSnapshot = captureListFocus(pageElement, note.uid);
+    invalidateArchiveRequest();
+    markBusy(note.uid, true);
+    operationError = null;
+    actionStatus = null;
+    try {
+      const updated = await updateNote(note.uid, { content });
+      if (matchesCurrentQuery(updated)) {
+        notes = notes.map((item) => (item.uid === updated.uid ? updated : item));
+      } else {
+        const wasVisible = notes.some((item) => item.uid === updated.uid);
+        notes = notes.filter((item) => item.uid !== updated.uid);
+        if (wasVisible) {
+          total = Math.max(0, total - 1);
+          actionStatus = 'Note updated and removed from the current view.';
+          await restoreListFocus(pageElement, focusSnapshot);
+        }
+      }
+      void loadArchive(true);
+    } catch (cause) {
+      operationError = errorMessage(cause, 'Unable to save the note.');
+      void loadArchive(true);
+      throw cause;
+    } finally {
+      markBusy(note.uid, false);
+    }
+  }
+
+  async function confirmDelete(): Promise<void> {
+    if (!pendingDelete) return;
+    const note = pendingDelete;
+    invalidateArchiveRequest();
+    deleteBusy = true;
+    deleteError = null;
+    try {
+      await deleteNote(note.uid);
+      notes = notes.filter((item) => item.uid !== note.uid);
+      total = Math.max(0, total - 1);
+      pendingDelete = null;
+      deleteError = null;
+      actionStatus = 'Note deleted.';
+      void loadArchive(true);
+    } catch (cause) {
+      deleteError = errorMessage(cause, 'Unable to delete the note.');
+      void loadArchive(true);
+    } finally {
+      deleteBusy = false;
+    }
+  }
+
+  function requestDelete(note: Note): void {
+    deleteFocusSnapshot = captureListFocus(pageElement, note.uid);
+    deleteError = null;
+    actionStatus = null;
+    pendingDelete = note;
+  }
+
+  function cancelDelete(): void {
+    deleteFocusSnapshot = null;
+    deleteError = null;
+    pendingDelete = null;
+  }
+
+  async function focusAfterDelete(): Promise<void> {
+    const snapshot = deleteFocusSnapshot;
+    deleteFocusSnapshot = null;
+    if (snapshot) await restoreListFocus(pageElement, snapshot);
+    else document.getElementById('main-content')?.focus();
+  }
+
+  function matchesCurrentQuery(note: Note): boolean {
+    return (
+      !query.trim() || note.content.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())
+    );
+  }
+
+  function markBusy(uid: string, busy: boolean): void {
+    const next = new Set(busyUids);
+    if (busy) next.add(uid);
+    else next.delete(uid);
+    busyUids = next;
+  }
+
+  function invalidateArchiveRequest(): void {
+    requestId += 1;
+    controller?.abort();
+    controller = null;
+    loading = false;
+    loadingMore = false;
+  }
+</script>
+
+<div bind:this={pageElement} class="page archive-page">
+  <header class="page-header">
+    <div>
+      <p class="eyebrow">Notes</p>
+      <h1>Archive</h1>
+      <p class="page-description">Notes kept out of the active timeline.</p>
+    </div>
+    <label class="search-field compact-search">
+      <Icon name="search" size={17} />
+      <span class="sr-only">Search archived notes</span>
+      <input oninput={handleSearch} placeholder="Search archive" type="search" value={query} />
+    </label>
+  </header>
+
+  {#if operationError}<StatusMessage tone="error">{operationError}</StatusMessage>{/if}
+  <div aria-atomic="true" aria-live="polite" class="sr-only" data-action-status role="status">
+    {actionStatus ?? ''}
+  </div>
+  <div class="list-toolbar">
+    <span>{total} archived {total === 1 ? 'note' : 'notes'}</span>
+    {#if loading && notes.length > 0}<span aria-live="polite">Updating…</span>{/if}
+  </div>
+
+  {#if loading && notes.length === 0}
+    <div aria-live="polite" class="loading-state large">Loading archive…</div>
+  {:else if loadError}
+    <div class="empty-state">
+      <h2>Archive unavailable</h2>
+      <p>{loadError}</p>
+      <button class="button secondary" onclick={() => void loadArchive(true)} type="button"
+        >Try again</button
+      >
+    </div>
+  {:else if notes.length === 0}
+    <div class="empty-state">
+      <h2>{query ? 'No archived notes found' : 'Nothing archived yet'}</h2>
+      <p>{query ? 'Try another keyword.' : 'Archived notes will stay available here.'}</p>
+    </div>
+  {:else}
+    <NoteTimeline
+      {busyUids}
+      mode="archive"
+      {notes}
+      onDelete={requestDelete}
+      onRestore={handleRestore}
+      onSave={handleSave}
+      timeZone={session.workspace.timezone}
+    />
+    {#if notes.length < total}
+      <button
+        class="button secondary load-more"
+        disabled={loadingMore}
+        onclick={() => void loadArchive(false)}
+        type="button">{loadingMore ? 'Loading…' : 'Load older notes'}</button
+      >
+    {/if}
+  {/if}
+</div>
+
+<ConfirmDialog
+  busy={deleteBusy}
+  confirmLabel="Delete note"
+  error={deleteError}
+  message="This archived note will be permanently deleted."
+  onCancel={cancelDelete}
+  onConfirm={confirmDelete}
+  onFallbackFocus={focusAfterDelete}
+  open={Boolean(pendingDelete)}
+  title="Delete this note?"
+/>

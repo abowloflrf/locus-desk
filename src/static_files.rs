@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use axum::{
     body::Body,
     http::{StatusCode, Uri, header},
@@ -33,7 +35,7 @@ pub async fn serve(uri: Uri) -> Response {
 }
 
 fn serve_asset(path: &str) -> Response {
-    let Some(asset) = WebAssets::get(path) else {
+    let Some(data) = asset_data(path) else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             [(header::CACHE_CONTROL, "no-store")],
@@ -55,6 +57,44 @@ fn serve_asset(path: &str) -> Response {
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, mime.as_ref())
         .header(header::CACHE_CONTROL, cache_control)
-        .body(Body::from(asset.data.into_owned()))
+        .body(Body::from(data.into_owned()))
         .expect("static response headers should be valid")
+}
+
+fn asset_data(path: &str) -> Option<Cow<'static, [u8]>> {
+    if let Some(asset) = WebAssets::get(path) {
+        return Some(asset.data);
+    }
+    #[cfg(test)]
+    if path == "index.html" {
+        return Some(Cow::Borrowed(include_bytes!("../web/index.html")));
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::{StatusCode, Uri, header};
+
+    use super::serve;
+
+    #[tokio::test]
+    async fn serves_spa_fallback_without_caching_the_document() {
+        let response = serve(Uri::from_static("/archive")).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL).unwrap(),
+            "no-cache"
+        );
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "text/html"
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_file_like_paths_do_not_fall_back_to_the_spa() {
+        let response = serve(Uri::from_static("/missing.js")).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
 }

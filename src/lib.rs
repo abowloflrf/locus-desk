@@ -1,81 +1,58 @@
 pub mod api;
 pub mod auth;
+pub mod clock;
+pub mod commands;
 pub mod config;
+pub mod data_management;
 pub mod db;
+pub mod error;
+pub mod notes;
+mod patch;
+pub mod state;
 pub mod static_files;
+pub mod tasks;
+pub mod version;
 pub mod workspace;
 
-use axum::Router;
+use axum::{Router, extract::Request, middleware};
+use state::AppState;
+use tower_http::{
+    request_id::{MakeRequestUuid, PropagateRequestIdLayer, RequestId, SetRequestIdLayer},
+    trace::{DefaultOnResponse, TraceLayer},
+};
+use tracing::Level;
 
 /// Builds the complete HTTP router.
-pub fn app() -> Router {
+pub fn app(state: AppState) -> Router {
     let api = Router::new()
-        .nest("/v1", api::router())
-        .fallback(api::not_found);
+        .nest("/v1", api::router(state.clone()))
+        .fallback(api::not_found)
+        .layer(middleware::from_fn(api::disable_caching));
+
+    let trace = TraceLayer::new_for_http()
+        .make_span_with(|request: &Request| {
+            let request_id = request
+                .extensions()
+                .get::<RequestId>()
+                .and_then(|value| value.header_value().to_str().ok())
+                .unwrap_or("unknown");
+            tracing::info_span!(
+                "http_request",
+                request_id,
+                method = %request.method(),
+                path = %request.uri().path()
+            )
+        })
+        .on_response(DefaultOnResponse::new().level(Level::INFO));
 
     Router::new()
         .nest("/api", api)
         .fallback(static_files::serve)
+        .layer(PropagateRequestIdLayer::x_request_id())
+        .layer(trace)
+        .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
+        .with_state(state)
 }
 
 #[cfg(test)]
-mod tests {
-    use axum::{
-        body::{Body, to_bytes},
-        http::{Request, StatusCode, header},
-    };
-    use serde_json::Value;
-    use tower::ServiceExt;
-
-    use super::app;
-
-    #[tokio::test]
-    async fn health_endpoint_reports_service_metadata() {
-        let response = app()
-            .oneshot(
-                Request::builder()
-                    .uri("/api/v1/health")
-                    .body(Body::empty())
-                    .expect("request should be valid"),
-            )
-            .await
-            .expect("router should respond");
-
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers().get(header::CONTENT_TYPE),
-            Some(&header::HeaderValue::from_static("application/json"))
-        );
-
-        let body = to_bytes(response.into_body(), 64 * 1024)
-            .await
-            .expect("response body should be readable");
-        let payload: Value = serde_json::from_slice(&body).expect("response should be JSON");
-
-        assert_eq!(payload["status"], "ok");
-        assert_eq!(payload["service"], "locus-desk");
-        assert_eq!(payload["version"], env!("CARGO_PKG_VERSION"));
-        assert_eq!(payload["schemaVersion"], 0);
-    }
-
-    #[tokio::test]
-    async fn unknown_api_routes_never_fall_back_to_the_spa() {
-        for uri in ["/api/unknown", "/api/v1/unknown"] {
-            let response = app()
-                .oneshot(
-                    Request::builder()
-                        .uri(uri)
-                        .body(Body::empty())
-                        .expect("request should be valid"),
-                )
-                .await
-                .expect("router should respond");
-
-            assert_eq!(response.status(), StatusCode::NOT_FOUND);
-            assert_eq!(
-                response.headers().get(header::CONTENT_TYPE),
-                Some(&header::HeaderValue::from_static("application/json"))
-            );
-        }
-    }
-}
+mod integration_tests;

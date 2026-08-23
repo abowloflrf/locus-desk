@@ -7,16 +7,31 @@ description = "A local-first personal notes and tasks workspace"
 license = "MIT"
 
 [dependencies]
+argon2 = "0.5.3"
 axum = "0.8.9"
+axum-extra = { version = "0.12.6", features = ["cookie"] }
+base64 = "0.22.1"
+chrono = { version = "0.4.42", features = ["serde"] }
+chrono-tz = "0.10.4"
+cookie = "0.18.1"
+getrandom = "0.4.3"
+libc = "0.2.177"
 mime_guess = "2.0.5"
+pulldown-cmark = "0.13.0"
 rust-embed = "8.12.0"
 serde = { version = "1.0.229", features = ["derive"] }
-tokio = { version = "1.53.1", features = ["macros", "net", "rt-multi-thread", "signal"] }
+serde_json = "1.0"
+sha2 = "0.10.9"
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+thiserror = "2.0.17"
+tokio = { version = "1.53.1", features = ["macros", "net", "rt-multi-thread", "signal", "sync"] }
+tower-http = { version = "0.7.0", features = ["request-id", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+ulid = "3.0.0"
 
 [dev-dependencies]
-serde_json = "1.0"
+tempfile = "3.23.0"
 tower = { version = "0.5", features = ["util"] }
 
 [profile.release]

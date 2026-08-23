@@ -7,6 +7,8 @@ services:
       context: .
       dockerfile: Dockerfile
       network: host
+      args:
+        LOCUS_GIT_COMMIT: ${LOCUS_GIT_COMMIT:-unknown}
     network_mode: host
     environment:
       APP_ENV: production

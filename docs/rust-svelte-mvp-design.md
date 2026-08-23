@@ -2,9 +2,9 @@
 
 > 文档状态：持续维护（Living Document）
 >
-> 当前阶段：Phase 0A — 可运行核心
+> 当前阶段：Phase 0B — 完成，Phase 1/2 待选择
 >
-> 文档版本：0.5
+> 文档版本：0.8
 >
 > 最近更新：2026-08-23
 >
@@ -359,7 +359,7 @@ CREATE INDEX idx_note_tags_tag ON note_tags(tag);
 
 标签由独立的领域服务在创建和更新笔记时从 Markdown 内容中提取，统一去除 `#`、去重并按约定规则规范化。HTTP handler 不直接实现标签解析。更新笔记时，在同一事务中替换该笔记的全部标签。
 
-Phase 0A 先使用带 workspace 条件的参数化 `LIKE` 搜索。个人数据量小时，它的实现和中文行为更可预测。Phase 0B 使用真实中英文样本建立基准，再决定是否引入 SQLite FTS5；不能因为英文测试通过就默认中文检索质量合格。
+Phase 0A 先使用带 workspace 条件的参数化 `LIKE` 搜索。个人数据量小时，它的实现和中文行为更可预测。真实中英文样本评估作为长期使用中的持续验证，再决定是否引入 SQLite FTS5；该评估不阻塞后续功能开发，但不能因为英文测试通过就默认中文检索质量合格。
 
 如果启用 FTS5，通过迁移中的触发器与 `notes` 同步，FTS 文档必须携带可过滤的 workspace 标识，搜索查询先绑定当前 workspace，再返回对象。API 形状不依赖具体索引实现。
 
@@ -412,7 +412,7 @@ CREATE INDEX idx_tasks_today
 
 ## 6. HTTP API
 
-所有响应使用 JSON。除健康检查、初始化状态和登录接口外，其余 API 都要求有效会话，并在服务端绑定到 session 的 active workspace。`/api/v1` 是清晰的路由命名空间，不代表开发期兼容承诺。
+API 成功响应除 `204 No Content` 外使用 JSON，错误响应统一使用 JSON。除健康检查、初始化状态和登录接口外，其余 API 都要求有效会话，并在服务端绑定到 session 的 active workspace。`/api/v1` 是清晰的路由命名空间，不代表开发期兼容承诺。所有 `/api` 响应都带 `Cache-Control: no-store`，避免浏览器或中间缓存保存个人数据。
 
 ### 6.1 路由
 
@@ -443,6 +443,18 @@ DELETE /api/v1/tasks/:uid
 
 ```ts
 type NoteStatus = "ACTIVE" | "ARCHIVED";
+
+interface HealthResponse {
+  status: "ok";
+  service: "locus-desk";
+  version: string;
+  gitCommit: string;
+  schemaVersion: number;
+}
+
+interface BootstrapStatusResponse {
+  initialized: boolean;
+}
 
 interface SessionInfo {
   user: {
@@ -485,6 +497,10 @@ interface ListNotesResponse {
   total: number;
 }
 
+interface ListTagsResponse {
+  items: string[];
+}
+
 type TaskStatus = "TODO" | "DONE";
 
 interface Task {
@@ -493,10 +509,10 @@ interface Task {
   description: string;
   status: TaskStatus;
   priority: 0 | 1;
-  dueDate?: string;
-  dueTime?: string;
+  dueDate: string | null;
+  dueTime: string | null;
   sortKey: number;
-  completedAt?: string;
+  completedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -517,6 +533,10 @@ interface UpdateTaskRequest {
   dueDate?: string | null;
   dueTime?: string | null;
   sortKey?: number;
+}
+
+interface ListTasksResponse {
+  items: Task[];
 }
 
 interface ApiError {
@@ -542,6 +562,8 @@ interface ApiError {
 - 完成任务在 Today 列表底部保留到当天结束；默认任务列表可以通过 `status` 单独过滤。
 - 不向客户端暴露数据库错误、密码哈希、会话摘要或内部路径。
 - 客户端不能提交 `workspaceId` 或 `creatorId` 覆盖服务端上下文；未来多 workspace 接口应通过受认证的 workspace 切换能力单独设计。
+- 登录成功和 `GET /auth/me` 直接返回 `SessionInfo`；`GET /notes` 返回 `ListNotesResponse`，`GET /tags` 返回 `{ items: string[] }`，`GET /tasks` 返回 `{ items: Task[] }`。创建和单项查询/更新直接返回对应的 `Note` 或 `Task`。
+- 每个请求由服务端设置或透传 `X-Request-Id`；结构化日志记录 request ID、HTTP 方法、路径、状态码和耗时，不记录 Cookie、密码或完整正文。
 
 状态码约定：
 
@@ -552,9 +574,11 @@ interface ApiError {
 | 204 | 登出或删除成功 |
 | 400 | 参数格式错误 |
 | 401 | 未登录、登录失败或会话过期 |
+| 403 | 修改请求的 `Origin` 与 `Host` 不同源 |
 | 404 | 资源不存在 |
-| 409 | 初始化或状态冲突 |
+| 405 | 已知 API 路由不支持该 HTTP 方法 |
 | 422 | 内容为空、过长或业务校验失败 |
+| 429 | 登录失败次数触发进程内限速 |
 | 500 | 未预期服务端错误 |
 
 ## 7. 前端设计
@@ -668,7 +692,7 @@ Phase 0A 即实现左侧导航、Notes 主工作区和 Today 右栏，未来模�
 
 中央正文有效阅读宽度控制在约 680–760px；剩余空间用于内边距和操作区。笔记列表默认不使用独立卡片背景，每条记录通过垂直留白和一条轻分隔线区分；编辑器因为本身是交互容器，可以使用独立 surface、边框和聚焦阴影。
 
-桌面窗口小于 1100px 时隐藏 Today 右栏，通过顶部 Today 按钮打开抽屉；小于 900px 时左侧导航收为图标栏。移动端不属于当前视觉设计范围，但结构上不能依赖 hover 才能完成操作。
+实现使用三档响应式断点：`>= 1200px` 显示完整左侧导航和 Today 右栏；`768–1199px` 将导航收为图标栏，Today 通过顶部按钮打开抽屉；`< 768px` 使用紧凑顶部栏、单列工作区和底部主导航。所有主要数据操作均可在触控界面完成，不依赖 hover。
 
 ### 7.8 编辑与渲染
 
@@ -678,7 +702,8 @@ Phase 0A 即实现左侧导航、Notes 主工作区和 Today 右栏，未来模�
 - 点击编辑后切换为 textarea，并提供保存和取消。
 - 链接使用安全的 `rel="noopener noreferrer"`。
 - Markdown 中的原始 HTML 默认不信任；渲染结果必须清洗。
-- 任务列表首版只负责展示，修改任务状态通过编辑 Markdown 完成。
+- Markdown task list 只负责展示，修改 checkbox 仍通过编辑笔记 Markdown 完成；它不与独立任务同步。
+- 独立 Tasks 领域在 Today 右栏和 `/tasks` 页面均支持完整创建、读取、编辑、完成/恢复和删除；可编辑标题、描述、重点、日期和可选时间。
 
 ### 7.9 状态管理
 
@@ -1003,7 +1028,7 @@ HTTP API ──▶ jobs table ──▶ Worker
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `APP_ENV` | `development` | `development`、`test` 或 `production` |
-| `APP_BIND` | `0.0.0.0:7310` | HTTP 监听地址 |
+| `APP_BIND` | `127.0.0.1:7310` | HTTP 监听地址；容器和需对外服务的生产部署显式改为 `0.0.0.0:7310` |
 | `APP_DATA_DIR` | 按环境推导 | SQLite、备份和运行数据目录 |
 | `APP_TIMEZONE` | `Asia/Singapore` | 空库初始化 workspace 时写入的 IANA 时区 |
 | `APP_ADMIN_USERNAME` | 无 | 空库首次启动必填 |
@@ -1014,11 +1039,14 @@ HTTP API ──▶ jobs table ──▶ Worker
 最小启动流程：
 
 ```bash
+install -d -m 0700 /srv/locus-desk/data
 APP_ENV=production \
+APP_BIND=0.0.0.0:7310 \
 APP_DATA_DIR=/srv/locus-desk/data \
 APP_TIMEZONE=Asia/Singapore \
 APP_ADMIN_USERNAME=admin \
 APP_ADMIN_PASSWORD='replace-with-a-strong-password' \
+APP_COOKIE_SECURE=true \
 ./locus-desk
 ```
 
@@ -1026,9 +1054,11 @@ APP_ADMIN_PASSWORD='replace-with-a-strong-password' \
 
 - `development`、`test` 和 `production` 必须使用不同的数据目录，禁止通过相同默认路径共享 SQLite 文件。
 - 测试始终创建临时数据库，测试代码不得读取 `production` 配置或真实个人数据目录。
-- 本地开发建议使用 `./var/dev/`；生产环境必须显式设置绝对 `APP_DATA_DIR`，未设置时拒绝以 `production` 启动。
-- 数据库、备份、附件和抓取缓存使用独立子目录，避免后续清理缓存时误删主数据。
-- 所有会删除、重建或导入数据库的开发命令都要求显式目标环境，并拒绝目标为 `production`。
+- 本地开发建议使用仓库根下的 `./var/dev/`；`make dev` 保证 API 子进程从仓库根启动，`/web/var/` 也被忽略以防旧工作流把敏感开发库加入 Git。
+- 生产环境必须显式设置绝对 `APP_DATA_DIR`，未设置时拒绝以 `production` 启动。Unix 上既有顶层目录必须由服务账户持有并预先设置为精确的 `0700`；启动时同时校验目录所有者 UID 与进程有效 UID，拒绝文件系统根、符号链接和仍有 group/other 权限的既有目录，且不会静默修改其权限。
+- Phase 0 只创建数据库、备份和导出三个独立子目录；附件、抓取缓存和独立日志目录在对应领域落地时再引入。
+- Unix 上新建数据目录及三个子目录使用 `0700`，SQLite 主文件和当前 WAL/SHM 使用 `0600`；备份和导出文件同样按私有文件创建。
+- 备份与导出命令从当前 `APP_DATA_DIR` 读取数据库，托管输出只接受不带目录分量的文件名且不覆盖已有文件；恢复命令显式接收源备份和目标数据目录。
 
 推荐目录：
 
@@ -1036,21 +1066,36 @@ APP_ADMIN_PASSWORD='replace-with-a-strong-password' \
 data/
 ├── db/locus-desk.sqlite3
 ├── backups/
-├── blobs/
-├── cache/
-└── logs/
+└── exports/
 ```
 
 ### 9.3 备份、导出与恢复
 
-Phase 0B 必须在开始长期写入真实数据前完成：
+Phase 0B 已实现以下数据保护基线，长期自用期间继续通过真实数据演练验证；后续演练用于发现改进项，不作为进入下一阶段的前置条件：
 
-- 使用 SQLite Online Backup API 或等价一致性机制创建快照，不能在服务运行时直接复制 WAL 数据库主文件。
-- 每次 schema 迁移前自动创建带 schema 版本和时间戳的备份；备份失败则中止迁移。
-- 提供手工备份命令和 JSON/Markdown 导出。Markdown 导出用于可读与迁移，SQLite 备份用于完整恢复。
-- 默认保留最近 7 个日备份和 4 个周备份，允许配置；清理只作用于明确的 `backups/` 目录。
-- 至少完成一次“新数据目录 → 恢复备份 → 启动 → 核对数量与抽样内容”的恢复演练，再把应用视为可长期使用。
-- 备份与导出默认包含个人敏感信息；文档和 UI 必须提示用户对备份目录进行同等级保护。
+- 使用 SQLite `VACUUM INTO` 创建一致性快照，不在服务运行时直接复制 WAL 数据库主文件；发布前执行 `quick_check`、精确 SQLx migration 版本/描述/checksum、内嵌 schema 对象形状、备份元数据和外键一致性校验。
+- 已有数据库的 schema 版本落后于内嵌 migration 时，启动会先创建 `pre-migration-<timestamp>-schema-<version>.sqlite3`；备份失败则中止迁移。空库首次迁移不创建无意义备份。
+- 每个 SQLite 备份内含唯一一行元数据：创建时间、应用版本、schema version 和 Git commit；恢复时元数据必须与快照 schema 一致。
+- 默认命名的手工备份与迁移前备份作为两个独立保留桶，各保留最近 7 个 UTC 日备份和额外 4 个较早 UTC 周备份。每次清理显式保护刚生成的产物，避免系统时钟回拨或未来日期文件将其淘汰；校验失败的托管样式文件、自定义文件名和符号链接不参与自动清理，清理范围严格限制在 `backups/`。
+- JSON/Markdown 导出包含可迁移的用户、workspace、笔记、标签和任务数据，但排除密码哈希、session、数据库内部整数 ID 和文件系统路径；导出事务先执行外键一致性检查，避免 `INNER JOIN` 对损坏数据静默漏项。Markdown 导出用于脱离应用阅读，SQLite 备份用于完整恢复。
+- 恢复只允许写入新的空绝对数据目录，或由服务账户持有且已是 `0700` 的空既有目录；不覆盖已有数据库，也不接纳带 WAL/SHM 伴随文件的源或目标。最终发布使用同目录原子 no-replace 链接，消除检查与发布之间的跨进程覆盖竞态；失败后仅残留空 `db/` 时允许在同一目标重试。
+- 恢复源在 Unix 上通过 `O_NOFOLLOW` 打开并持有同一文件描述符复制，复制前后复核 inode、长度、修改时间和 SQLite companion，防止路径替换或误复制活动 WAL 数据库。备份、导出、恢复使用带版本的私有临时文件协议；启动或重试时只回收同一账户、`0600`、所属 PID 已退出且复核 inode 未变化的遗留文件，不删除自定义或仍在使用的文件。
+- 新建数据目录按层设置 `0700`，并同步新目录及其父目录；生成文件在原子发布前同步内容，发布后同步直接父目录，收紧断电后的持久性边界。
+- 已覆盖“创建备份 → 恢复到新目录 → 读取抽样内容 → 对恢复库再次备份”的自动化演练，并完成 release 服务从恢复目录启动的记录化冒烟；连续自用阶段仍需定期重复演练。
+- 备份与导出默认包含个人敏感信息，必须与主数据目录采用同等级保护。
+
+CLI 契约与实际实现一致：
+
+```text
+locus-desk [serve]
+locus-desk backup [FILE]
+locus-desk export <json|markdown> [FILE]
+locus-desk restore <BACKUP> <TARGET_DATA_DIR>
+locus-desk --version
+locus-desk --help
+```
+
+`backup [FILE]` 输出到 `APP_DATA_DIR/backups/`，`export` 输出到 `APP_DATA_DIR/exports/`；省略文件名时使用含 Unix 毫秒时间戳的默认名称。`--version` 输出应用版本、Git commit 和最新 schema version。
 
 ### 9.4 发布物
 
@@ -1061,15 +1106,17 @@ Phase 0B 必须在开始长期写入真实数据前完成：
 - 内嵌数据库迁移，不要求用户安装 SQLx CLI。
 - 版本号、Git commit 和 schema version 可通过 `--version` 或健康信息查看。
 
-Docker 镜像可以在 MVP 完成后补充，但不应阻塞首个可用版本。
+Phase 0 已同时提供多阶段 Docker 镜像和 Compose 入口；构建参数传入 Git commit，运行时使用非 root 用户和持久化 `/data` volume。容器交付不改变“单 Rust 进程 + 单数据目录”的生产模型，也不是后续阶段的必要依赖。
 
 ## 10. 安全基线
 
 - 密码使用 Argon2id 和随机盐，不得写入日志。
+- 首次 owner 密码与登录输入共享 1024 字节上限，避免创建一个之后无法登录的账户；超限登录仍执行固定 dummy 校验并返回统一凭据错误。
 - 会话令牌使用密码学安全随机源，数据库只存摘要。
 - Cookie 使用 `HttpOnly`、`SameSite=Lax`，生产 HTTPS 启用 `Secure`。
 - 所有 SQL 使用绑定参数。
 - Markdown 输出必须清洗，不直接信任生成的 HTML。
+- 单条笔记最多提取 64 个唯一标签，单标签最多 64 个 Unicode 字符，超限在开启写事务前返回 422。
 - 修改型 API 只接受 JSON，并校验同源 `Origin`/`Host`。
 - 所有业务查询在数据访问层绑定 `workspace_id`；跨 workspace 访问统一返回 404，避免泄露资源存在性。
 - 未来开放邀请时，角色检查放在 workspace authorization 层，不散落在各 handler 中。
@@ -1111,6 +1158,29 @@ Phase 0A 退出条件：
 - `cargo test`、前端类型检查和生产构建通过。
 - 没有已知的数据丢失、跨 workspace 访问或存储型 XSS 问题。
 
+阶段记录（2026-08-23）：
+
+```text
+状态：完成
+开始日期：2026-08-23
+完成日期：2026-08-23
+实际交付：
+- 完成单所有者认证、session、workspace 隔离、Note/Task 完整 CRUD、Today 时区语义、基础搜索和安全 Markdown 渲染。
+- 完成 Svelte 双轨工作台、响应式壳层、SPA fallback、静态资源嵌入和 release 单二进制。
+与计划偏差：
+- Phase 0A 与 0B 在同一实现周期连续推进；Phase 0A 完成时已经包含部分标签、归档、窄屏和数据管理能力。
+- 为降低并发 PATCH 丢失更新风险，Note/Task 更新只修改请求中出现的字段，并显式区分缺失、null 和实际值。
+验证证据：
+- cargo test --all-targets --locked（47 tests）
+- cargo clippy --all-targets --all-features --locked -- -D warnings
+- pnpm --dir web check && pnpm --dir web test（35 tests）&& pnpm --dir web build
+- cargo build --release --locked；release 二进制独立启动并通过登录、Note/Task CRUD、重启与 SPA 路由冒烟
+未解决问题：
+- 无 P0/P1
+下一步：
+- 完成 Phase 0B 功能切片与数据保护验收；真实搜索评估和连续自用记录作为非阻塞验证并行推进。
+```
+
 ### 11.3 Phase 0B：可长期使用 MVP
 
 | 切片 | 内容 | 完成标准 |
@@ -1118,16 +1188,47 @@ Phase 0A 退出条件：
 | B1 整理 | 置顶、归档、恢复、标签提取与筛选、独立 Tasks 页面 | 每个操作有加载/空/错误状态，刷新后状态一致 |
 | B2 数据安全 | SQLite 一致性备份、迁移前备份、JSON/Markdown 导出、恢复命令 | 在全新目录完成一次自动化或记录化恢复演练 |
 | B3 体验 | 键盘快捷操作、焦点管理、窄屏降级、错误反馈、选定视觉精修 | 桌面主流程只用键盘可完成，无明显布局跳动 |
-| B4 质量 | 后端边界测试、前端状态测试、日志与健康信息 | 第 12 节自动化检查与人工验收全部通过 |
-| B5 搜索评估 | 用真实中文、英文、标签和混合内容比较 `LIKE` 与 FTS5 | 记录结论；只有收益明确时才引入 FTS5 |
+| B4 质量 | 后端边界测试、前端状态测试、日志与健康信息 | 第 12 节高风险边界自动化与记录化冒烟通过，低价值组合场景保留为按需人工验收 |
+| B5 搜索评估（非阻塞） | 用真实中文、英文、标签和混合内容比较 `LIKE` 与 FTS5 | 在长期使用中记录结论；只有收益明确时才引入 FTS5，不阻塞后续功能开发 |
 
 Phase 0B 退出条件：
 
-- 连续自用至少 7 天，期间没有未解决的 P0 数据或安全问题。
+- B1–B4 功能切片通过当前自动化与记录化验收。
 - 至少一次成功备份和恢复，导出文件可脱离应用阅读。
 - 所有 schema 变更都由迁移完成，生产数据不依赖删库重建。
 - 核心页面没有阻断日常使用的 P1 问题。
-- 已记录 Phase 1 前最常见的入口、摩擦点和无法找回的信息。
+
+Phase 0B 完成后并行持续验证：
+
+- 用真实中文、英文、标签和混合内容评估搜索召回与噪声，再决定是否引入 FTS5。
+- 连续自用至少 7 天，记录常见入口、摩擦点、无法找回的信息和新发现的 P0/P1；发现 P0 时立即停止新功能并修复，其他结果进入后续阶段排期。
+- 以上验证用于校正产品优先级和实现决策，不阻塞 Phase 1/2 的设计与开发。
+
+阶段记录（2026-08-23）：
+
+```text
+状态：完成
+开始日期：2026-08-23
+完成日期：2026-08-23
+实际交付：
+- B1 已实现：置顶、归档/恢复、标签提取与筛选、归档页，以及支持标题、描述、重点、日期、时间和状态的完整 Tasks 页面。
+- B2 已实现：一致性 SQLite 手工/迁移前备份、备份元数据、独立保留策略、JSON/Markdown 导出，以及只恢复到新空绝对目录的 CLI。
+- B3 已实现：保存/搜索快捷键、可见焦点、加载/空/错误反馈、三档响应式壳层、Today 抽屉和移动端底部导航。
+- B4 已实现：认证/workspace/CRUD/并发 PATCH/Today/备份恢复等后端边界测试，API 客户端和 Markdown 清洗前端测试，API no-store、request ID、方法/路径/状态/耗时日志，以及版本/schema 健康信息。
+与计划偏差：
+- 未为了逐项勾选计划清单而增加大量重复组件测试；前端自动化集中在 API 失效处理、过期请求隔离、参数生成和 Markdown/XSS 边界，完整页面交互由真实服务冒烟覆盖。
+- 当前继续使用参数化 LIKE；B5 真实中英文样本评估转为长期使用中的非阻塞验证，FTS5 仍须在收益明确后引入。
+- Phase 0 同步交付了 Docker 构建与 Compose 运行入口，但它不是后续阶段的必要依赖。
+验证证据：
+- cargo test --all-targets --locked（47 tests）；备份测试覆盖创建备份 → 恢复新目录 → 读取抽样内容 → 对恢复库再次备份
+- pnpm --dir web check && pnpm --dir web test（9 files / 35 tests）&& pnpm --dir web build
+- cargo build --release --locked；CLI 手工备份、两种导出、恢复目录启动、再次备份和健康检查的记录化冒烟通过
+未解决问题：
+- 无已知 P0/P1
+下一步：
+- 用真实中文、英文、标签和混合笔记记录 LIKE 的召回/噪声，再决定是否引入 FTS5。
+- 连续自用至少 7 天，复核备份可恢复性、常见入口、摩擦点和无法找回的信息；两项验证与 Phase 1/2 开发并行推进。
+```
 
 ### 11.4 范围降级顺序
 
@@ -1152,78 +1253,102 @@ Phase 0B 退出条件：
 
 ## 12. 测试与验收
 
-### 12.1 后端自动化测试
+第 12 节是 Phase 0 验收矩阵，不等同于“每个排列组合都必须有一条自动化测试”。核心行为和高风险边界优先自动化；浏览器布局、独立二进制和恢复启动采用记录化冒烟；需要时间积累的搜索质量和连续自用作为非阻塞的持续验证。下表状态描述 2026-08-23 的实际覆盖。
 
-使用临时 SQLite 数据库，并通过可注入 `Clock` 固定当前时间，覆盖：
+### 12.1 Phase 0 验收矩阵
 
-- 空库根据环境变量创建第一个用户、个人 workspace 和 OWNER membership。
-- 已初始化数据库不会重复创建或覆盖密码。
-- 正确登录、错误密码、未认证访问、登出和过期会话。
-- 两个 workspace 之间的列表、详情、更新和删除严格隔离，跨 workspace UID 访问返回 404。
-- 笔记创建、读取、编辑和删除。
-- 任务创建、编辑、完成、恢复和删除。
-- Today 范围、重点/常规分组和完成任务保留规则。
-- workspace 时区、UTC 跨日、月末/年末、逾期、仅日期、带时间和无日期任务。
-- 相同时间与 `sort_key` 下的确定性排序。
-- 空内容、超长内容和非法 PATCH。
-- 置顶排序、归档隔离和恢复归档。
-- 创建和编辑后标签正确重建。
-- 中文、英文和标签组合搜索。
-- 分页边界和最大 `page_size`。
-- `/api` 未知路由返回 JSON 404。
-- SPA 路由回退和静态资源缓存头。
-- 迁移前备份失败会阻止迁移；备份恢复后的 schema version 和对象数量正确。
+| 风险或闭环 | 当前证据 | 状态 |
+| --- | --- | --- |
+| 空库初始化、重复启动、登录/登出/过期 session | Rust 集成测试和认证单元测试 | 已覆盖 |
+| 登录枚举缓解、用户名边界、单用户/全局/并发限速 | 缺失用户执行固定 dummy Argon2；限速容量、过期、并发预约测试 | 已覆盖 |
+| workspace 数据隔离 | 两个 workspace 的 Note/Task API 集成测试，对象与列表查询跨 workspace 统一 404 | 已覆盖 |
+| Note CRUD、搜索、标签、置顶和归档 | 真实 SQLite + HTTP 集成测试，标签解析和大小边界单元测试 | 已覆盖 |
+| Task CRUD、Today、完成/恢复、可空日期时间 | 真实 SQLite + HTTP 集成测试，严格日期/时间与 PATCH 三态测试 | 已覆盖 |
+| 并发更新不覆盖无关字段 | 并发标题/状态 PATCH 集成测试 | 已覆盖 |
+| API 安全与契约 | JSON 错误、修改请求 Origin 的 scheme/Host/缺失边界、Cookie 属性、未知路由/方法、`no-store`、request ID 测试 | 已覆盖 |
+| Markdown/GFM 与存储型 XSS | GFM、危险 HTML/URL、应用 CSS class 注入和链接加固测试 | 已覆盖 |
+| 页面焦点、归档分页、过期认证请求 | Svelte 组件和 API client 测试 | 已覆盖 |
+| SPA fallback、嵌入资源和 release 单二进制 | Rust 静态资源测试、前端生产构建与 release 启动冒烟 | 已覆盖 |
+| 一致性备份、元数据、导出排密/FK、恢复、崩溃临时文件和保留策略 | 数据管理测试及 CLI 恢复演练 | 已覆盖 |
+| 360px/中屏/宽屏主要操作 | 真实服务的 360px 与 1440px 浏览器冒烟，中屏由同一断点实现核对 | 记录化验证 |
+| 真实中英文搜索质量与 FTS5 比较 | B5 样本尚未记录 | 非阻塞跟踪 |
+| 连续 7 天无 P0/P1 的真实自用 | 观察期尚未结束 | 非阻塞跟踪 |
 
-### 12.2 前端自动化测试
+### 12.2 后端已覆盖的自动化边界
 
-使用 Vitest 覆盖：
+后端使用临时 SQLite 数据库和可注入 `Clock`，当前自动化集中覆盖：
 
-- API 错误解析和认证失效处理。
-- 编辑器空内容校验及提交状态。
-- 创建后列表插入和失败回滚。
-- 编辑、置顶、归档的乐观更新。
-- Today 任务快速添加、勾选完成和失败回滚。
-- 搜索和标签过滤参数生成。
-- Markdown 清洗行为。
+- 初始化后的目录/数据库私有权限、既有数据根目录的有效 UID 所有权校验、OWNER membership、重复启动不覆盖账户，以及健康信息中的真实 schema version。
+- 正确密码、错误密码、不存在用户名的统一错误、未认证、登出、过期 session、1024 字节 owner/登录共同上限、Cookie 属性，以及登录限速的容量、并发与请求取消边界。
+- Note CRUD、中文/英文正文搜索、`%` 转义、标签提取/重建/筛选、置顶、归档隔离、空内容、256 KiB 正文、64 字符单标签和 64 个唯一标签上限。
+- Task CRUD、逾期与当天范围、重点排序、当天完成保留、完成/恢复、无日期 Inbox、严格日期/时间和可空计划字段；并发日期/时间冲突稳定返回 422 而非数据库 500。
+- PATCH 未知/空/null 语义、并发更新、Note/Task 的 workspace 级列表与对象隔离。
+- `/api` JSON 404/405、修改请求缺失/跨 scheme/跨 Host Origin、API `no-store`、request ID、SPA document 缓存和 file-like 404。
+- 纽约 23/25 小时 DST 日边界和 Kiritimati 跨年 Today 样本。
+- `VACUUM INTO` 快照一致性、原子不可覆盖、精确 migration/schema 校验、备份元数据、导出排除秘密/内部 ID 与外键损坏拒绝、O_NOFOLLOW 恢复源、崩溃临时文件回收、恢复后再次备份，以及手工/迁移前备份的独立 7 日 + 4 周保留。
 
-### 12.3 构建检查
+以下是原计划中的组合性用例，当前未为每一项建立独立测试：所有 IANA 时区的 DST/月末/年末组合、所有相同时间/`sort_key` 排序平局、Notes 分页与最大 `page_size` 的全部排列，以及在尚无第二个 migration 时模拟每种迁移失败。Phase 0 当前以 `Asia/Singapore` 真实 Today 路径、纽约 DST 与 Kiritimati 跨年代表样本、确定性 SQL 次级排序、归档第二页组件测试和备份失败即中止的实现约束建立信心；出现相关缺陷、引入其他特殊时区或新增 migration 时再把对应高风险样本升级为自动化，不为勾选清单堆叠重复测试。
+
+### 12.3 前端已覆盖的自动化边界
+
+Vitest 当前覆盖：
+
+- 稳定 API 错误信封、非 JSON 服务端错误的安全降级、`204`、当前认证 `401` 和旧认证世代迟到 `401` 的隔离。
+- GFM 标题、引用、列表、任务 checkbox 和代码块；危险元素/属性/协议、可覆盖应用的 class 注入，以及外链 `rel`/`target` 加固。
+- Note/Task 原位编辑时焦点进入编辑器，`Esc` 取消后返回触发按钮；归档、恢复和任务跨组移动后聚焦邻项或原项，并通过 live status 宣告结果。
+- NoteComposer 与 TaskCreateForm 的同步双提交防重，以及提交期间草稿变化不被旧响应覆盖。
+- Note 创建和编辑仅用 `trim()` 判空，实际提交保留首行缩进、行尾空格和末尾换行，避免静默改写合法 Markdown。
+- Notes 搜索和标签响应世代隔离；Archive 第二页继续加载；Task 状态筛选立即清除旧 rows 并暴露 busy 状态。
+- Today 行内编辑或恢复使任务不再属于当天范围时，任务立即移出列表，并将焦点稳定转移到邻项或主内容，同时通过 live status 宣告结果。
+- logout→login 后旧 session refresh 的迟到成功/失败隔离、新登录清除旧 notice，以及点击导航与浏览器 Back/Forward 后的主内容焦点。
+- Today drawer 的 inert、全局 notice、移动端快捷入口、内嵌原生确认框的 Escape/Tab 层级，以及删除失败在确认框内可感知。
+
+当前没有为每个乐观更新失败排列、所有 Today/Tasks 过滤组合或像素级响应式布局复制 mock 测试；这些路径由最小高风险竞态测试、真实后端浏览器冒烟和实现中的回滚/请求失效约束共同建立信心。若自用期间出现状态不同步、焦点或回滚缺陷，先新增最小复现测试再修复。
+
+### 12.4 构建检查
+
+本地与 CI 使用同一组锁定依赖检查：
 
 ```bash
-cargo test
-cargo clippy -- -D warnings
-cd web && pnpm check
-cd web && pnpm test
-cd web && pnpm build
-cargo build --release
+cargo fmt --check
+cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo test --all-targets --locked
+pnpm --dir web format:check
+pnpm --dir web check
+pnpm --dir web test
+pnpm --dir web build
+cargo build --release --locked
 ```
 
-每个阶段只新增当前所需的质量工具。格式化、lint、测试和构建命令写入仓库脚本或 `justfile`，保证本地与 CI 调用同一入口；不要依赖只存在于个人 shell 的别名。
+2026-08-23 的最终结果为 Rust 47 tests、Vitest 9 files / 35 tests、Svelte 0 errors / 0 warnings；格式化、Clippy `-D warnings`、前端生产构建和 release 构建全部通过。仓库通过 `make check`、`make test` 和 `make build` 汇总这些命令；CI 还在干净 checkout 中重新安装锁定的前端依赖并构建包含静态资源的 release 二进制。
 
-### 12.4 人工验收
+### 12.5 记录化冒烟与持续观察
 
-在全新数据目录中完成以下闭环：
+2026-08-23 已在全新源数据目录完成以下闭环：启动并登录；创建包含 Markdown、中文、代码块和标签的笔记；搜索正文和标签；编辑、置顶、取消置顶、归档、恢复和删除；在 Today 与 Tasks 页面创建、编辑、完成、恢复和删除任务；重启后核对持久化；直接刷新 `/archive` 和 `/tasks`；在 1440px 和 360px 下核对主要操作。
 
-1. 使用环境变量启动服务并登录。
-2. 创建含 Markdown、中文、代码块和标签的笔记。
-3. 搜索正文并按标签过滤。
-4. 编辑内容并确认标签和搜索结果同步变化。
-5. 在右侧 Today 栏添加重点和常规任务，验证日期/时间/逾期展示，并完成、恢复和删除。
-6. 置顶、取消置顶、归档、恢复和删除笔记。
-7. 重启服务，确认笔记和任务数据仍存在。
-8. 直接刷新 `/archive` 和 `/tasks`，确认 SPA fallback 正常。
-9. 创建一致性备份，在全新数据目录恢复并抽查账户、笔记、标签和任务。
-10. 将服务器系统时区临时设为与 workspace 不同的时区，确认 Today 仍按 workspace 时区计算。
+同日恢复演练按以下链路完成；恢复实例还验证了缺失 `Origin` 的修改请求返回 403、JSON/Markdown 导出不含密码/session 秘密，以及数据目录和托管文件分别保持 `0700`/`0600`：
+
+```text
+初始化源目录并写入样本
+→ locus-desk backup
+→ locus-desk export json / export markdown
+→ locus-desk restore <backup> <new-empty-absolute-data-dir>
+→ 从恢复目录启动 release 服务并登录、核对健康信息与样本
+→ 对恢复目录再次执行 locus-desk backup
+```
+
+自动化测试验证恢复后的笔记可读、恢复库可再次备份、目标不可覆盖且目录范围受限；恢复实现还会拒绝缺失/不匹配元数据、不完整 schema、`quick_check` 失败和外键不一致的快照。恢复演练已经满足 B2 的实现门禁。B5 真实搜索评估和连续 7 天自用仍需继续，但作为产品反馈与技术决策输入，不阻塞后续阶段。
 
 ## 13. 产品实施路线与阶段门禁
 
 ### 13.1 路线总览
 
-阶段按依赖关系排序，不按固定发布日期承诺。只有上一阶段达到退出条件，下一阶段才进入“进行中”；使用反馈可以调整 Phase 1–3 的先后，但不能跳过数据安全和领域依赖。
+阶段按必要依赖排序，不按固定发布日期承诺。交付物、数据安全、迁移和 P0/P1 属于硬门禁；搜索质量评估、连续自用等需要时间积累的观察项可以与后续开发并行。使用反馈可以调整 Phase 1–3 的先后，但不能跳过数据安全和领域依赖。
 
 | 阶段 | 状态 | 核心结果 | 关键依赖 |
 | --- | --- | --- | --- |
-| Phase 0A | 当前 | Notes + Today Tasks 可运行核心 | 无 |
-| Phase 0B | 待开始 | 可长期自用的完整 MVP | Phase 0A |
+| Phase 0A | 完成 | Notes + Today Tasks 可运行核心 | 无 |
+| Phase 0B | 完成 | 完整 MVP、数据保护与恢复闭环 | Phase 0A |
 | Phase 1 | 候选 | Library + 网页剪藏闭环 | Phase 0B 数据安全 |
 | Phase 2 | 候选 | Tasks 成为可靠的轻量行动系统 | Phase 0 使用数据 |
 | Phase 3 | 候选 | RSS 发现、阅读与沉淀闭环 | Phase 1 内容流水线 |
@@ -1233,9 +1358,11 @@ cargo build --release
 
 状态只使用：`当前`、`进行中`、`待开始`、`候选`、`暂停`、`完成`。每次更新当前阶段时，同步修改文档顶部的“当前阶段”。
 
-阶段进入“进行中”前必须满足：上一项必要依赖已经完成、范围和非目标已经写清、schema/迁移影响已评审、验收样本已准备；涉及真实数据时还要确认最近一次备份可恢复。
+阶段进入“进行中”前必须满足：上一项硬依赖已经完成、范围和非目标已经写清、schema/迁移影响已评审、验收样本已准备；涉及真实数据时还要确认最近一次备份可恢复。未完成的非阻塞观察项继续记录，但不单独阻止下一阶段启动。
 
 ### 13.2 Phase 0A：可运行核心
+
+状态：**完成（2026-08-23）**。完整阶段记录见第 11.2 节。
 
 目标：一天内用真实数据完成记录与行动双闭环。
 
@@ -1246,12 +1373,15 @@ cargo build --release
 
 ### 13.3 Phase 0B：可长期使用 MVP
 
+状态：**完成（2026-08-23）**。完整阶段记录见第 11.3 节。
+
 目标：从“能跑”提升为“敢放真实个人数据并持续升级”。
 
-- 交付：置顶、归档、标签、完整 Tasks 页面、导出、自动备份、恢复流程、日志和体验修整。
+- 已交付：置顶、归档、标签、完整 Tasks 页面、导出、自动备份、恢复流程、日志和体验修整；B1–B4 功能切片已经实现并通过当前验收矩阵。
 - 数据变化：只通过单向 migration 演进；在真实数据迁移前自动备份。
-- 验证：完整执行第 12 节；连续自用至少 7 天并记录问题。
-- 决策门：根据真实样本决定是否启用 FTS5、Phase 1 与 Phase 2 的先后，以及哪些快捷操作值得优先做。
+- 已验证：备份、恢复到新目录、从恢复目录启动并再次备份；高风险自动化与记录化浏览器冒烟见第 12 节。
+- 持续验证：B5 真实中英文/标签/混合内容搜索评估，以及连续自用至少 7 天的问题记录；两项与后续阶段并行，不改变 Phase 0B 完成状态。
+- 后续决策：根据真实样本决定是否启用 FTS5、Phase 1 与 Phase 2 的先后，以及哪些快捷操作值得优先做。
 - 非目标：附件、浏览器插件、提醒、重复任务和 Agent。
 
 ### 13.4 Phase 1：Library 与网页剪藏
@@ -1345,19 +1475,19 @@ cargo build --release
 - 数据模型和服务层从第一天带 workspace 边界，但不实现注册、邀请、workspace 切换或多租户管理 UI。
 - 项目用于个人工作整理和技术学习，优先采用实现时最新成熟稳定的技术框架。
 - 开发期不承诺旧版本、旧 schema 或旧 API 兼容；开始保存真实个人数据后通过单向迁移和升级前备份保护数据。
-- Phase 0A 采用“快速笔记 + Today 任务”双闭环；置顶、归档、标签完善和数据保护进入紧随其后的 Phase 0B。
+- Phase 0A 已以“快速笔记 + Today 任务”双闭环完成；置顶、归档、标签完善和数据保护已在 Phase 0B 功能切片交付。
 - Today 按 workspace IANA 时区计算；任务计划使用日期与可选时间，不用单个 UTC 截止时间混淆日历语义。
-- Phase 0A 使用参数化 `LIKE` 基础搜索，是否采用 FTS5 由真实中文检索测试决定。
+- Phase 0 当前使用参数化 `LIKE` 基础搜索，是否采用 FTS5 仍由 B5 真实中文检索测试决定。
 - 桌面端视觉选择“双轨工作台”：左侧模块导航、中央 Notes、右侧 Today。
 - 浅色、简洁、克制字号和低饱和苔绿色是已确认偏好；不使用橙色、渐变或典型 AI 发光效果。
-- 桌面端优先，当前阶段不把移动端设计作为交付要求。
+- 桌面端仍是视觉优先级；Phase 0 已提供 `< 768px` 单列、顶部栏和底部导航的功能性移动适配，不承诺原生移动端或像素级精修。
 - 不做任何 Memos 兼容、数据导入或迁移。
 - 长期方向是个人信息与行动中枢，包含 Notes、Library、Tasks、Reader 和 Agent Chat。
 - 不使用万能 JSON 内容表；第二种内容实体出现时引入共享对象层和独立领域表。
 - RSS 条目默认不进入长期知识库，也不自动成为 Agent 的默认检索语料。
 - Agent 的写操作必须经过预览和用户确认，并且回答需要提供内部来源引用。
 - 产品调研以当前 Memos 源码和官方框架资料为主，不包含外部竞品和社区舆情研究。
-- 当前文件只描述新应用；后续实现应建立独立代码仓库，避免与 Memos 上游代码混合。
+- 当前仓库是独立实现，不与 Memos 上游源码、API 或数据库混合。
 
 ## 16. 文档维护约定
 
@@ -1431,6 +1561,7 @@ cargo build --release
 | D-007 | 2026-08-23 | 数据导出、自动备份和恢复演练必须早于 Library、RSS 与 Agent | 已接受 |
 | D-008 | 2026-08-23 | Agent 最后实现，写操作必须预览并确认，回答必须可追溯到来源 | 已接受 |
 | D-009 | 2026-08-23 | 正式产品名确定为 Locus Desk；仓库、二进制和默认数据命名统一使用 locus-desk | 已接受 |
+| D-010 | 2026-08-23 | B5 搜索评估与连续 7 天自用是非阻塞持续验证，不作为 Phase 1/2 开发的必要依赖 | 已接受 |
 
 ### 16.6 版本维度
 
@@ -1441,7 +1572,7 @@ cargo build --release
 - **Schema version**：由有序 migration 唯一决定，只向前迁移，不用应用版本号代替。
 - **Git commit**：定位精确源码；release 二进制和健康信息同时暴露应用版本、commit 和 schema version。
 
-备份文件元数据必须记录创建时间、应用版本和 schema version。需要撤销错误升级时，恢复升级前备份并运行匹配代码，不设计数据库 down migration。
+备份文件元数据记录创建时间、应用版本、schema version 和 Git commit。需要撤销错误升级时，恢复升级前备份并运行匹配代码，不设计数据库 down migration。
 
 ### 16.7 文档版本记录
 
@@ -1452,3 +1583,6 @@ cargo build --release
 | 0.3 | 2026-08-23 | 确认双轨工作台视觉方向和个人优先、workspace-aware 原则 |
 | 0.4 | 2026-08-23 | 增加可执行阶段、退出门禁、日期语义、数据保护和文档维护机制 |
 | 0.5 | 2026-08-23 | 确认 Locus Desk 产品名，并迁移至独立项目目录 |
+| 0.6 | 2026-08-23 | 记录 Phase 0A 完成、Phase 0B 功能交付与恢复演练，并将真实搜索和连续 7 天自用保留为观察门禁 |
+| 0.7 | 2026-08-23 | 补充最终自动化数量、release 备份恢复闭环、目录所有权和 Markdown/Today 状态一致性验收证据 |
+| 0.8 | 2026-08-23 | 将 B5 搜索评估与连续 7 天自用调整为非阻塞持续验证，并将 Phase 0B 标记为完成 |

@@ -16,15 +16,23 @@ RUN pnpm build
 FROM rust:1.97.1-bookworm AS rust-builder
 
 WORKDIR /app
+ARG LOCUS_GIT_COMMIT=unknown
+ENV LOCUS_GIT_COMMIT=${LOCUS_GIT_COMMIT}
 
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml Cargo.lock build.rs ./
 COPY src/ ./src/
-RUN cargo fetch --locked
+RUN --mount=type=cache,id=locus-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=locus-cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    cargo fetch --locked
 
 COPY migrations/ ./migrations/
 COPY --from=web-builder /app/web/dist/ ./web/dist/
 
-RUN cargo build --release --locked
+RUN --mount=type=cache,id=locus-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=locus-cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,id=locus-cargo-target,target=/app/target,sharing=locked \
+    cargo build --release --locked \
+    && cp target/release/locus-desk /app/locus-desk
 
 FROM debian:bookworm-slim AS runtime
 
@@ -34,9 +42,10 @@ RUN apt-get update \
     && groupadd --gid 10001 locus-desk \
     && useradd --uid 10001 --gid locus-desk --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin locus-desk \
     && mkdir --parents /data \
+    && chmod 0700 /data \
     && chown locus-desk:locus-desk /data
 
-COPY --from=rust-builder /app/target/release/locus-desk /usr/local/bin/locus-desk
+COPY --from=rust-builder /app/locus-desk /usr/local/bin/locus-desk
 
 ENV APP_ENV=production \
     APP_BIND=0.0.0.0:7310 \
