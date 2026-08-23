@@ -15,7 +15,7 @@
     today,
     refreshToken = 0,
   }: {
-    mode: 'today' | 'all';
+    mode: 'todo' | 'all';
     today: string;
     refreshToken?: number;
   } = $props();
@@ -65,8 +65,7 @@
     try {
       const response = await listTasks(
         {
-          scope: mode === 'today' ? 'today' : undefined,
-          status: mode === 'all' && statusFilter !== 'ALL' ? statusFilter : undefined,
+          status: mode === 'todo' ? 'TODO' : statusFilter !== 'ALL' ? statusFilter : undefined,
         },
         activeController.signal,
       );
@@ -86,7 +85,7 @@
     operationError = null;
     try {
       const task = await createTask(payload);
-      if (mode === 'today' || statusFilter !== 'DONE') tasks = [...tasks, task];
+      if (mode === 'todo' || statusFilter !== 'DONE') tasks = [...tasks, task];
       window.dispatchEvent(new CustomEvent('locus:tasks-changed'));
     } catch (cause) {
       operationError = errorMessage(cause, 'Unable to add the task.');
@@ -119,8 +118,8 @@
       replaceTask(updated);
       focusTask = updated;
       actionStatus =
-        mode === 'today' && !taskMatchesCurrentFilter(updated)
-          ? `Task restored and moved out of Today: ${task.title}.`
+        mode === 'todo' && !taskMatchesCurrentFilter(updated)
+          ? `Task completed and removed from Todo: ${task.title}.`
           : nextStatus === 'DONE'
             ? `Task completed: ${task.title}.`
             : `Task restored: ${task.title}.`;
@@ -152,8 +151,8 @@
       replaceTask(updated);
       if (!remainsVisible) {
         actionStatus =
-          mode === 'today'
-            ? `Task moved out of Today: ${task.title}.`
+          mode === 'todo'
+            ? `Task updated and removed from Todo: ${task.title}.`
             : `Task updated and removed from the current view: ${task.title}.`;
         await restoreListFocus(boardElement, focusSnapshot);
       }
@@ -220,8 +219,8 @@
   }
 
   function taskMatchesCurrentFilter(task: Task): boolean {
-    if (mode === 'today') {
-      return task.status === 'DONE' || Boolean(task.dueDate && task.dueDate <= today);
+    if (mode === 'todo') {
+      return task.status === 'TODO';
     }
     return statusFilter === 'ALL' || task.status === statusFilter;
   }
@@ -255,7 +254,7 @@
   aria-busy={loading}
   bind:this={boardElement}
   class:full-task-board={mode === 'all'}
-  class:today-task-board={mode === 'today'}
+  class:todo-task-board={mode === 'todo'}
   class="task-board"
 >
   {#if mode === 'all'}
@@ -293,9 +292,9 @@
     </div>
   {:else if tasks.length === 0}
     <div class="empty-state compact">
-      <p>{mode === 'today' ? 'Nothing is scheduled for today.' : 'No tasks in this view.'}</p>
+      <p>{mode === 'todo' ? 'No open tasks.' : 'No tasks in this view.'}</p>
       <span
-        >{mode === 'today'
+        >{mode === 'todo'
           ? 'Add one small next step to get started.'
           : 'Create a task to get started.'}</span
       >
@@ -321,14 +320,8 @@
     {/if}
 
     {#if regularTasks.length > 0}
-      <section
-        aria-label={mode === 'today' ? 'Regular tasks' : undefined}
-        aria-labelledby={mode === 'all' ? `regular-${mode}` : undefined}
-        class="task-section"
-      >
-        {#if mode === 'all'}
-          <h2 id={`regular-${mode}`}>Regular <span>{regularTasks.length}</span></h2>
-        {/if}
+      <section aria-labelledby={`regular-${mode}`} class="task-section">
+        <h2 id={`regular-${mode}`}>Regular <span>{regularTasks.length}</span></h2>
         <div class="task-list">
           {#each regularTasks as task (task.uid)}
             <TaskRow
@@ -383,7 +376,7 @@
     min-width: 0;
   }
 
-  .today-task-board {
+  .todo-task-board {
     min-height: 0;
   }
 
@@ -393,7 +386,7 @@
     padding: 3px;
     margin-bottom: 18px;
     background: var(--color-surface-muted);
-    border-radius: 8px;
+    border-radius: var(--radius-control);
   }
 
   .segmented-control button {
@@ -413,7 +406,7 @@
   }
 
   .task-section {
-    margin-bottom: 26px;
+    margin-bottom: 20px;
     animation: content-enter 180ms ease both;
   }
 

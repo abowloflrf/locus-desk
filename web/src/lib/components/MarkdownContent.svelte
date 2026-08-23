@@ -13,7 +13,7 @@
     color: var(--color-text);
     overflow-wrap: anywhere;
     font-size: 15px;
-    line-height: 26px;
+    line-height: 24px;
   }
 
   .markdown-content > :global(:first-child) {
@@ -50,7 +50,7 @@
   .markdown-content :global(ol),
   .markdown-content :global(blockquote),
   .markdown-content :global(pre) {
-    margin: 0 0 0.8em;
+    margin: 0 0 0.7em;
   }
 
   .markdown-content :global(ul),

@@ -7,6 +7,7 @@
   let content = $state('');
   let busy = $state(false);
   let error = $state<string | null>(null);
+  let focused = $state(false);
   let textarea = $state<HTMLTextAreaElement>();
 
   async function submit(): Promise<void> {
@@ -42,8 +43,19 @@
 
   function resizeTextarea(): void {
     if (!textarea) return;
+    const minimum = focused || content ? 88 : 60;
     textarea.style.height = 'auto';
-    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 88), 280)}px`;
+    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, minimum), 280)}px`;
+  }
+
+  function handleFocus(): void {
+    focused = true;
+    resizeTextarea();
+  }
+
+  function handleBlur(): void {
+    focused = false;
+    if (!content) resizeTextarea();
   }
 </script>
 
@@ -51,16 +63,19 @@
   <h2 class="sr-only" id="composer-title">Create a note</h2>
   <label class="sr-only" for="note-composer-input">Note content</label>
   <textarea
-    aria-describedby={error ? 'composer-error' : undefined}
+    aria-describedby={error ? 'composer-hint composer-error' : 'composer-hint'}
     bind:this={textarea}
     bind:value={content}
     disabled={busy}
     id="note-composer-input"
+    onblur={handleBlur}
+    onfocus={handleFocus}
     oninput={resizeTextarea}
     onkeydown={handleKeydown}
     placeholder="Write a quick note…"
     rows="3"></textarea>
   <div class="composer-footer">
+    <span class="composer-hint" id="composer-hint">Markdown <kbd>⌘↵</kbd></span>
     <div class="composer-submit">
       <button
         class="button primary"
@@ -78,27 +93,28 @@
 <style>
   .note-composer {
     position: relative;
-    padding: 16px 20px 14px;
+    padding: 14px 16px 12px;
     margin-bottom: 10px;
     background: var(--color-surface);
-    border-radius: 18px;
-    box-shadow:
-      0 1px 2px color-mix(in oklch, var(--color-text), transparent 94%),
-      0 16px 42px color-mix(in oklch, var(--color-text), transparent 95%);
+    border: 1px solid var(--color-border-soft);
+    border-radius: var(--radius-feature);
+    box-shadow: var(--shadow-soft);
     transition:
+      border-color 160ms ease,
       box-shadow 160ms ease;
   }
 
   .note-composer:focus-within {
+    border-color: color-mix(in oklch, var(--color-accent), var(--color-border) 68%);
     box-shadow:
       0 0 0 3px color-mix(in oklch, var(--color-accent), transparent 88%),
-      0 20px 52px color-mix(in oklch, var(--color-text), transparent 92%);
+      var(--shadow-soft);
   }
 
   textarea {
-    min-height: 88px;
+    min-height: 60px;
     max-height: 280px;
-    padding: 5px 2px 9px;
+    padding: 4px 2px 8px;
     background: transparent;
     border: 0;
     border-radius: 0;
@@ -107,6 +123,7 @@
     font-size: 15px;
     line-height: 24px;
     resize: none;
+    transition: height 160ms ease;
   }
 
   textarea:focus {
@@ -116,8 +133,22 @@
   .composer-footer {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: space-between;
+    gap: 16px;
     padding-top: 0;
+  }
+
+  .composer-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--color-text-muted);
+    font-size: 11px;
+  }
+
+  .composer-hint kbd {
+    background: transparent;
+    border-color: var(--color-border-soft);
   }
 
   .composer-submit {
@@ -129,17 +160,16 @@
   .composer-submit .button {
     min-height: 38px;
     padding-inline: 18px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
   }
 
   @media (max-width: 767px) {
     .note-composer {
-      padding: 14px 15px 12px;
-      border-radius: 15px;
+      padding: 12px 14px 11px;
     }
 
     textarea {
-      min-height: 96px;
+      min-height: 60px;
       padding-top: 4px;
       font-size: 15px;
     }

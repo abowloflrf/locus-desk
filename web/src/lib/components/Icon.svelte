@@ -10,6 +10,7 @@
     | 'library'
     | 'logout'
     | 'menu'
+    | 'more'
     | 'note'
     | 'pin'
     | 'plus'
@@ -18,7 +19,8 @@
     | 'search'
     | 'settings'
     | 'tasks'
-    | 'today';
+    | 'today'
+    | 'todo';
 
   let { name, size = 18 }: { name: IconName; size?: number } = $props();
 
@@ -33,6 +35,7 @@
     library: ['M4 5h16v15H4z', 'M8 5V3h8v2', 'M9 10h6', 'M9 14h6'],
     logout: ['M10 4H5v16h5', 'M14 8l4 4-4 4', 'M8 12h10'],
     menu: ['M4 7h16', 'M4 12h16', 'M4 17h16'],
+    more: ['M5 12h.01', 'M12 12h.01', 'M19 12h.01'],
     note: ['M5 3h10l4 4v14H5z', 'M14 3v5h5', 'M8 12h8', 'M8 16h6'],
     pin: ['M9 4h6', 'M10 4v5l-3 3v2h10v-2l-3-3V4', 'M12 14v7'],
     plus: ['M12 5v14', 'M5 12h14'],
@@ -45,6 +48,7 @@
     ],
     tasks: ['M9 6h11', 'M9 12h11', 'M9 18h11', 'M4 6l1 1 2-2', 'M4 12l1 1 2-2', 'M4 18l1 1 2-2'],
     today: ['M12 3a9 9 0 1 0 9 9', 'M12 7v5l3 2', 'M4 4l2 2', 'M18 4l-2 2'],
+    todo: ['M12 21a9 9 0 1 0-9-9 9 9 0 0 0 9 9z', 'M8 12l3 3 5-6'],
   };
 </script>
 

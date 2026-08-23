@@ -7,17 +7,19 @@
     current,
     session,
     onNavigate,
-    onOpenToday,
+    onWorkspaceViewChange,
     onLogout,
-    todayOpen,
+    todoOpen,
+    workspaceView,
     blocked = false,
   }: {
     current: ProtectedRoute;
     session: SessionInfo;
     onNavigate: (route: ProtectedRoute) => void;
-    onOpenToday: () => void | Promise<void>;
+    onWorkspaceViewChange: (view: 'split' | 'notes' | 'todo') => void;
     onLogout: () => void | Promise<void>;
-    todayOpen: boolean;
+    todoOpen: boolean;
+    workspaceView: 'split' | 'notes' | 'todo';
     blocked?: boolean;
   } = $props();
 
@@ -26,10 +28,8 @@
     route?: ProtectedRoute;
     icon: IconName;
     disabled?: boolean;
-    opensToday?: boolean;
   }> = [
-    { icon: 'today', label: 'Today', opensToday: true, route: 'home' },
-    { icon: 'note', label: 'Notes', route: 'home' },
+    { icon: 'note', label: 'Workspace', route: 'home' },
     { icon: 'tasks', label: 'Tasks', route: 'tasks' },
     { icon: 'archive', label: 'Archive', route: 'archive' },
     { disabled: true, icon: 'library', label: 'Library' },
@@ -42,25 +42,19 @@
     onNavigate(route);
   }
 
-  function activateItem(
-    event: MouseEvent,
-    item: { opensToday?: boolean; route?: ProtectedRoute },
-  ): void {
+  function activateItem(event: MouseEvent, item: { route?: ProtectedRoute }): void {
     event.preventDefault();
-    if (item.opensToday) {
-      void onOpenToday();
-    } else if (item.route) {
-      onNavigate(item.route);
-    }
+    if (item.route) onNavigate(item.route);
   }
 
   function focusSearch(): void {
+    if (workspaceView === 'todo') onWorkspaceViewChange('notes');
     onNavigate('home');
     setTimeout(() => window.dispatchEvent(new Event('locus:focus-search')), 0);
   }
 </script>
 
-<aside class:today-open={todayOpen} class="sidebar" aria-label="Main navigation" inert={blocked}>
+<aside class:todo-open={todoOpen} class="sidebar" aria-label="Main navigation" inert={blocked}>
   <a
     aria-label="Locus Desk home"
     class="brand"
@@ -75,10 +69,8 @@
     {#each primaryItems as item}
       {#if item.route && !item.disabled}
         <a
-          aria-controls={item.opensToday ? 'today-panel' : undefined}
-          aria-current={!item.opensToday && current === item.route ? 'page' : undefined}
-          aria-expanded={item.opensToday ? todayOpen : undefined}
-          class:active={item.opensToday ? todayOpen : current === item.route}
+          aria-current={current === item.route ? 'page' : undefined}
+          class:active={current === item.route}
           class="nav-item"
           href={item.route === 'home' ? '/' : `/${item.route}`}
           onclick={(event) => activateItem(event, item)}
@@ -96,6 +88,31 @@
           <Icon name={item.icon} />
           <span>{item.label}</span>
         </span>
+      {/if}
+      {#if item.route === 'home' && current === 'home'}
+        <div aria-label="Workspace view" class="workspace-view-control" role="group">
+          <button
+            aria-label="Show Notes and Todo"
+            aria-pressed={workspaceView === 'split'}
+            class:active={workspaceView === 'split'}
+            onclick={() => onWorkspaceViewChange('split')}
+            type="button">Both</button
+          >
+          <button
+            aria-label="Show Notes only"
+            aria-pressed={workspaceView === 'notes'}
+            class:active={workspaceView === 'notes'}
+            onclick={() => onWorkspaceViewChange('notes')}
+            type="button">Notes</button
+          >
+          <button
+            aria-label="Show Todo only"
+            aria-pressed={workspaceView === 'todo'}
+            class:active={workspaceView === 'todo'}
+            onclick={() => onWorkspaceViewChange('todo')}
+            type="button">Todo</button
+          >
+        </div>
       {/if}
     {/each}
   </nav>
@@ -177,6 +194,34 @@
   .primary-nav {
     display: grid;
     gap: 3px;
+  }
+
+  .workspace-view-control {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 2px;
+    padding: 3px;
+    margin: 1px 8px 7px;
+    background: var(--color-surface-muted);
+    border-radius: var(--radius-control);
+  }
+
+  .workspace-view-control button {
+    min-width: 0;
+    min-height: 26px;
+    padding: 3px 4px;
+    color: var(--color-text-muted);
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+    font-size: 10px;
+  }
+
+  .workspace-view-control button.active {
+    color: var(--color-text);
+    background: var(--color-surface);
+    box-shadow: 0 1px 3px color-mix(in oklch, var(--color-text), transparent 92%);
+    font-weight: 620;
   }
 
   .nav-item {
@@ -286,7 +331,8 @@
     .brand-name,
     .nav-item > span,
     .search-nav kbd,
-    .sidebar-user {
+    .sidebar-user,
+    .workspace-view-control {
       display: none;
     }
 
@@ -321,7 +367,7 @@
       border-right: 0;
     }
 
-    .sidebar.today-open {
+    .sidebar.todo-open {
       z-index: 40;
     }
 
@@ -329,8 +375,7 @@
     .sidebar-divider,
     .search-nav,
     .sidebar-footer,
-    .primary-nav .nav-item.disabled,
-    .primary-nav .nav-item:nth-child(2) {
+    .primary-nav .nav-item.disabled {
       display: none;
     }
 

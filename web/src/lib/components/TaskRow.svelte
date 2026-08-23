@@ -17,7 +17,7 @@
   }: {
     task: Task;
     today: string;
-    mode?: 'today' | 'all';
+    mode?: 'todo' | 'all';
     busy: boolean;
     onToggle: (task: Task) => Promise<void>;
     onSave: (task: Task, payload: UpdateTaskRequest) => Promise<void>;
@@ -30,8 +30,11 @@
   let priority = $state<TaskPriority>(0);
   let dueDate = $state('');
   let error = $state<string | null>(null);
+  let actionsOpen = $state(false);
+  let actionsElement = $state<HTMLDivElement>();
   let titleInput = $state<HTMLInputElement>();
   let editButton = $state<HTMLButtonElement>();
+  let moreButton = $state<HTMLButtonElement>();
   let dateLabel = $derived(taskDateLabel(task, today));
 
   async function beginEdit(): Promise<void> {
@@ -86,11 +89,36 @@
       void save();
     }
   }
+
+  function closeActions(restoreFocus = false): void {
+    actionsOpen = false;
+    if (restoreFocus) requestAnimationFrame(() => moreButton?.focus());
+  }
+
+  function handleActionBlur(event: FocusEvent): void {
+    if (event.relatedTarget instanceof Node && actionsElement?.contains(event.relatedTarget)) {
+      return;
+    }
+    closeActions();
+  }
+
+  function handleActionsKeydown(event: KeyboardEvent): void {
+    if (actionsOpen && event.key === 'Escape') {
+      event.preventDefault();
+      closeActions(true);
+    }
+  }
+
+  function handleDelete(): void {
+    closeActions();
+    onDelete(task);
+  }
 </script>
 
 <article
   class:task-done={task.status === 'DONE'}
   class:task-editing={editing}
+  class:task-row-compact={mode === 'todo' && !editing && !task.description && !dateLabel}
   class:task-row-full={mode === 'all'}
   class="task-row"
   data-focus-uid={task.uid}
@@ -173,65 +201,120 @@
     <div class="task-copy">
       <div class="task-title-line">
         <h3>{task.title}</h3>
-        {#if mode === 'all' && task.priority === 1 && task.status === 'TODO'}<span
-            class="priority-mark">Priority</span
-          >{/if}
+        {#if task.priority === 1 && task.status === 'TODO'}
+          <span aria-label="Priority task" class="priority-mark" title="Priority">
+            <Icon name="flag" size={12} />
+            {#if mode === 'all'}<span>Priority</span>{/if}
+          </span>
+        {/if}
       </div>
       {#if task.description}<p>{task.description}</p>{/if}
       {#if dateLabel}
         <span class:overdue={isTaskOverdue(task, today)} class="task-date">{dateLabel}</span>
       {/if}
     </div>
-    <div class="row-actions">
+    <div
+      aria-label={`Actions for ${task.title}`}
+      bind:this={actionsElement}
+      class:menu-open={actionsOpen}
+      class="row-actions"
+      role="group"
+    >
       <button
-        aria-label={`Edit ${task.title}`}
-        bind:this={editButton}
-        class="icon-button"
+        aria-expanded={actionsOpen}
+        aria-label={`More actions for ${task.title}`}
+        bind:this={moreButton}
+        class="icon-button row-more"
         disabled={busy}
-        onclick={() => void beginEdit()}
+        onblur={handleActionBlur}
+        onclick={() => (actionsOpen = !actionsOpen)}
+        onkeydown={handleActionsKeydown}
         type="button"
       >
-        <Icon name="edit" size={16} />
+        <Icon name="more" size={18} />
       </button>
-      <button
-        aria-label={`Delete ${task.title}`}
-        class="icon-button danger-quiet"
-        disabled={busy}
-        onclick={() => onDelete(task)}
-        type="button"
-      >
-        <Icon name="delete" size={16} />
-      </button>
+      <div class="row-action-buttons">
+        <button
+          aria-label={`Edit ${task.title}`}
+          bind:this={editButton}
+          class="icon-button"
+          disabled={busy}
+          onblur={handleActionBlur}
+          onclick={() => void beginEdit()}
+          onkeydown={handleActionsKeydown}
+          type="button"
+        >
+          <Icon name="edit" size={16} />
+          <span class="action-label">Edit</span>
+        </button>
+        <button
+          aria-label={`Delete ${task.title}`}
+          class="icon-button danger-quiet"
+          disabled={busy}
+          onblur={handleActionBlur}
+          onclick={handleDelete}
+          onkeydown={handleActionsKeydown}
+          type="button"
+        >
+          <Icon name="delete" size={16} />
+          <span class="action-label">Delete</span>
+        </button>
+      </div>
     </div>
   {/if}
 </article>
 
 <style>
   .task-row {
+    position: relative;
     display: grid;
-    grid-template-columns: 24px minmax(0, 1fr) auto;
-    gap: 11px;
+    grid-template-columns: 32px minmax(0, 1fr) auto;
+    gap: 7px;
     align-items: start;
-    padding: 13px 0;
+    padding: 11px 0;
     border-bottom: 1px solid var(--color-border);
+  }
+
+  .task-row-compact {
+    align-items: center;
+    padding-block: 6px;
+  }
+
+  .task-row-compact .task-checkbox {
+    margin-top: 0;
   }
 
   .task-checkbox {
     display: grid;
-    width: 19px;
-    height: 19px;
+    width: 32px;
+    height: 32px;
     padding: 0;
-    margin-top: 2px;
+    margin-top: -4px;
     color: var(--color-surface);
     background: transparent;
-    border: 1px solid color-mix(in oklch, var(--color-text-muted), transparent 25%);
-    border-radius: 5px;
+    border: 0;
+    border-radius: var(--radius-control);
     font-size: 12px;
     font-weight: 700;
     place-items: center;
   }
 
-  .task-checkbox[aria-pressed='true'] {
+  .task-checkbox > span {
+    display: grid;
+    width: 19px;
+    height: 19px;
+    background: transparent;
+    border: 1px solid color-mix(in oklch, var(--color-text-muted), transparent 25%);
+    border-radius: 5px;
+    place-items: center;
+  }
+
+  .task-checkbox:hover:not(:disabled),
+  .task-checkbox:focus-visible {
+    background: var(--color-surface-muted);
+  }
+
+  .task-checkbox[aria-pressed='true'] > span {
     background: var(--color-accent);
     border-color: var(--color-accent);
   }
@@ -255,7 +338,10 @@
   }
 
   .priority-mark {
+    display: inline-flex;
     flex: none;
+    gap: 3px;
+    align-items: center;
     color: var(--color-accent-hover);
     font-size: 10px;
     font-weight: 620;
@@ -273,7 +359,7 @@
   .task-date {
     display: block;
     margin-top: 4px;
-    color: var(--color-accent-hover);
+    color: var(--color-text-muted);
     font-size: 11px;
   }
 
@@ -295,9 +381,78 @@
     transition: opacity 140ms ease;
   }
 
+  .row-action-buttons {
+    display: flex;
+    gap: 1px;
+  }
+
+  .row-more,
+  .action-label {
+    display: none;
+  }
+
   .task-row:hover .row-actions,
   .task-row:focus-within .row-actions {
     opacity: 1;
+  }
+
+  @media (max-width: 767px), (hover: none) {
+    .row-actions {
+      opacity: 1;
+    }
+
+    .row-more {
+      display: inline-grid;
+    }
+
+    .row-action-buttons {
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      z-index: 30;
+      display: grid;
+      width: 132px;
+      gap: 2px;
+      padding: 6px;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border-soft);
+      border-radius: var(--radius-input);
+      box-shadow: var(--shadow-floating);
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-4px);
+      visibility: hidden;
+      transition:
+        opacity 120ms ease,
+        transform 140ms ease,
+        visibility 120ms step-end;
+    }
+
+    .row-actions.menu-open .row-action-buttons {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+      visibility: visible;
+      transition:
+        opacity 120ms ease,
+        transform 140ms ease,
+        visibility 0ms step-start;
+    }
+
+    .row-action-buttons .icon-button {
+      display: flex;
+      width: 100%;
+      min-width: 0;
+      gap: 9px;
+      justify-content: flex-start;
+      padding: 0 9px;
+    }
+
+    .action-label {
+      display: inline;
+      font-size: 12px;
+      font-weight: 560;
+    }
   }
 
   .task-edit-form {
@@ -318,7 +473,7 @@
     gap: 11px;
     padding: 10px 12px 12px;
     background: color-mix(in oklch, var(--color-surface-muted), var(--color-surface) 35%);
-    border-radius: 12px;
+    border-radius: var(--radius-surface);
     transition: box-shadow 150ms ease;
   }
 
@@ -365,7 +520,7 @@
     padding: 6px 8px;
     background: color-mix(in oklch, var(--color-surface-muted), var(--color-surface) 35%);
     border-color: transparent;
-    border-radius: 9px;
+    border-radius: var(--radius-input);
     font-size: 12px;
   }
 
@@ -386,7 +541,7 @@
     gap: 8px;
     padding: 6px 9px;
     background: color-mix(in oklch, var(--color-surface-muted), var(--color-surface) 35%);
-    border-radius: 9px;
+    border-radius: var(--radius-input);
     cursor: pointer;
     transition:
       color 150ms ease,
@@ -425,7 +580,7 @@
 
   .task-edit-footer .button {
     min-height: 38px;
-    border-radius: 9px;
+    border-radius: var(--radius-input);
   }
 
   .task-edit-footer .button.secondary {
@@ -434,7 +589,7 @@
   }
 
   .task-row-full {
-    grid-template-columns: 28px minmax(0, 1fr) 76px;
+    grid-template-columns: 32px minmax(0, 1fr) 76px;
     padding: 16px 4px;
   }
 
@@ -474,6 +629,11 @@
       min-width: 44px;
       min-height: 44px;
       margin: 0;
+    }
+
+    .task-row-compact {
+      align-items: center;
+      padding-block: 2px;
     }
 
     .row-actions {

@@ -8,18 +8,18 @@ export interface NoteGroup {
   items: Note[];
 }
 
-export function groupNotesByDate(notes: Note[], timeZone: string): NoteGroup[] {
+export function groupNotesByMonth(notes: Note[], timeZone: string): NoteGroup[] {
   const groups = new Map<string, NoteGroup>();
 
-  for (const note of notes) {
+  for (const note of sortNotesByCreatedAt(notes)) {
     const date = new Date(note.createdAt);
-    const key = formatParts(date, timeZone);
+    const key = formatMonthKey(date, timeZone);
     let group = groups.get(key);
     if (!group) {
       group = {
         items: [],
         key,
-        label: getFormatter(timeZone, 'date').format(date),
+        label: getFormatter(timeZone, 'month').format(date),
       };
       groups.set(key, group);
     }
@@ -29,8 +29,17 @@ export function groupNotesByDate(notes: Note[], timeZone: string): NoteGroup[] {
   return [...groups.values()];
 }
 
-export function formatNoteTime(value: string, timeZone: string): string {
-  return getFormatter(timeZone, 'time').format(new Date(value));
+export function sortNotesByCreatedAt(notes: Note[]): Note[] {
+  return [...notes].sort(
+    (left, right) =>
+      right.createdAt.localeCompare(left.createdAt) || right.uid.localeCompare(left.uid),
+  );
+}
+
+export function formatNoteTimestamp(value: string, timeZone: string): string {
+  const parts = getFormatter(timeZone, 'timestamp').formatToParts(new Date(value));
+  const dateTime = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${dateTime.month}/${dateTime.day} · ${dateTime.hour}:${dateTime.minute}`;
 }
 
 export function formatTodayLabel(today: string): string {
@@ -63,24 +72,24 @@ export function isTaskOverdue(task: Task, today: string): boolean {
   return task.status === 'TODO' && Boolean(task.dueDate && task.dueDate < today);
 }
 
-function getFormatter(timeZone: string, type: 'date' | 'time'): Intl.DateTimeFormat {
+function getFormatter(timeZone: string, type: 'month' | 'timestamp'): Intl.DateTimeFormat {
   const key = `${timeZone}:${type}`;
   const cached = dateFormatterCache.get(key);
   if (cached) return cached;
 
   const formatter =
-    type === 'date'
+    type === 'month'
       ? new Intl.DateTimeFormat('en', {
-          day: 'numeric',
           month: 'long',
           timeZone,
-          weekday: 'short',
           year: 'numeric',
         })
       : new Intl.DateTimeFormat('en', {
+          day: '2-digit',
           hour: '2-digit',
-          hour12: false,
+          hourCycle: 'h23',
           minute: '2-digit',
+          month: '2-digit',
           timeZone,
         });
 
@@ -88,13 +97,12 @@ function getFormatter(timeZone: string, type: 'date' | 'time'): Intl.DateTimeFor
   return formatter;
 }
 
-function formatParts(date: Date, timeZone: string): string {
+function formatMonthKey(date: Date, timeZone: string): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
-    day: '2-digit',
     month: '2-digit',
     timeZone,
     year: 'numeric',
   }).formatToParts(date);
   const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${value.year}-${value.month}-${value.day}`;
+  return `${value.year}-${value.month}`;
 }

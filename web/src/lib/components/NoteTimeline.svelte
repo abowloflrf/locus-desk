@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Note } from '../api/types';
-  import { groupNotesByDate } from '../utils/date';
+  import { groupNotesByMonth, sortNotesByCreatedAt } from '../utils/date';
   import NoteItem from './NoteItem.svelte';
 
   let {
@@ -27,10 +27,38 @@
     onTag?: (tag: string) => void;
   } = $props();
 
-  let groups = $derived(groupNotesByDate(notes, timeZone));
+  let pinnedNotes = $derived(sortNotesByCreatedAt(notes.filter((note) => note.pinned)));
+  let groups = $derived(
+    groupNotesByMonth(
+      notes.filter((note) => !note.pinned),
+      timeZone,
+    ),
+  );
 </script>
 
 <div class="note-timeline">
+  {#if pinnedNotes.length > 0}
+    <section class="note-day pinned-notes" aria-labelledby={`pinned-${mode}`}>
+      <h2 id={`pinned-${mode}`}>Pinned</h2>
+      <div class="note-day-list">
+        {#each pinnedNotes as note (note.uid)}
+          <NoteItem
+            busy={busyUids.has(note.uid)}
+            {mode}
+            {note}
+            {onArchive}
+            {onDelete}
+            {onPin}
+            {onRestore}
+            {onSave}
+            {onTag}
+            {timeZone}
+          />
+        {/each}
+      </div>
+    </section>
+  {/if}
+
   {#each groups as group (group.key)}
     <section class="note-day" aria-labelledby={`day-${mode}-${group.key}`}>
       <h2 id={`day-${mode}-${group.key}`}>{group.label}</h2>

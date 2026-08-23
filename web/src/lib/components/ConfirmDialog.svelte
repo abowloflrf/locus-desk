@@ -86,7 +86,7 @@
     color: var(--color-text);
     background: transparent;
     border: 0;
-    border-radius: 12px;
+    border-radius: var(--radius-surface);
   }
 
   .confirm-dialog::backdrop {
@@ -98,7 +98,7 @@
     padding: 24px;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
-    border-radius: 12px;
+    border-radius: var(--radius-surface);
     box-shadow: 0 20px 70px color-mix(in oklch, var(--color-text), transparent 78%);
   }
 

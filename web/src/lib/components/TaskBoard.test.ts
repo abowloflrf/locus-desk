@@ -19,6 +19,48 @@ afterEach(() => {
 });
 
 describe('TaskBoard focus and filtering', () => {
+  it('loads every open Todo task, shows dates, and exposes compact actions', async () => {
+    const alpha = task('alpha', 'Alpha');
+    const timed = { ...task('timed', 'Timed'), dueTime: '16:00' };
+    const undated = { ...task('undated', 'Undated'), dueDate: null };
+    const priority = { ...task('priority', 'Priority item'), dueDate: null, priority: 1 as const };
+    vi.mocked(listTasks).mockResolvedValue({ items: [alpha, timed, undated, priority] });
+    const target = document.createElement('div');
+    document.body.append(target);
+    const component = mount(TaskBoard, {
+      props: { mode: 'todo', today: '2026-08-23' },
+      target,
+    });
+
+    try {
+      await vi.waitFor(() => expect(target.textContent).toContain('Alpha'));
+      expect(listTasks).toHaveBeenCalledWith({ status: 'TODO' }, expect.any(AbortSignal));
+      expect(target.querySelector('#regular-todo')?.textContent).toContain('3');
+      expect(target.querySelector('#priority-todo')?.textContent).toContain('1');
+      expect(
+        target.querySelector('[data-focus-uid="priority"] [aria-label="Priority task"]'),
+      ).not.toBeNull();
+      expect(target.querySelector('[data-focus-uid="alpha"]')?.textContent).toContain('Today');
+      expect(target.querySelector('[data-focus-uid="timed"]')?.textContent).toContain('16:00');
+      expect(target.querySelector('[data-focus-uid="undated"]')?.classList).toContain(
+        'task-row-compact',
+      );
+      expect(target.querySelector('[data-focus-uid="alpha"]')?.classList).not.toContain(
+        'task-row-compact',
+      );
+
+      const more = target.querySelector<HTMLButtonElement>(
+        '[aria-label="More actions for Alpha"]',
+      )!;
+      expect(more.getAttribute('aria-expanded')).toBe('false');
+      more.click();
+      await tick();
+      expect(more.getAttribute('aria-expanded')).toBe('true');
+    } finally {
+      await unmount(component);
+    }
+  });
+
   it('sends only one create request for synchronous duplicate submissions', async () => {
     const pending = deferred<Task>();
     vi.mocked(listTasks).mockResolvedValue({ items: [] });
@@ -88,7 +130,7 @@ describe('TaskBoard focus and filtering', () => {
     }
   });
 
-  it('removes an edited task that moves beyond Today and focuses its neighbor', async () => {
+  it('keeps an edited Todo task visible when its due date changes', async () => {
     const alpha = task('alpha', 'Alpha');
     const beta = task('beta', 'Beta');
     vi.mocked(listTasks).mockResolvedValue({ items: [alpha, beta] });
@@ -96,7 +138,7 @@ describe('TaskBoard focus and filtering', () => {
     const target = document.createElement('div');
     document.body.append(target);
     const component = mount(TaskBoard, {
-      props: { mode: 'today', today: '2026-08-23' },
+      props: { mode: 'todo', today: '2026-08-23' },
       target,
     });
 
@@ -106,7 +148,7 @@ describe('TaskBoard focus and filtering', () => {
         expect(button).not.toBeNull();
         return button!;
       });
-      expect(target.querySelector('#regular-today')).toBeNull();
+      expect(target.querySelector('#regular-todo')?.textContent).toContain('Regular');
       edit.click();
       const dueDate = await vi.waitFor(() => {
         const input = target.querySelector<HTMLInputElement>(
@@ -126,47 +168,39 @@ describe('TaskBoard focus and filtering', () => {
         ?.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }));
 
       await vi.waitFor(() =>
-        expect(
-          document.activeElement?.closest('[data-focus-uid]')?.getAttribute('data-focus-uid'),
-        ).toBe('beta'),
+        expect(target.querySelector('[data-focus-uid="alpha"]')?.textContent).toContain('Aug 24'),
       );
-      expect(target.querySelector('[data-focus-uid="alpha"]')).toBeNull();
-      expect(target.querySelector('[data-action-status]')?.textContent).toContain(
-        'Task moved out of Today: Alpha.',
-      );
+      expect(target.querySelector('[data-focus-uid="alpha"]')).not.toBeNull();
       expect(updateTask).toHaveBeenCalledWith('alpha', expect.objectContaining({ dueTime: null }));
     } finally {
       await unmount(component);
     }
   });
 
-  it('removes a future completed task when it is restored in Today', async () => {
-    const alpha = {
-      ...task('alpha', 'Alpha', 'DONE'),
-      dueDate: '2026-08-24',
-    };
+  it('removes a completed task from Todo and focuses its neighbor', async () => {
+    const alpha = task('alpha', 'Alpha');
     const beta = task('beta', 'Beta');
     vi.mocked(listTasks).mockResolvedValue({ items: [alpha, beta] });
     vi.mocked(updateTask).mockResolvedValue({
       ...alpha,
-      completedAt: null,
-      status: 'TODO',
+      completedAt: '2026-08-23T12:00:00.000Z',
+      status: 'DONE',
     });
     const target = document.createElement('div');
     document.body.append(target);
     const component = mount(TaskBoard, {
-      props: { mode: 'today', today: '2026-08-23' },
+      props: { mode: 'todo', today: '2026-08-23' },
       target,
     });
 
     try {
-      const restore = await vi.waitFor(() => {
-        const button = target.querySelector<HTMLButtonElement>('[aria-label="Restore Alpha"]');
+      const complete = await vi.waitFor(() => {
+        const button = target.querySelector<HTMLButtonElement>('[aria-label="Complete Alpha"]');
         expect(button).not.toBeNull();
         return button!;
       });
-      restore.focus();
-      restore.click();
+      complete.focus();
+      complete.click();
 
       await vi.waitFor(() =>
         expect(
@@ -175,7 +209,7 @@ describe('TaskBoard focus and filtering', () => {
       );
       expect(target.querySelector('[data-focus-uid="alpha"]')).toBeNull();
       expect(target.querySelector('[data-action-status]')?.textContent).toContain(
-        'Task restored and moved out of Today: Alpha.',
+        'Task completed and removed from Todo: Alpha.',
       );
     } finally {
       await unmount(component);

@@ -3,7 +3,6 @@
 
   import type { SessionInfo } from '../api/types';
   import type { ProtectedRoute } from '../routes';
-  import { formatTodayLabel } from '../utils/date';
   import Icon from './Icon.svelte';
   import Sidebar from './Sidebar.svelte';
   import TaskBoard from './TaskBoard.svelte';
@@ -29,8 +28,9 @@
   } = $props();
 
   let compact = $state(false);
-  let todayOpen = $state(false);
-  let todayButton = $state<HTMLButtonElement>();
+  let todoOpen = $state(false);
+  let workspaceView = $state<'split' | 'notes' | 'todo'>('split');
+  let todoButton = $state<HTMLButtonElement>();
   let drawerClose = $state<HTMLButtonElement>();
   let drawer = $state<HTMLElement>();
 
@@ -38,7 +38,7 @@
     const media = window.matchMedia('(max-width: 1199px)');
     const update = () => {
       compact = media.matches;
-      if (!compact) todayOpen = false;
+      if (!compact) todoOpen = false;
     };
     update();
     media.addEventListener('change', update);
@@ -47,31 +47,35 @@
 
   $effect(() => {
     current;
-    todayOpen = false;
+    todoOpen = false;
   });
 
   $effect(() => {
-    if (todayOpen) requestAnimationFrame(() => drawerClose?.focus());
+    if (todoOpen) requestAnimationFrame(() => drawerClose?.focus());
   });
 
-  async function openToday(): Promise<void> {
+  async function openTodo(): Promise<void> {
     if (current !== 'home') {
       onNavigate('home');
       await tick();
     }
-    todayOpen = true;
+    todoOpen = true;
   }
 
-  function closeToday(restoreFocus = true): void {
-    todayOpen = false;
-    if (restoreFocus) requestAnimationFrame(() => todayButton?.focus());
+  function closeTodo(restoreFocus = true): void {
+    todoOpen = false;
+    if (restoreFocus) requestAnimationFrame(() => todoButton?.focus());
+  }
+
+  function setWorkspaceView(view: 'split' | 'notes' | 'todo'): void {
+    workspaceView = view;
   }
 
   function handleWindowKeydown(event: KeyboardEvent): void {
-    if (!todayOpen) return;
+    if (!todoOpen) return;
     if (event.defaultPrevented || document.querySelector('dialog[open]')) return;
     if (event.key === 'Escape') {
-      closeToday();
+      closeTodo();
       return;
     }
     if (event.key !== 'Tab' || !drawer) return;
@@ -98,13 +102,25 @@
 
 <svelte:window onkeydown={handleWindowKeydown} />
 
-<div class:has-today={current === 'home'} class:today-open={todayOpen} class="app-shell">
-  <a class="skip-link" href="#main-content" inert={compact && todayOpen}>Skip to content</a>
+<div
+  class:todo-open={todoOpen}
+  class:workspace-notes={current === 'home' && workspaceView === 'notes'}
+  class:workspace-split={current === 'home' && workspaceView === 'split'}
+  class:workspace-todo={current === 'home' && workspaceView === 'todo'}
+  class="app-shell"
+>
+  <a
+    class="skip-link"
+    href={current === 'home' && !compact && workspaceView === 'todo'
+      ? '#todo-panel'
+      : '#main-content'}
+    inert={compact && todoOpen}>Skip to content</a
+  >
   {#if notice}
     <div
       class="global-notice"
-      hidden={compact && todayOpen}
-      inert={compact && todayOpen}
+      hidden={compact && todoOpen}
+      inert={compact && todoOpen}
       role="alert"
     >
       <span>{notice}</span>
@@ -112,16 +128,17 @@
     </div>
   {/if}
   <Sidebar
-    blocked={compact && todayOpen}
+    blocked={compact && todoOpen}
     {current}
     {onLogout}
     {onNavigate}
-    onOpenToday={openToday}
+    onWorkspaceViewChange={setWorkspaceView}
     {session}
-    {todayOpen}
+    {todoOpen}
+    {workspaceView}
   />
 
-  <div class="workspace-column" inert={compact && todayOpen}>
+  <div class="workspace-column" inert={compact && todoOpen}>
     <header class="compact-topbar">
       <a
         href="/"
@@ -130,14 +147,16 @@
           onNavigate('home');
         }}>Locus</a
       >
-      <span>{current === 'home' ? 'Notes' : current === 'tasks' ? 'Tasks' : 'Archive'}</span>
+      <span>{current === 'home' ? 'Workspace' : current === 'tasks' ? 'Tasks' : 'Archive'}</span>
       <div class="compact-topbar-actions">
         {#if current === 'home'}
           <button
-            bind:this={todayButton}
+            bind:this={todoButton}
+            aria-controls="todo-panel"
+            aria-expanded={todoOpen}
             class="button secondary"
-            onclick={() => void openToday()}
-            type="button">Today</button
+            onclick={() => void openTodo()}
+            type="button">Todo</button
           >
         {/if}
         <button
@@ -156,38 +175,41 @@
 
   {#if current === 'home'}
     <button
-      aria-label="Close Today panel"
-      class:visible={todayOpen}
+      aria-label="Close Todo panel"
+      class:visible={todoOpen}
       class="drawer-backdrop"
-      onclick={() => closeToday()}
+      onclick={() => closeTodo()}
       tabindex="-1"
       type="button"
     ></button>
     <aside
-      aria-hidden={compact && !todayOpen}
-      aria-label="Today tasks"
+      aria-hidden={compact && !todoOpen}
+      aria-label="Todo tasks"
       aria-modal={compact ? 'true' : undefined}
-      class:open={todayOpen}
-      class="today-rail"
+      class:open={todoOpen}
+      class="todo-rail"
       bind:this={drawer}
-      id="today-panel"
-      inert={compact && !todayOpen}
+      id="todo-panel"
+      inert={compact && !todoOpen}
       role={compact ? 'dialog' : 'complementary'}
+      tabindex="-1"
     >
-      <header class="today-header">
-        <div>
-          <h2>Today</h2>
-          <p>{formatTodayLabel(session.workspace.today)}</p>
-        </div>
-        <button
-          aria-label="Close Today panel"
-          bind:this={drawerClose}
-          class="icon-button drawer-close"
-          onclick={() => closeToday()}
-          type="button"><Icon name="close" /></button
-        >
-      </header>
-      <TaskBoard mode="today" {refreshToken} today={session.workspace.today} />
+      <div class="todo-content">
+        <header class="todo-header">
+          <div>
+            <h2>Todo</h2>
+            <p>All open tasks</p>
+          </div>
+          <button
+            aria-label="Close Todo panel"
+            bind:this={drawerClose}
+            class="icon-button drawer-close"
+            onclick={() => closeTodo()}
+            type="button"><Icon name="close" /></button
+          >
+        </header>
+        <TaskBoard mode="todo" {refreshToken} today={session.workspace.today} />
+      </div>
     </aside>
   {/if}
 </div>
@@ -201,8 +223,33 @@
     overflow: hidden;
   }
 
-  .app-shell.has-today {
+  .app-shell.workspace-split {
     grid-template-columns: 224px minmax(0, 1fr) 336px;
+  }
+
+  .todo-content {
+    width: 100%;
+    min-width: 0;
+  }
+
+  @media (min-width: 1200px) {
+    .app-shell.workspace-notes .todo-rail {
+      display: none;
+    }
+
+    .app-shell.workspace-todo .workspace-column {
+      display: none;
+    }
+
+    .app-shell.workspace-todo .todo-rail {
+      grid-column: 2;
+      border-left: 0;
+    }
+
+    .app-shell.workspace-todo .todo-content {
+      width: min(100%, 720px);
+      margin-inline: auto;
+    }
   }
 
   .skip-link {
@@ -254,7 +301,7 @@
     min-width: 0;
   }
 
-  .today-rail {
+  .todo-rail {
     position: sticky;
     top: 0;
     z-index: 18;
@@ -270,27 +317,27 @@
     scrollbar-width: none;
   }
 
-  .today-rail::-webkit-scrollbar {
+  .todo-rail::-webkit-scrollbar {
     display: none;
   }
 
-  .today-header {
+  .todo-header {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     padding-bottom: 22px;
   }
 
-  .today-header h2 {
+  .todo-header h2 {
     margin-bottom: 2px;
     font-size: 22px;
     font-weight: 670;
     letter-spacing: -0.02em;
   }
 
-  .today-header p {
+  .todo-header p {
     margin-bottom: 0;
-    color: var(--color-accent-hover);
+    color: var(--color-text-muted);
     font-size: 12px;
   }
 
@@ -312,8 +359,8 @@
     color: var(--color-danger);
     background: var(--color-surface);
     border: 1px solid var(--color-danger);
-    border-radius: 8px;
-    box-shadow: 0 12px 32px color-mix(in oklch, var(--color-text), transparent 88%);
+    border-radius: var(--radius-input);
+    box-shadow: var(--shadow-floating);
     font-size: 13px;
   }
 
@@ -327,7 +374,9 @@
 
   @media (max-width: 1199px) {
     .app-shell,
-    .app-shell.has-today {
+    .app-shell.workspace-split,
+    .app-shell.workspace-notes,
+    .app-shell.workspace-todo {
       grid-template-columns: 64px minmax(0, 1fr);
     }
 
@@ -359,7 +408,7 @@
       justify-self: end;
     }
 
-    .today-rail {
+    .todo-rail {
       position: fixed;
       top: 0;
       right: 0;
@@ -374,7 +423,7 @@
         visibility 190ms step-end;
     }
 
-    .today-rail.open {
+    .todo-rail.open {
       transform: translateX(0);
       visibility: visible;
       transition:
@@ -407,7 +456,9 @@
 
   @media (max-width: 767px) {
     .app-shell,
-    .app-shell.has-today {
+    .app-shell.workspace-split,
+    .app-shell.workspace-notes,
+    .app-shell.workspace-todo {
       display: block;
     }
 
@@ -424,7 +475,7 @@
       display: inline-grid;
     }
 
-    .today-rail {
+    .todo-rail {
       width: min(100%, 390px);
       padding: 24px 18px 82px;
     }

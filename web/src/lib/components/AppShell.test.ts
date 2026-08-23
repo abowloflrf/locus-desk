@@ -64,7 +64,7 @@ afterEach(() => {
 });
 
 describe('AppShell modal boundaries', () => {
-  it('isolates the notice and preserves the Today drawer while a native dialog is open', async () => {
+  it('isolates the notice and preserves the Todo drawer while a native dialog is open', async () => {
     const target = document.createElement('div');
     document.body.append(target);
     const children = createRawSnippet(() => ({
@@ -85,34 +85,36 @@ describe('AppShell modal boundaries', () => {
 
     try {
       await vi.waitFor(() =>
-        expect(target.querySelector('.today-rail')?.getAttribute('aria-modal')).toBe('true'),
+        expect(target.querySelector('.todo-rail')?.getAttribute('aria-modal')).toBe('true'),
       );
       expect(target.querySelector('.sidebar .brand')?.getAttribute('aria-label')).toBe(
         'Locus Desk home',
       );
-      const todayShortcut = target.querySelector<HTMLAnchorElement>(
-        '.sidebar .nav-item[title="Today"]',
+      const workspaceShortcut = target.querySelector<HTMLAnchorElement>(
+        '.sidebar .nav-item[title="Workspace"]',
       );
-      expect(todayShortcut?.getAttribute('aria-current')).toBeNull();
-      expect(
-        target.querySelector('.sidebar .nav-item[title="Notes"]')?.getAttribute('aria-current'),
-      ).toBe('page');
-      todayShortcut?.click();
+      expect(workspaceShortcut?.getAttribute('aria-current')).toBe('page');
+      expect(target.querySelector('.sidebar .nav-item[title="Notes"]')).toBeNull();
+      expect(target.querySelector('.sidebar .nav-item[title="Todo"]')).toBeNull();
+      const todoButton = [
+        ...target.querySelectorAll<HTMLButtonElement>('.compact-topbar button'),
+      ].find((button) => button.textContent?.trim() === 'Todo')!;
+      todoButton.click();
       await tick();
 
-      expect(target.querySelector('.app-shell')?.classList.contains('today-open')).toBe(true);
-      expect(todayShortcut?.getAttribute('aria-expanded')).toBe('true');
+      expect(target.querySelector('.app-shell')?.classList.contains('todo-open')).toBe(true);
+      expect(todoButton.getAttribute('aria-expanded')).toBe('true');
       const notice = target.querySelector<HTMLElement>('.global-notice');
       expect(inertState(notice)).toBe(true);
       expect(notice?.hidden).toBe(true);
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
       await tick();
-      expect(target.querySelector('.app-shell')?.classList.contains('today-open')).toBe(true);
+      expect(target.querySelector('.app-shell')?.classList.contains('todo-open')).toBe(true);
 
       target.querySelector('dialog')?.removeAttribute('open');
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
       await tick();
-      expect(target.querySelector('.app-shell')?.classList.contains('today-open')).toBe(false);
+      expect(target.querySelector('.app-shell')?.classList.contains('todo-open')).toBe(false);
       expect(inertState(notice)).toBe(false);
       expect(notice?.hidden).toBe(false);
     } finally {
@@ -120,7 +122,60 @@ describe('AppShell modal boundaries', () => {
     }
   });
 
-  it('lets an open delete dialog own Tab handling inside the Today drawer', async () => {
+  it('uses one Workspace destination and supports split or focused desktop views', async () => {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(
+        (query: string) =>
+          ({
+            addEventListener: vi.fn(),
+            matches: false,
+            media: query,
+            removeEventListener: vi.fn(),
+          }) as unknown as MediaQueryList,
+      ),
+    );
+    const target = document.createElement('div');
+    document.body.append(target);
+    const children = createRawSnippet(() => ({ render: () => '<h1>Notes</h1>' }));
+    const component = mount(AppShell, {
+      props: {
+        children,
+        current: 'home',
+        onDismissNotice: vi.fn(),
+        onLogout: vi.fn(),
+        onNavigate: vi.fn(),
+        session,
+      },
+      target,
+    });
+
+    try {
+      await vi.waitFor(() =>
+        expect(target.querySelector('.app-shell')?.classList.contains('workspace-split')).toBe(
+          true,
+        ),
+      );
+      expect(target.querySelectorAll('.sidebar .nav-item[aria-current="page"]')).toHaveLength(1);
+      expect(target.querySelector('.sidebar .nav-item[title="Workspace"]')).not.toBeNull();
+
+      target.querySelector<HTMLButtonElement>('[aria-label="Show Notes only"]')?.click();
+      await tick();
+      expect(target.querySelector('.app-shell')?.classList.contains('workspace-notes')).toBe(true);
+
+      target.querySelector<HTMLButtonElement>('[aria-label="Show Todo only"]')?.click();
+      await tick();
+      expect(target.querySelector('.app-shell')?.classList.contains('workspace-todo')).toBe(true);
+
+      target.querySelector<HTMLButtonElement>('[aria-label="Show Notes and Todo"]')?.click();
+      await tick();
+      expect(target.querySelector('.app-shell')?.classList.contains('workspace-split')).toBe(true);
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it('lets an open delete dialog own Tab handling inside the Todo drawer', async () => {
     installDialogPolyfill();
     vi.mocked(listTasks).mockResolvedValue({ items: [todayTask] });
     const target = document.createElement('div');
@@ -140,11 +195,13 @@ describe('AppShell modal boundaries', () => {
 
     try {
       await vi.waitFor(() =>
-        expect(target.querySelector('.today-rail')?.getAttribute('aria-modal')).toBe('true'),
+        expect(target.querySelector('.todo-rail')?.getAttribute('aria-modal')).toBe('true'),
       );
-      target.querySelector<HTMLAnchorElement>('.sidebar .nav-item[title="Today"]')?.click();
+      [...target.querySelectorAll<HTMLButtonElement>('.compact-topbar button')]
+        .find((button) => button.textContent?.trim() === 'Todo')
+        ?.click();
       await vi.waitFor(() =>
-        expect(target.querySelector('.app-shell')?.classList.contains('today-open')).toBe(true),
+        expect(target.querySelector('.app-shell')?.classList.contains('todo-open')).toBe(true),
       );
       const deleteButton = await vi.waitFor(() => {
         const button = target.querySelector<HTMLButtonElement>('[aria-label="Delete Alpha"]');
@@ -165,7 +222,7 @@ describe('AppShell modal boundaries', () => {
 
       expect(tab.defaultPrevented).toBe(false);
       expect(document.activeElement).toBe(confirm);
-      expect(target.querySelector('.app-shell')?.classList.contains('today-open')).toBe(true);
+      expect(target.querySelector('.app-shell')?.classList.contains('todo-open')).toBe(true);
     } finally {
       await unmount(component);
       uninstallDialogPolyfill();

@@ -72,7 +72,7 @@
         activeController.signal,
       );
       if (id !== requestId) return;
-      notes = reset ? response.items : [...notes, ...response.items];
+      notes = sortNotes(reset ? response.items : [...notes, ...response.items]);
       page = response.page;
       total = response.total;
     } catch (cause) {
@@ -294,10 +294,7 @@
 
 <div bind:this={pageElement} class="page notes-page">
   <header class="page-header notes-header">
-    <div>
-      <p class="eyebrow">{session.workspace.name}</p>
-      <h1>Notes</h1>
-    </div>
+    <h1>Notes</h1>
     <label class="search-field">
       <Icon name="search" size={17} />
       <span class="sr-only">Search notes</span>
@@ -403,7 +400,7 @@
 
   .notes-header {
     align-items: center;
-    margin-bottom: 34px;
+    margin-bottom: 28px;
   }
 
   .notes-header h1 {
@@ -413,19 +410,12 @@
     letter-spacing: -0.035em;
   }
 
-  .notes-header .eyebrow {
-    margin-bottom: 3px;
-    font-size: 10px;
-    font-weight: 720;
-    letter-spacing: 0.11em;
-  }
-
   .notes-header :global(.search-field) {
     min-height: 42px;
     background: color-mix(in oklch, var(--color-surface), transparent 10%);
     border-color: transparent;
-    border-radius: 11px;
-    box-shadow: 0 1px 2px color-mix(in oklch, var(--color-text), transparent 94%);
+    border-radius: var(--radius-input);
+    box-shadow: 0 1px 2px color-mix(in oklch, var(--color-text), transparent 95%);
   }
 
   .notes-header :global(.search-field:focus-within) {
@@ -446,12 +436,14 @@
 
   @media (max-width: 767px) {
     .notes-header {
+      grid-template-columns: minmax(0, 1fr);
       align-items: start;
-      margin-bottom: 24px;
+      margin-bottom: 20px;
     }
 
     .notes-header :global(.search-field) {
       width: 100%;
+      max-width: none;
     }
 
     .notes-header h1 {

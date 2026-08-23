@@ -8,7 +8,7 @@
     busy,
     onCreate,
   }: {
-    mode: 'today' | 'all';
+    mode: 'todo' | 'all';
     busy: boolean;
     onCreate: (payload: CreateTaskRequest) => Promise<void>;
   } = $props();
@@ -37,13 +37,16 @@
     error = null;
     submitting = true;
     try {
-      await onCreate({
+      const payload: CreateTaskRequest = {
         description: description.trim() || undefined,
-        dueDate: dueDate || undefined,
-        dueTime: dueDate && dueTime ? dueTime : undefined,
         priority,
         title: trimmedTitle,
-      });
+      };
+      if (dueDate) {
+        payload.dueDate = dueDate;
+        if (dueTime) payload.dueTime = dueTime;
+      }
+      await onCreate(payload);
       title = '';
       description = '';
       dueTime = '';
@@ -82,7 +85,7 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <form
-  class:task-create-compact={mode === 'today'}
+  class:task-create-compact={mode === 'todo'}
   class="task-create"
   onfocusin={() => (compactFocused = true)}
   onfocusout={handleFocusOut}
@@ -90,7 +93,7 @@
 >
   <div class="field task-title-field">
     <label class="sr-only" for={`new-task-${mode}`}>Task title</label>
-    {#if mode === 'today'}
+    {#if mode === 'todo'}
       <span class="task-add-icon" aria-hidden="true"><Icon name="plus" size={19} /></span>
     {/if}
     <input
@@ -98,7 +101,7 @@
       disabled={formBusy}
       id={`new-task-${mode}`}
       maxlength="500"
-      placeholder={mode === 'today' ? 'Add a task…' : 'What needs to be done?'}
+      placeholder={mode === 'todo' ? 'Add a task…' : 'What needs to be done?'}
       bind:value={title}
     />
   </div>
@@ -218,7 +221,7 @@
     margin-bottom: 28px;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
-    border-radius: 10px;
+    border-radius: var(--radius-input);
   }
 
   .task-create-compact {
@@ -341,8 +344,8 @@
     padding: 6px;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
-    border-radius: 9px;
-    box-shadow: 0 12px 32px color-mix(in oklch, var(--color-text), transparent 86%);
+    border-radius: var(--radius-input);
+    box-shadow: var(--shadow-floating);
   }
 
   .priority-menu button {
