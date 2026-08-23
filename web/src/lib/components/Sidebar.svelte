@@ -143,6 +143,11 @@
     overflow-y: auto;
     background: var(--color-surface);
     border-right: 1px solid var(--color-border);
+    scrollbar-width: none;
+  }
+
+  .sidebar::-webkit-scrollbar {
+    display: none;
   }
 
   .brand {

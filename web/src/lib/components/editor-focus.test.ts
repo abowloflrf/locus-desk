@@ -52,6 +52,9 @@ describe('inline editor focus', () => {
       const editButton = target.querySelector<HTMLButtonElement>('[aria-label="Edit note"]');
       editButton?.click();
       await vi.waitFor(() => expect(document.activeElement?.tagName).toBe('TEXTAREA'));
+      expect((document.activeElement as HTMLTextAreaElement).style.height).toBe('48px');
+      expect(target.querySelector('.note-item')?.classList.contains('editing')).toBe(true);
+      expect(target.querySelector('.note-actions')).toBeNull();
 
       document.activeElement?.dispatchEvent(
         new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' }),
@@ -59,6 +62,7 @@ describe('inline editor focus', () => {
       await vi.waitFor(() =>
         expect(document.activeElement?.getAttribute('aria-label')).toBe('Edit note'),
       );
+      expect(target.querySelector('.note-item')?.classList.contains('editing')).toBe(false);
     } finally {
       await unmount(component);
     }

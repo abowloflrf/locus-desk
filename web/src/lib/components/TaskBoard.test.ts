@@ -106,6 +106,7 @@ describe('TaskBoard focus and filtering', () => {
         expect(button).not.toBeNull();
         return button!;
       });
+      expect(target.querySelector('#regular-today')).toBeNull();
       edit.click();
       const dueDate = await vi.waitFor(() => {
         const input = target.querySelector<HTMLInputElement>(
@@ -114,6 +115,10 @@ describe('TaskBoard focus and filtering', () => {
         expect(input).not.toBeNull();
         return input!;
       });
+      expect(target.querySelector('[data-focus-uid="alpha"] input[type="time"]')).toBeNull();
+      expect(
+        target.querySelector('[data-focus-uid="alpha"] .task-edit-copy textarea'),
+      ).not.toBeNull();
       dueDate.value = '2026-08-24';
       dueDate.dispatchEvent(new Event('input', { bubbles: true }));
       target
@@ -129,6 +134,7 @@ describe('TaskBoard focus and filtering', () => {
       expect(target.querySelector('[data-action-status]')?.textContent).toContain(
         'Task moved out of Today: Alpha.',
       );
+      expect(updateTask).toHaveBeenCalledWith('alpha', expect.objectContaining({ dueTime: null }));
     } finally {
       await unmount(component);
     }

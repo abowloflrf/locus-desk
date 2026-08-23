@@ -14,7 +14,7 @@
     const submittedContent = content;
     const trimmed = content.trim();
     if (!trimmed) {
-      error = 'Write something before posting.';
+      error = 'Write something before saving.';
       textarea?.focus();
       return;
     }
@@ -27,7 +27,7 @@
       resizeTextarea();
       textarea?.focus();
     } catch (cause) {
-      error = errorMessage(cause, 'Unable to create the note.');
+      error = errorMessage(cause, 'Unable to save the note.');
     } finally {
       busy = false;
     }
@@ -43,33 +43,32 @@
   function resizeTextarea(): void {
     if (!textarea) return;
     textarea.style.height = 'auto';
-    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 112), 360)}px`;
+    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 88), 280)}px`;
   }
 </script>
 
 <section class="note-composer" aria-labelledby="composer-title">
   <h2 class="sr-only" id="composer-title">Create a note</h2>
-  <label class="sr-only" for="note-composer-input">Markdown note</label>
+  <label class="sr-only" for="note-composer-input">Note content</label>
   <textarea
-    aria-describedby={error ? 'composer-error composer-hint' : 'composer-hint'}
+    aria-describedby={error ? 'composer-error' : undefined}
     bind:this={textarea}
     bind:value={content}
     disabled={busy}
     id="note-composer-input"
     oninput={resizeTextarea}
     onkeydown={handleKeydown}
-    placeholder="Write a quick note… Markdown is supported."
-    rows="5"></textarea>
+    placeholder="Write a quick note…"
+    rows="3"></textarea>
   <div class="composer-footer">
     <div class="composer-submit">
-      <span id="composer-hint"><kbd>⌘</kbd><kbd>↵</kbd></span>
       <button
         class="button primary"
         disabled={busy || !content.trim()}
         onclick={() => void submit()}
         type="button"
       >
-        {busy ? 'Posting…' : 'Post note'}
+        {busy ? 'Saving…' : 'Save'}
       </button>
     </div>
   </div>
@@ -78,33 +77,35 @@
 
 <style>
   .note-composer {
-    padding: 18px 18px 14px;
-    margin-bottom: 22px;
+    position: relative;
+    padding: 16px 20px 14px;
+    margin-bottom: 10px;
     background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 12px;
+    border-radius: 18px;
+    box-shadow:
+      0 1px 2px color-mix(in oklch, var(--color-text), transparent 94%),
+      0 16px 42px color-mix(in oklch, var(--color-text), transparent 95%);
     transition:
-      border-color 160ms ease,
-      box-shadow 160ms ease,
-      transform 160ms ease;
+      box-shadow 160ms ease;
   }
 
   .note-composer:focus-within {
-    border-color: color-mix(in oklch, var(--color-accent), var(--color-border) 40%);
-    box-shadow: 0 12px 32px color-mix(in oklch, var(--color-text), transparent 93%);
-    transform: translateY(-1px);
+    box-shadow:
+      0 0 0 3px color-mix(in oklch, var(--color-accent), transparent 88%),
+      0 20px 52px color-mix(in oklch, var(--color-text), transparent 92%);
   }
 
   textarea {
-    min-height: 112px;
-    max-height: 360px;
-    padding: 5px 6px 12px;
+    min-height: 88px;
+    max-height: 280px;
+    padding: 5px 2px 9px;
     background: transparent;
     border: 0;
     border-radius: 0;
     box-shadow: none;
+    font-family: var(--font-ui);
     font-size: 15px;
-    line-height: 25px;
+    line-height: 24px;
     resize: none;
   }
 
@@ -116,33 +117,35 @@
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    padding-top: 10px;
-    border-top: 1px solid var(--color-border);
+    padding-top: 0;
   }
 
   .composer-submit {
     display: flex;
     flex: none;
-    gap: 10px;
     align-items: center;
   }
 
-  .composer-submit > span {
-    display: flex;
-    gap: 2px;
+  .composer-submit .button {
+    min-height: 38px;
+    padding-inline: 18px;
+    border-radius: 10px;
   }
 
   @media (max-width: 767px) {
     .note-composer {
-      padding: 13px 12px 11px;
+      padding: 14px 15px 12px;
+      border-radius: 15px;
     }
 
     textarea {
-      min-height: 132px;
+      min-height: 96px;
+      padding-top: 4px;
+      font-size: 15px;
     }
 
     .composer-footer {
-      padding-top: 9px;
+      padding-top: 2px;
     }
 
     .composer-submit {

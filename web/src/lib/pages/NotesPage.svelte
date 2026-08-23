@@ -340,15 +340,8 @@
   <div aria-atomic="true" aria-live="polite" class="sr-only" data-action-status role="status">
     {actionStatus ?? ''}
   </div>
-
-  <div class="list-toolbar">
-    <span
-      >{query || selectedTag
-        ? `${total} matching ${total === 1 ? 'note' : 'notes'}`
-        : `${total} notes`}</span
-    >
-    {#if loading && notes.length > 0}<span aria-live="polite">Updating…</span>{/if}
-  </div>
+  {#if loading && notes.length > 0}<span aria-live="polite" class="sr-only">Updating notes…</span
+    >{/if}
 
   {#if loading && notes.length === 0}
     <div aria-live="polite" class="loading-state large">Loading notes…</div>
@@ -405,7 +398,38 @@
 
 <style>
   .notes-page {
-    width: min(100%, 860px);
+    width: min(100%, 920px);
+  }
+
+  .notes-header {
+    align-items: center;
+    margin-bottom: 34px;
+  }
+
+  .notes-header h1 {
+    font-size: 30px;
+    font-weight: 700;
+    line-height: 38px;
+    letter-spacing: -0.035em;
+  }
+
+  .notes-header .eyebrow {
+    margin-bottom: 3px;
+    font-size: 10px;
+    font-weight: 720;
+    letter-spacing: 0.11em;
+  }
+
+  .notes-header :global(.search-field) {
+    min-height: 42px;
+    background: color-mix(in oklch, var(--color-surface), transparent 10%);
+    border-color: transparent;
+    border-radius: 11px;
+    box-shadow: 0 1px 2px color-mix(in oklch, var(--color-text), transparent 94%);
+  }
+
+  .notes-header :global(.search-field:focus-within) {
+    border-color: transparent;
   }
 
   .tag-filter {
@@ -418,5 +442,20 @@
 
   .tag-filter .tag-chip.active {
     border-color: color-mix(in oklch, var(--color-accent), transparent 65%);
+  }
+
+  @media (max-width: 767px) {
+    .notes-header {
+      align-items: start;
+      margin-bottom: 24px;
+    }
+
+    .notes-header :global(.search-field) {
+      width: 100%;
+    }
+
+    .notes-header h1 {
+      font-size: 26px;
+    }
   }
 </style>

@@ -27,6 +27,7 @@ describe('note composer submission', () => {
       textarea.value = submittedDraft;
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
       const submitButton = target.querySelector<HTMLButtonElement>('.composer-submit button')!;
+      expect(submitButton.textContent?.trim()).toBe('Save');
       await vi.waitFor(() => expect(submitButton.disabled).toBe(false));
       submitButton.click();
       await vi.waitFor(() => expect(onCreate).toHaveBeenCalledOnce());
@@ -34,6 +35,7 @@ describe('note composer submission', () => {
 
       expect(textarea.disabled).toBe(true);
       expect(submitButton.disabled).toBe(true);
+      expect(submitButton.textContent?.trim()).toBe('Saving…');
       submitButton.click();
       expect(onCreate).toHaveBeenCalledOnce();
 

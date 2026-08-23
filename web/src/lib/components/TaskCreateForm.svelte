@@ -227,9 +227,8 @@
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 4px;
     align-items: center;
-    order: 20;
     padding: 5px 6px 5px 10px;
-    margin: auto 0 0;
+    margin: 0 0 18px;
     background: var(--color-surface);
     transition:
       border-color 150ms ease,
@@ -333,8 +332,8 @@
 
   .priority-menu {
     position: absolute;
+    top: calc(100% + 8px);
     right: 0;
-    bottom: calc(100% + 8px);
     z-index: 30;
     display: grid;
     width: 138px;

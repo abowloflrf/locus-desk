@@ -195,8 +195,10 @@
 <style>
   .app-shell {
     display: grid;
+    height: 100%;
+    min-height: 0;
     grid-template-columns: 224px minmax(0, 1fr);
-    min-height: 100vh;
+    overflow: hidden;
   }
 
   .app-shell.has-today {
@@ -224,6 +226,14 @@
 
   .workspace-column {
     min-width: 0;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+
+  .workspace-column::-webkit-scrollbar {
+    display: none;
   }
 
   .compact-topbar {
@@ -250,12 +260,18 @@
     z-index: 18;
     display: flex;
     min-width: 0;
-    height: 100vh;
+    height: 100%;
     flex-direction: column;
     padding: 32px 24px 22px;
+    overflow-x: hidden;
     overflow-y: auto;
     background: var(--color-surface);
     border-left: 1px solid var(--color-border);
+    scrollbar-width: none;
+  }
+
+  .today-rail::-webkit-scrollbar {
+    display: none;
   }
 
   .today-header {
@@ -397,6 +413,11 @@
 
     .compact-topbar {
       padding-inline: 16px;
+    }
+
+    .workspace-column {
+      height: 100%;
+      padding-bottom: 64px;
     }
 
     .compact-logout {

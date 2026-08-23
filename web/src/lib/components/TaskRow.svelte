@@ -29,7 +29,6 @@
   let description = $state('');
   let priority = $state<TaskPriority>(0);
   let dueDate = $state('');
-  let dueTime = $state('');
   let error = $state<string | null>(null);
   let titleInput = $state<HTMLInputElement>();
   let editButton = $state<HTMLButtonElement>();
@@ -40,7 +39,6 @@
     description = task.description;
     priority = task.priority;
     dueDate = task.dueDate ?? '';
-    dueTime = task.dueTime ?? '';
     error = null;
     editing = true;
     await tick();
@@ -67,7 +65,7 @@
       await onSave(task, {
         description: description.trim(),
         dueDate: dueDate || null,
-        dueTime: dueDate && dueTime ? dueTime : null,
+        dueTime: null,
         priority,
         title: title.trim(),
       });
@@ -92,6 +90,7 @@
 
 <article
   class:task-done={task.status === 'DONE'}
+  class:task-editing={editing}
   class:task-row-full={mode === 'all'}
   class="task-row"
   data-focus-uid={task.uid}
@@ -99,63 +98,65 @@
 >
   {#if editing}
     <form class="task-edit-form" onsubmit={save}>
-      <label class="field">
-        <span>Title</span>
-        <input
-          bind:this={titleInput}
-          disabled={busy}
-          maxlength="500"
-          onkeydown={handleEditorKeydown}
-          bind:value={title}
-        />
-      </label>
-      <label class="field">
-        <span>Details</span>
-        <textarea disabled={busy} onkeydown={handleEditorKeydown} rows="2" bind:value={description}
-        ></textarea>
-      </label>
+      <div class="task-edit-copy">
+        <label class="field task-edit-title">
+          <span class="sr-only">Title</span>
+          <input
+            bind:this={titleInput}
+            disabled={busy}
+            maxlength="500"
+            onkeydown={handleEditorKeydown}
+            bind:value={title}
+          />
+        </label>
+        <label class="field task-edit-details">
+          <span class="sr-only">Details</span>
+          <textarea
+            disabled={busy}
+            onkeydown={handleEditorKeydown}
+            rows="2"
+            bind:value={description}></textarea>
+        </label>
+      </div>
       <div class="task-edit-grid">
         <label class="compact-field">
           <span>Date</span>
           <input disabled={busy} onkeydown={handleEditorKeydown} type="date" bind:value={dueDate} />
         </label>
-        <label class="compact-field">
-          <span>Time</span>
-          <input
-            disabled={busy || !dueDate}
-            onkeydown={handleEditorKeydown}
-            type="time"
-            bind:value={dueTime}
-          />
-        </label>
-        <label class="priority-toggle">
-          <input
-            checked={priority === 1}
-            disabled={busy}
-            onchange={(event) => (priority = event.currentTarget.checked ? 1 : 0)}
-            onkeydown={handleEditorKeydown}
-            type="checkbox"
-          />
+        <div class="compact-field task-priority-field">
           <span>Priority</span>
-        </label>
+          <label class:active={priority === 1} class="priority-toggle task-priority-toggle">
+            <input
+              checked={priority === 1}
+              disabled={busy}
+              onchange={(event) => (priority = event.currentTarget.checked ? 1 : 0)}
+              onkeydown={handleEditorKeydown}
+              type="checkbox"
+            />
+            <Icon name="flag" size={15} />
+            <span>{priority === 1 ? 'Priority' : 'Regular'}</span>
+          </label>
+        </div>
       </div>
       {#if error}<p aria-live="assertive" class="form-error">{error}</p>{/if}
-      <div class="inline-form-actions">
-        <button
-          class="button secondary"
-          disabled={busy}
-          onclick={() => void closeEditor()}
-          onkeydown={handleEditorKeydown}
-          type="button">Cancel</button
-        >
-        <button
-          class="button primary"
-          disabled={busy || !title.trim()}
-          onkeydown={handleEditorKeydown}
-          type="submit"
-        >
-          {busy ? 'Saving…' : 'Save'}
-        </button>
+      <div class="task-edit-footer">
+        <div class="inline-form-actions">
+          <button
+            class="button secondary"
+            disabled={busy}
+            onclick={() => void closeEditor()}
+            onkeydown={handleEditorKeydown}
+            type="button">Cancel</button
+          >
+          <button
+            class="button primary"
+            disabled={busy || !title.trim()}
+            onkeydown={handleEditorKeydown}
+            type="submit"
+          >
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+        </div>
       </div>
     </form>
   {:else}
@@ -302,25 +303,134 @@
   .task-edit-form {
     grid-column: 1 / -1;
     display: grid;
-    gap: 10px;
-    padding: 12px;
-    background: var(--color-canvas);
-    border: 1px solid var(--color-border);
-    border-radius: 8px;
+    gap: 13px;
+    padding: 7px 0 2px;
+    animation: editor-enter 180ms ease both;
+  }
+
+  .task-editing {
+    padding-block: 9px 17px;
+    border-bottom-color: transparent;
+  }
+
+  .task-edit-copy {
+    display: grid;
+    gap: 11px;
+    padding: 10px 12px 12px;
+    background: color-mix(in oklch, var(--color-surface-muted), var(--color-surface) 35%);
+    border-radius: 12px;
+    transition: box-shadow 150ms ease;
+  }
+
+  .task-edit-copy:focus-within {
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-focus), transparent 84%);
+  }
+
+  .task-edit-copy :is(input, textarea),
+  .task-edit-copy :is(input, textarea):focus {
+    padding-inline: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .task-edit-form .compact-field > span {
+    padding-left: 2px;
+    font-size: 11px;
+    font-weight: 650;
+  }
+
+  .task-edit-title input {
+    min-height: 34px;
+    font-size: 14px;
+    font-weight: 620;
+  }
+
+  .task-edit-details textarea {
+    min-height: 68px;
+    padding-block: 2px 0;
+    resize: none;
   }
 
   .task-edit-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
     align-items: end;
   }
 
-  .task-edit-grid input[type='date'],
-  .task-edit-grid input[type='time'] {
+  .task-edit-grid input[type='date'] {
     min-height: 34px;
     padding: 6px 8px;
+    background: color-mix(in oklch, var(--color-surface-muted), var(--color-surface) 35%);
+    border-color: transparent;
+    border-radius: 9px;
     font-size: 12px;
+  }
+
+  .task-edit-grid input[type='date']:focus {
+    background: var(--color-surface);
+    border-color: transparent;
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-focus), transparent 84%);
+  }
+
+  .task-priority-field {
+    min-width: 0;
+  }
+
+  .task-priority-toggle {
+    position: relative;
+    width: 100%;
+    min-height: 34px;
+    gap: 8px;
+    padding: 6px 9px;
+    background: color-mix(in oklch, var(--color-surface-muted), var(--color-surface) 35%);
+    border-radius: 9px;
+    cursor: pointer;
+    transition:
+      color 150ms ease,
+      background-color 150ms ease,
+      box-shadow 150ms ease;
+  }
+
+  .task-priority-toggle input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    min-height: 0;
+    opacity: 0;
+  }
+
+  .task-priority-toggle.active {
+    color: var(--color-accent-hover);
+    background: var(--color-accent-soft);
+  }
+
+  .task-priority-toggle:focus-within {
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-focus), transparent 84%);
+  }
+
+  .task-edit-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    padding-top: 2px;
+  }
+
+  .task-edit-footer .inline-form-actions {
+    margin-top: 0;
+  }
+
+  .task-edit-footer .button {
+    min-height: 38px;
+    border-radius: 9px;
+  }
+
+  .task-edit-footer .button.secondary {
+    background: transparent;
+    border-color: transparent;
   }
 
   .task-row-full {
@@ -330,6 +440,21 @@
 
   .task-row-full .task-title-line h3 {
     font-size: 14px;
+  }
+
+  .task-row-full .task-edit-grid {
+    grid-template-columns: repeat(2, minmax(130px, 180px));
+  }
+
+  @keyframes editor-enter {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   @media (max-width: 1199px) {
@@ -355,12 +480,8 @@
       display: grid;
     }
 
-    .task-edit-grid {
+    .task-row-full .task-edit-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .task-edit-grid .priority-toggle {
-      grid-column: 1 / -1;
     }
   }
 

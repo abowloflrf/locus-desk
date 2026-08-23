@@ -60,17 +60,18 @@
   }
 
   .note-day > h2 {
-    padding: 18px 0 9px;
+    padding: 18px 2px 10px;
     margin: 0;
     color: var(--color-text-muted);
-    font-size: 11px;
-    font-weight: 540;
+    font-size: 12px;
+    font-weight: 650;
+    letter-spacing: 0.015em;
   }
 
   .note-day-list {
     display: grid;
-    gap: 10px;
-    padding-bottom: 8px;
+    gap: 9px;
+    padding-bottom: 12px;
   }
 
   @keyframes content-enter {

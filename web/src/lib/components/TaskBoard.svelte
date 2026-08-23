@@ -296,7 +296,7 @@
       <p>{mode === 'today' ? 'Nothing is scheduled for today.' : 'No tasks in this view.'}</p>
       <span
         >{mode === 'today'
-          ? 'Add one small next step below.'
+          ? 'Add one small next step to get started.'
           : 'Create a task to get started.'}</span
       >
     </div>
@@ -321,8 +321,14 @@
     {/if}
 
     {#if regularTasks.length > 0}
-      <section class="task-section" aria-labelledby={`regular-${mode}`}>
-        <h2 id={`regular-${mode}`}>Regular <span>{regularTasks.length}</span></h2>
+      <section
+        aria-label={mode === 'today' ? 'Regular tasks' : undefined}
+        aria-labelledby={mode === 'all' ? `regular-${mode}` : undefined}
+        class="task-section"
+      >
+        {#if mode === 'all'}
+          <h2 id={`regular-${mode}`}>Regular <span>{regularTasks.length}</span></h2>
+        {/if}
         <div class="task-list">
           {#each regularTasks as task (task.uid)}
             <TaskRow
@@ -378,9 +384,7 @@
   }
 
   .today-task-board {
-    display: flex;
-    min-height: calc(100vh - 112px);
-    flex-direction: column;
+    min-height: 0;
   }
 
   .segmented-control {
@@ -420,7 +424,6 @@
     padding: 0 0 9px;
     margin-bottom: 0;
     color: var(--color-text);
-    border-bottom: 1px solid var(--color-border);
     font-size: 12px;
     font-weight: 650;
   }
@@ -454,12 +457,6 @@
     to {
       opacity: 1;
       transform: translateY(0);
-    }
-  }
-
-  @media (max-width: 767px) {
-    .today-task-board {
-      min-height: calc(100vh - 130px);
     }
   }
 </style>

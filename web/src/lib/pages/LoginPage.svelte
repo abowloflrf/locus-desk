@@ -85,8 +85,15 @@
 <style>
   .login-page {
     display: grid;
+    height: 100%;
     min-height: 100vh;
     grid-template-columns: minmax(360px, 0.92fr) minmax(430px, 1.08fr);
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+
+  .login-page::-webkit-scrollbar {
+    display: none;
   }
 
   .login-intro {
