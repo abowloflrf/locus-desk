@@ -28,7 +28,7 @@
       resizeTextarea();
       textarea?.focus();
     } catch (cause) {
-      error = errorMessage(cause, 'Unable to save the note.');
+      error = errorMessage(cause, 'Unable to save the memo.');
     } finally {
       busy = false;
     }
@@ -60,8 +60,8 @@
 </script>
 
 <section class="note-composer" aria-labelledby="composer-title">
-  <h2 class="sr-only" id="composer-title">Create a note</h2>
-  <label class="sr-only" for="note-composer-input">Note content</label>
+  <h2 class="sr-only" id="composer-title">Create a memo</h2>
+  <label class="sr-only" for="note-composer-input">Memo content</label>
   <textarea
     aria-describedby={error ? 'composer-hint composer-error' : 'composer-hint'}
     bind:this={textarea}
@@ -72,7 +72,7 @@
     onfocus={handleFocus}
     oninput={resizeTextarea}
     onkeydown={handleKeydown}
-    placeholder="Write a quick note…"
+    placeholder="Write a quick memo…"
     rows="3"></textarea>
   <div class="composer-footer">
     <span class="composer-hint" id="composer-hint">Markdown <kbd>⌘↵</kbd></span>
@@ -171,7 +171,7 @@
     textarea {
       min-height: 60px;
       padding-top: 4px;
-      font-size: 15px;
+      font-size: 16px;
     }
 
     .composer-footer {
@@ -180,6 +180,10 @@
 
     .composer-submit {
       justify-content: flex-end;
+    }
+
+    .composer-submit .button {
+      min-height: 44px;
     }
   }
 </style>

@@ -21,8 +21,10 @@
   let error = $state<string | null>(null);
   let submitting = $state(false);
   let compactFocused = $state(false);
+  let detailsOpen = $state(false);
   let priorityOpen = $state(false);
   let priorityButton = $state<HTMLButtonElement>();
+  let moreButton = $state<HTMLButtonElement>();
   let formBusy = $derived(busy || submitting);
 
   async function submit(event: SubmitEvent): Promise<void> {
@@ -53,6 +55,7 @@
       priority = 0;
       priorityOpen = false;
       dueDate = '';
+      detailsOpen = false;
     } catch (cause) {
       error = errorMessage(cause, 'Unable to add the task.');
     } finally {
@@ -69,10 +72,17 @@
   }
 
   function handleKeydown(event: KeyboardEvent): void {
-    if (event.key !== 'Escape' || !priorityOpen) return;
+    if (event.key !== 'Escape') return;
+    if (priorityOpen) {
+      event.preventDefault();
+      priorityOpen = false;
+      requestAnimationFrame(() => priorityButton?.focus());
+      return;
+    }
+    if (!detailsOpen) return;
     event.preventDefault();
-    priorityOpen = false;
-    requestAnimationFrame(() => priorityButton?.focus());
+    detailsOpen = false;
+    requestAnimationFrame(() => moreButton?.focus());
   }
 
   function selectPriority(value: TaskPriority): void {
@@ -85,45 +95,109 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <form
-  class:task-create-compact={mode === 'todo'}
-  class="task-create"
+  class:has-advanced={mode === 'all' && detailsOpen}
+  class="task-create task-create-compact"
   onfocusin={() => (compactFocused = true)}
   onfocusout={handleFocusOut}
   onsubmit={submit}
 >
   <div class="field task-title-field">
     <label class="sr-only" for={`new-task-${mode}`}>Task title</label>
-    {#if mode === 'todo'}
-      <span class="task-add-icon" aria-hidden="true"><Icon name="plus" size={19} /></span>
-    {/if}
+    <span class="task-add-icon" aria-hidden="true"><Icon name="plus" size={19} /></span>
     <input
       autocomplete="off"
       disabled={formBusy}
       id={`new-task-${mode}`}
       maxlength="500"
-      placeholder={mode === 'todo' ? 'Add a task…' : 'What needs to be done?'}
+      placeholder="Add a task…"
       bind:value={title}
     />
   </div>
 
-  {#if mode === 'all'}
-    <div class="field task-description-field">
-      <label class="sr-only" for="new-task-description">Task details</label>
+  <div
+    aria-hidden={!compactFocused}
+    class:wide={mode === 'all'}
+    class:visible={compactFocused}
+    class="quick-actions"
+  >
+    <label
+      class:active={Boolean(dueDate)}
+      class="quick-action date-action"
+      title={dueDate ? `Due ${dueDate}` : 'Set due date'}
+    >
+      <Icon name="calendar" size={17} />
       <input
-        autocomplete="off"
+        aria-label="Due date"
         disabled={formBusy}
-        id="new-task-description"
-        placeholder="Details (optional)"
-        bind:value={description}
+        tabindex={compactFocused ? 0 : -1}
+        type="date"
+        bind:value={dueDate}
       />
+    </label>
+    <div class="priority-picker">
+      <button
+        aria-expanded={priorityOpen}
+        aria-haspopup="menu"
+        aria-label="Set priority"
+        bind:this={priorityButton}
+        class:active={priority === 1}
+        class="quick-action"
+        disabled={formBusy}
+        onclick={() => (priorityOpen = !priorityOpen)}
+        tabindex={compactFocused ? 0 : -1}
+        title={priority === 1 ? 'Priority task' : 'Set priority'}
+        type="button"
+      >
+        <Icon name="flag" size={17} />
+      </button>
+      {#if priorityOpen}
+        <div aria-label="Task priority" class="priority-menu" role="menu">
+          <button
+            aria-checked={priority === 0}
+            onclick={() => selectPriority(0)}
+            role="menuitemradio"
+            type="button"
+          >
+            <Icon name="flag" size={16} />
+            <span>Regular</span>
+          </button>
+          <button
+            aria-checked={priority === 1}
+            class="priority-option"
+            onclick={() => selectPriority(1)}
+            role="menuitemradio"
+            type="button"
+          >
+            <Icon name="flag" size={16} />
+            <span>Priority</span>
+          </button>
+        </div>
+      {/if}
     </div>
-  {/if}
+    {#if mode === 'all'}
+      <button
+        aria-controls="new-task-options"
+        aria-expanded={detailsOpen}
+        aria-label="More task options"
+        bind:this={moreButton}
+        class:active={detailsOpen || Boolean(description) || Boolean(dueTime)}
+        class="quick-action"
+        disabled={formBusy}
+        onclick={() => (detailsOpen = !detailsOpen)}
+        tabindex={compactFocused ? 0 : -1}
+        title="More task options"
+        type="button"
+      >
+        <Icon name="more" size={18} />
+      </button>
+    {/if}
+  </div>
 
-  {#if mode === 'all'}
-    <div class="task-create-options">
-      <label class="compact-field">
-        <span>Date</span>
-        <input aria-label="Due date" disabled={formBusy} type="date" bind:value={dueDate} />
+  {#if mode === 'all' && detailsOpen}
+    <div class="task-advanced" id="new-task-options">
+      <label class="field">
+        <span>Details</span>
+        <input autocomplete="off" disabled={formBusy} bind:value={description} />
       </label>
       <label class="compact-field">
         <span>Time</span>
@@ -134,79 +208,6 @@
           bind:value={dueTime}
         />
       </label>
-      <label class="priority-toggle">
-        <input
-          checked={priority === 1}
-          disabled={formBusy}
-          onchange={(event) => (priority = event.currentTarget.checked ? 1 : 0)}
-          type="checkbox"
-        />
-        <span>Priority</span>
-      </label>
-      <button
-        class="button primary task-add-button"
-        disabled={formBusy || !title.trim()}
-        type="submit"
-      >
-        {formBusy ? 'Adding…' : 'Add task'}
-      </button>
-    </div>
-  {:else}
-    <div aria-hidden={!compactFocused} class:visible={compactFocused} class="quick-actions">
-      <label
-        class:active={Boolean(dueDate)}
-        class="quick-action date-action"
-        title={dueDate ? `Due ${dueDate}` : 'Set due date'}
-      >
-        <Icon name="calendar" size={17} />
-        <input
-          aria-label="Due date"
-          disabled={formBusy}
-          tabindex={compactFocused ? 0 : -1}
-          type="date"
-          bind:value={dueDate}
-        />
-      </label>
-      <div class="priority-picker">
-        <button
-          aria-expanded={priorityOpen}
-          aria-haspopup="menu"
-          aria-label="Set priority"
-          bind:this={priorityButton}
-          class:active={priority === 1}
-          class="quick-action"
-          disabled={formBusy}
-          onclick={() => (priorityOpen = !priorityOpen)}
-          tabindex={compactFocused ? 0 : -1}
-          title={priority === 1 ? 'Priority task' : 'Set priority'}
-          type="button"
-        >
-          <Icon name="flag" size={17} />
-        </button>
-        {#if priorityOpen}
-          <div aria-label="Task priority" class="priority-menu" role="menu">
-            <button
-              aria-checked={priority === 0}
-              onclick={() => selectPriority(0)}
-              role="menuitemradio"
-              type="button"
-            >
-              <Icon name="flag" size={16} />
-              <span>Regular</span>
-            </button>
-            <button
-              aria-checked={priority === 1}
-              class="priority-option"
-              onclick={() => selectPriority(1)}
-              role="menuitemradio"
-              type="button"
-            >
-              <Icon name="flag" size={16} />
-              <span>Priority</span>
-            </button>
-          </div>
-        {/if}
-      </div>
     </div>
   {/if}
 
@@ -217,11 +218,11 @@
 
 <style>
   .task-create {
-    padding: 16px;
-    margin-bottom: 28px;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-input);
+    margin-bottom: 24px;
+  }
+
+  .task-add-icon {
+    color: var(--color-text-muted);
   }
 
   .task-create-compact {
@@ -231,8 +232,10 @@
     gap: 4px;
     align-items: center;
     padding: 5px 6px 5px 10px;
-    margin: 0 0 18px;
+    margin-bottom: 18px;
     background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-input);
     transition:
       border-color 150ms ease,
       box-shadow 150ms ease;
@@ -256,10 +259,6 @@
     background: transparent;
     border: 0;
     box-shadow: none;
-  }
-
-  .task-add-icon {
-    color: var(--color-text-muted);
   }
 
   .quick-actions {
@@ -290,6 +289,10 @@
       opacity 120ms ease 30ms,
       transform 150ms ease,
       visibility 0ms step-start;
+  }
+
+  .quick-actions.visible.wide {
+    width: 100px;
   }
 
   .quick-action {
@@ -376,56 +379,68 @@
     grid-column: 1 / -1;
   }
 
-  .task-create-options {
-    display: flex;
-    flex-wrap: wrap;
+  .task-advanced {
+    display: grid;
+    min-width: 0;
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1fr) minmax(120px, 150px);
     gap: 10px;
-    align-items: end;
-    margin-top: 11px;
+    padding: 10px 2px 2px 26px;
+    animation: details-enter 160ms ease both;
   }
 
-  .task-create-options .compact-field {
-    flex: 0 1 145px;
+  .task-advanced > * {
+    min-width: 0;
   }
 
-  .task-create-options input[type='date'],
-  .task-create-options input[type='time'] {
-    min-height: 34px;
+  .task-advanced input[type='time'] {
+    min-height: 38px;
     padding: 6px 8px;
     font-size: 12px;
   }
 
-  .task-description-field {
-    margin-top: 8px;
-  }
-
-  .task-add-button {
-    margin-left: auto;
+  @keyframes details-enter {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   @media (max-width: 767px) {
-    .task-create {
-      padding: 12px;
-    }
-
-    .task-create-options {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .task-create-options .compact-field,
-    .task-create-options .priority-toggle {
-      min-width: 0;
-    }
-
-    .task-add-button {
-      grid-column: 1 / -1;
-      width: 100%;
-      margin-left: 0;
-    }
-
     .task-create-compact {
       padding: 5px 6px 5px 10px;
+    }
+
+    .quick-actions.visible {
+      width: 90px;
+    }
+
+    .quick-actions.visible.wide {
+      width: 136px;
+    }
+
+    .quick-action,
+    .priority-menu button {
+      width: 44px;
+      min-height: 44px;
+    }
+
+    .priority-menu button {
+      width: 100%;
+    }
+
+    .task-advanced {
+      grid-template-columns: minmax(0, 1fr);
+      padding: 10px 2px 4px 26px;
+    }
+
+    .task-advanced input[type='time'] {
+      min-height: 44px;
+      font-size: 16px;
     }
   }
 </style>

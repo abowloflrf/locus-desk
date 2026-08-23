@@ -82,3 +82,90 @@ describe('Todo task creation', () => {
     }
   });
 });
+
+describe('Full task creation', () => {
+  it('starts with a single-line entry and submits without optional fields', async () => {
+    const onCreate = vi.fn().mockResolvedValue(undefined);
+    const target = document.createElement('div');
+    document.body.append(target);
+    const component = mount(TaskCreateForm, {
+      props: { busy: false, mode: 'all', onCreate },
+      target,
+    });
+
+    try {
+      expect(target.querySelector('#new-task-options')).toBeNull();
+      expect(target.querySelector('#new-task-description')).toBeNull();
+      expect(target.querySelector('button[type="submit"]')).toBeNull();
+
+      const input = target.querySelector<HTMLInputElement>('#new-task-all')!;
+      input.value = 'Plan tomorrow';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      target.querySelector<HTMLFormElement>('form')!.requestSubmit();
+
+      await vi.waitFor(() => expect(onCreate).toHaveBeenCalledOnce());
+      expect(onCreate).toHaveBeenCalledWith({
+        description: undefined,
+        priority: 0,
+        title: 'Plan tomorrow',
+      });
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it('keeps quick actions consistent with Todo and reveals advanced fields on demand', async () => {
+    const onCreate = vi.fn().mockResolvedValue(undefined);
+    const target = document.createElement('div');
+    document.body.append(target);
+    const component = mount(TaskCreateForm, {
+      props: { busy: false, mode: 'all', onCreate },
+      target,
+    });
+
+    try {
+      const title = target.querySelector<HTMLInputElement>('#new-task-all')!;
+      title.focus();
+      await vi.waitFor(() =>
+        expect(target.querySelector('.quick-actions')?.classList.contains('visible')).toBe(true),
+      );
+
+      const moreButton = target.querySelector<HTMLButtonElement>(
+        '[aria-label="More task options"]',
+      )!;
+      moreButton.click();
+      await vi.waitFor(() => expect(target.querySelector('#new-task-options')).not.toBeNull());
+
+      title.value = 'Send the report';
+      title.dispatchEvent(new Event('input', { bubbles: true }));
+      const description = target.querySelector<HTMLInputElement>(
+        '.task-advanced input:not([type="time"])',
+      )!;
+      description.value = 'Include the final numbers';
+      description.dispatchEvent(new Event('input', { bubbles: true }));
+      const date = target.querySelector<HTMLInputElement>('[aria-label="Due date"]')!;
+      date.value = '2026-08-25';
+      date.dispatchEvent(new Event('input', { bubbles: true }));
+      const time = target.querySelector<HTMLInputElement>('[aria-label="Due time"]')!;
+      time.value = '16:30';
+      time.dispatchEvent(new Event('input', { bubbles: true }));
+      target.querySelector<HTMLButtonElement>('[aria-label="Set priority"]')!.click();
+      await vi.waitFor(() => expect(target.querySelector('[role="menu"]')).not.toBeNull());
+      target.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')[1].click();
+      target.querySelector<HTMLFormElement>('form')!.requestSubmit();
+
+      await vi.waitFor(() => expect(onCreate).toHaveBeenCalledOnce());
+      expect(onCreate).toHaveBeenCalledWith({
+        description: 'Include the final numbers',
+        dueDate: '2026-08-25',
+        dueTime: '16:30',
+        priority: 1,
+        title: 'Send the report',
+      });
+      await vi.waitFor(() => expect(target.querySelector('#new-task-options')).toBeNull());
+      expect(moreButton.getAttribute('aria-expanded')).toBe('false');
+    } finally {
+      await unmount(component);
+    }
+  });
+});

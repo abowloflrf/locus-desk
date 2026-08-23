@@ -69,7 +69,7 @@ describe('ArchivePage', () => {
       });
 
       const loadMore = [...target.querySelectorAll('button')].find((button) =>
-        button.textContent?.includes('Load older notes'),
+        button.textContent?.includes('Load older memos'),
       );
       expect(loadMore).toBeDefined();
       loadMore?.click();
@@ -101,7 +101,7 @@ describe('ArchivePage', () => {
     try {
       const restore = await vi.waitFor(() => {
         const button = target.querySelector<HTMLButtonElement>(
-          '[data-focus-uid="note-1"] [aria-label="Restore note"]',
+          '[data-focus-uid="note-1"] [aria-label="Restore memo"]',
         );
         expect(button).not.toBeNull();
         return button!;
@@ -116,7 +116,7 @@ describe('ArchivePage', () => {
       );
       await vi.waitFor(() =>
         expect(target.querySelector('[data-action-status]')?.textContent).toContain(
-          'Note restored.',
+          'Memo restored.',
         ),
       );
     } finally {
@@ -144,7 +144,7 @@ describe('ArchivePage', () => {
       search.dispatchEvent(new Event('input', { bubbles: true }));
       await vi.waitFor(() => expect(listNotes).toHaveBeenCalledTimes(2), { timeout: 1_000 });
       target
-        .querySelector<HTMLButtonElement>('[data-focus-uid="note-1"] [aria-label="Edit note"]')
+        .querySelector<HTMLButtonElement>('[data-focus-uid="note-1"] [aria-label="Edit memo"]')
         ?.click();
       const editor = await vi.waitFor(() => {
         const textarea = target.querySelector<HTMLTextAreaElement>('#edit-note-note-1');

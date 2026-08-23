@@ -25,7 +25,7 @@
     icon: IconName;
   }> = [
     { icon: 'today', label: 'Workspace', route: 'home' },
-    { icon: 'note', label: 'Notes', route: 'notes' },
+    { icon: 'note', label: 'Memos', route: 'notes' },
     { icon: 'tasks', label: 'Tasks', route: 'tasks' },
     { icon: 'archive', label: 'Archive', route: 'archive' },
   ];
@@ -70,7 +70,7 @@
 
   <div class="sidebar-divider"></div>
 
-  <button class="nav-item search-nav" onclick={focusSearch} title="Search notes" type="button">
+  <button class="nav-item search-nav" onclick={focusSearch} title="Search memos" type="button">
     <Icon name="search" />
     <span>Search</span>
     <kbd>⌘K</kbd>
@@ -106,6 +106,7 @@
     display: flex;
     min-width: 0;
     height: 100vh;
+    height: 100dvh;
     flex-direction: column;
     padding: 28px 18px 20px;
     overflow-y: auto;
@@ -289,7 +290,7 @@
       z-index: 60;
       display: block;
       width: 100%;
-      height: 64px;
+      height: calc(64px + env(safe-area-inset-bottom));
       padding: 6px 12px calc(6px + env(safe-area-inset-bottom));
       overflow: visible;
       border-top: 1px solid var(--color-border);

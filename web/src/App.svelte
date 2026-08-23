@@ -39,7 +39,7 @@
       : route === 'home'
         ? 'Workspace · Locus Desk'
         : route === 'notes'
-          ? 'Notes · Locus Desk'
+          ? 'Memos · Locus Desk'
           : route === 'tasks'
             ? 'Tasks · Locus Desk'
             : 'Archive · Locus Desk',
@@ -246,9 +246,10 @@
   .boot-screen {
     display: grid;
     min-height: 100vh;
+    min-height: 100dvh;
     align-content: center;
     justify-items: center;
-    padding: 32px;
+    padding: calc(32px + env(safe-area-inset-top)) 32px calc(32px + env(safe-area-inset-bottom));
     text-align: center;
   }
 

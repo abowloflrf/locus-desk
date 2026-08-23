@@ -60,7 +60,7 @@
   async function save(): Promise<void> {
     const submittedDraft = draft;
     if (!submittedDraft.trim()) {
-      editError = 'A note cannot be empty.';
+      editError = 'A memo cannot be empty.';
       return;
     }
 
@@ -69,7 +69,7 @@
       await onSave(note, submittedDraft);
       await closeEditor();
     } catch (cause) {
-      editError = errorMessage(cause, 'Unable to save the note.');
+      editError = errorMessage(cause, 'Unable to save the memo.');
     }
   }
 
@@ -144,7 +144,7 @@
   <div class="note-body">
     {#if editing}
       <div class="note-edit-form">
-        <label class="sr-only" for={`edit-note-${note.uid}`}>Edit note</label>
+        <label class="sr-only" for={`edit-note-${note.uid}`}>Edit memo</label>
         <textarea
           bind:this={editor}
           disabled={busy}
@@ -186,7 +186,7 @@
   </div>
   {#if !editing}
     <div
-      aria-label="Note actions"
+      aria-label="Memo actions"
       bind:this={actionsElement}
       class:menu-open={actionsOpen}
       class="note-actions"
@@ -194,7 +194,7 @@
     >
       <button
         aria-expanded={actionsOpen}
-        aria-label="More note actions"
+        aria-label="More memo actions"
         bind:this={moreButton}
         class="icon-button note-more"
         disabled={busy}
@@ -206,7 +206,7 @@
       <div class="note-action-buttons">
         {#if mode === 'active'}
           <button
-            aria-label={note.pinned ? 'Unpin note' : 'Pin note'}
+            aria-label={note.pinned ? 'Unpin memo' : 'Pin memo'}
             aria-pressed={note.pinned}
             class:active={note.pinned}
             class="icon-button"
@@ -221,7 +221,7 @@
           </button>
         {/if}
         <button
-          aria-label="Edit note"
+          aria-label="Edit memo"
           bind:this={editButton}
           class="icon-button"
           disabled={busy}
@@ -235,7 +235,7 @@
         </button>
         {#if mode === 'active'}
           <button
-            aria-label="Archive note"
+            aria-label="Archive memo"
             class="icon-button"
             disabled={busy}
             onblur={handleActionBlur}
@@ -248,7 +248,7 @@
           </button>
         {:else}
           <button
-            aria-label="Restore note"
+            aria-label="Restore memo"
             class="icon-button"
             disabled={busy}
             onblur={handleActionBlur}
@@ -261,7 +261,7 @@
           </button>
         {/if}
         <button
-          aria-label="Delete note"
+          aria-label="Delete memo"
           class="icon-button danger-quiet"
           disabled={busy}
           onblur={handleActionBlur}
@@ -420,6 +420,14 @@
     .note-item > time {
       line-height: 20px;
     }
+
+    .note-tags .tag-chip {
+      min-height: 44px;
+    }
+
+    .note-edit-form textarea {
+      font-size: 16px;
+    }
   }
 
   @media (max-width: 767px), (hover: none) {
@@ -470,9 +478,9 @@
     .note-action-buttons .icon-button {
       display: flex;
       width: 100%;
-      height: 38px;
+      height: 44px;
       min-width: 0;
-      min-height: 38px;
+      min-height: 44px;
       gap: 9px;
       justify-content: flex-start;
       padding: 0 9px;

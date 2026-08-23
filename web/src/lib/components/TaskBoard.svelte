@@ -381,28 +381,50 @@
   }
 
   .segmented-control {
-    display: inline-flex;
-    gap: 3px;
-    padding: 3px;
-    margin-bottom: 18px;
-    background: var(--color-surface-muted);
-    border-radius: var(--radius-control);
+    display: flex;
+    gap: 20px;
+    padding: 0;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--color-border-soft);
   }
 
   .segmented-control button {
-    min-height: 30px;
-    padding: 4px 11px;
+    position: relative;
+    min-height: 40px;
+    padding: 4px 2px;
     color: var(--color-text-muted);
     background: transparent;
     border: 0;
-    border-radius: 6px;
     font-size: 12px;
+    font-weight: 580;
   }
 
   .segmented-control button.active {
-    color: var(--color-text);
-    background: var(--color-surface);
-    box-shadow: 0 1px 3px color-mix(in oklch, var(--color-text), transparent 91%);
+    color: var(--color-accent-hover);
+  }
+
+  .segmented-control button.active::after {
+    position: absolute;
+    right: 0;
+    bottom: -1px;
+    left: 0;
+    height: 2px;
+    background: var(--color-accent);
+    border-radius: 2px 2px 0 0;
+    content: '';
+  }
+
+  @media (max-width: 767px) {
+    .segmented-control {
+      display: grid;
+      width: 100%;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0;
+    }
+
+    .segmented-control button {
+      min-height: 44px;
+    }
   }
 
   .task-section {

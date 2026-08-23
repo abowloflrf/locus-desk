@@ -63,7 +63,7 @@ describe('NotesPage request ordering', () => {
     try {
       await vi.waitFor(() => expect(listNotes).toHaveBeenCalledOnce());
       const firstSignal = vi.mocked(listNotes).mock.calls[0]?.[1];
-      const search = target.querySelector<HTMLInputElement>('[placeholder="Search notes"]')!;
+      const search = target.querySelector<HTMLInputElement>('[placeholder="Search memos"]')!;
       search.value = 'fresh';
       search.dispatchEvent(new Event('input', { bubbles: true }));
       expect(firstSignal?.aborted).toBe(true);
@@ -127,10 +127,10 @@ describe('NotesPage request ordering', () => {
     try {
       await vi.waitFor(() =>
         expect(
-          target.querySelector<HTMLButtonElement>('[aria-label="Delete note"]'),
+          target.querySelector<HTMLButtonElement>('[aria-label="Delete memo"]'),
         ).not.toBeNull(),
       );
-      target.querySelector<HTMLButtonElement>('[aria-label="Delete note"]')?.click();
+      target.querySelector<HTMLButtonElement>('[aria-label="Delete memo"]')?.click();
       await vi.waitFor(() => expect(target.querySelector('dialog')?.open).toBe(true));
       target.querySelector<HTMLButtonElement>('.confirm-dialog .button.danger')?.click();
 
@@ -141,7 +141,7 @@ describe('NotesPage request ordering', () => {
 
       target.querySelector<HTMLButtonElement>('.confirm-dialog .button.secondary')?.click();
       await vi.waitFor(() => expect(target.querySelector('dialog')?.open).toBe(false));
-      target.querySelector<HTMLButtonElement>('[aria-label="Delete note"]')?.click();
+      target.querySelector<HTMLButtonElement>('[aria-label="Delete memo"]')?.click();
       await vi.waitFor(() => expect(target.querySelector('dialog')?.open).toBe(true));
       expect(target.querySelector('[role="alert"]')).toBeNull();
     } finally {
@@ -170,7 +170,7 @@ describe('NotesPage request ordering', () => {
     try {
       const deleteButton = await vi.waitFor(() => {
         const button = target.querySelector<HTMLButtonElement>(
-          '[data-focus-uid="delete-me"] [aria-label="Delete note"]',
+          '[data-focus-uid="delete-me"] [aria-label="Delete memo"]',
         );
         expect(button).not.toBeNull();
         return button!;
@@ -185,7 +185,7 @@ describe('NotesPage request ordering', () => {
           document.activeElement?.closest('[data-focus-uid]')?.getAttribute('data-focus-uid'),
         ).toBe('keep-me'),
       );
-      expect(target.querySelector('[data-action-status]')?.textContent).toContain('Note deleted.');
+      expect(target.querySelector('[data-action-status]')?.textContent).toContain('Memo deleted.');
     } finally {
       await unmount(component);
       uninstallDialogPolyfill();
@@ -218,7 +218,7 @@ describe('NotesPage request ordering', () => {
       tagFilter.click();
       await vi.waitFor(() => expect(listNotes).toHaveBeenCalledTimes(2));
       target
-        .querySelector<HTMLButtonElement>('[data-focus-uid="first-work"] [aria-label="Edit note"]')
+        .querySelector<HTMLButtonElement>('[data-focus-uid="first-work"] [aria-label="Edit memo"]')
         ?.click();
       const editor = await vi.waitFor(() => {
         const textarea = target.querySelector<HTMLTextAreaElement>('#edit-note-first-work');
@@ -257,7 +257,7 @@ describe('NotesPage request ordering', () => {
     try {
       const archive = await vi.waitFor(() => {
         const button = target.querySelector<HTMLButtonElement>(
-          '[data-focus-uid="first-note"] [aria-label="Archive note"]',
+          '[data-focus-uid="first-note"] [aria-label="Archive memo"]',
         );
         expect(button).not.toBeNull();
         return button!;
@@ -272,7 +272,7 @@ describe('NotesPage request ordering', () => {
       );
       await vi.waitFor(() =>
         expect(target.querySelector('[data-action-status]')?.textContent).toContain(
-          'Note archived.',
+          'Memo archived.',
         ),
       );
     } finally {

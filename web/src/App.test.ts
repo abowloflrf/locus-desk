@@ -136,7 +136,7 @@ describe('App navigation focus', () => {
       skipLink.focus();
       expect(document.activeElement).toBe(skipLink);
 
-      target.querySelector<HTMLAnchorElement>('.nav-item[title="Notes"]')?.click();
+      target.querySelector<HTMLAnchorElement>('.nav-item[title="Memos"]')?.click();
       await vi.waitFor(() => expect(window.location.pathname).toBe('/notes'));
       await vi.waitFor(() => expect(document.activeElement?.id).toBe('main-content'));
       expect(target.querySelector('.todo-rail')).toBeNull();
@@ -168,7 +168,10 @@ describe('App navigation focus', () => {
       window.history.replaceState({}, '', '/tasks');
       window.dispatchEvent(new PopStateEvent('popstate'));
 
-      await vi.waitFor(() => expect(target.querySelector('h1')?.textContent).toBe('Tasks'));
+      await vi.waitFor(() => expect(target.querySelector('.tasks-page')).not.toBeNull());
+      expect(target.querySelector('.nav-item[title="Tasks"]')?.getAttribute('aria-current')).toBe(
+        'page',
+      );
       await vi.waitFor(() => expect(document.activeElement?.id).toBe('main-content'));
       expect(pushState).not.toHaveBeenCalled();
     } finally {

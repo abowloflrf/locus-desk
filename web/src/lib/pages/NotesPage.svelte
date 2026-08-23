@@ -77,7 +77,7 @@
       total = response.total;
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === 'AbortError') return;
-      if (id === requestId) loadError = errorMessage(cause, 'Unable to load notes.');
+      if (id === requestId) loadError = errorMessage(cause, 'Unable to load memos.');
     } finally {
       if (id === requestId) {
         loading = false;
@@ -148,14 +148,14 @@
         notes = notes.filter((item) => item.uid !== updated.uid);
         if (wasVisible) {
           total = Math.max(0, total - 1);
-          actionStatus = 'Note updated and removed from the current view.';
+          actionStatus = 'Memo updated and removed from the current view.';
           await restoreListFocus(pageElement, focusSnapshot);
         }
       }
       void refreshTags();
       void loadNotesPage(true);
     } catch (cause) {
-      operationError = errorMessage(cause, 'Unable to save the note.');
+      operationError = errorMessage(cause, 'Unable to save the memo.');
       void loadNotesPage(true);
       throw cause;
     } finally {
@@ -183,7 +183,7 @@
       const returnedDuringRequest = notes.some((item) => item.uid === note.uid);
       notes = notes.filter((item) => item.uid !== note.uid);
       if (returnedDuringRequest) total = Math.max(0, total - 1);
-      actionStatus = 'Note archived.';
+      actionStatus = 'Memo archived.';
       void refreshTags();
       void loadNotesPage(true);
     } catch (cause) {
@@ -191,7 +191,7 @@
         notes = sortNotes([note, ...notes]);
         total += 1;
       }
-      operationError = errorMessage(cause, 'Unable to archive the note.');
+      operationError = errorMessage(cause, 'Unable to archive the memo.');
       void loadNotesPage(true);
     } finally {
       markBusy(note.uid, false);
@@ -211,7 +211,7 @@
       void loadNotesPage(true);
     } catch (cause) {
       notes = sortNotes(notes.map((item) => (item.uid === note.uid ? note : item)));
-      operationError = errorMessage(cause, 'Unable to update the note.');
+      operationError = errorMessage(cause, 'Unable to update the memo.');
       void loadNotesPage(true);
     } finally {
       markBusy(note.uid, false);
@@ -230,11 +230,11 @@
       total = Math.max(0, total - 1);
       pendingDelete = null;
       deleteError = null;
-      actionStatus = 'Note deleted.';
+      actionStatus = 'Memo deleted.';
       void refreshTags();
       void loadNotesPage(true);
     } catch (cause) {
-      deleteError = errorMessage(cause, 'Unable to delete the note.');
+      deleteError = errorMessage(cause, 'Unable to delete the memo.');
       void loadNotesPage(true);
     } finally {
       deleteBusy = false;
@@ -294,15 +294,15 @@
 
 <div bind:this={pageElement} class="page notes-page">
   <header class="page-header notes-header">
-    <h1>Notes</h1>
+    <h1 class="sr-only">Memos</h1>
     <label class="search-field">
       <Icon name="search" size={17} />
-      <span class="sr-only">Search notes</span>
+      <span class="sr-only">Search memos</span>
       <input
         autocomplete="off"
         bind:this={searchInput}
         oninput={handleSearch}
-        placeholder="Search notes"
+        placeholder="Search memos"
         type="search"
         value={query}
       />
@@ -337,14 +337,14 @@
   <div aria-atomic="true" aria-live="polite" class="sr-only" data-action-status role="status">
     {actionStatus ?? ''}
   </div>
-  {#if loading && notes.length > 0}<span aria-live="polite" class="sr-only">Updating notes…</span
+  {#if loading && notes.length > 0}<span aria-live="polite" class="sr-only">Updating memos…</span
     >{/if}
 
   {#if loading && notes.length === 0}
-    <div aria-live="polite" class="loading-state large">Loading notes…</div>
+    <div aria-live="polite" class="loading-state large">Loading memos…</div>
   {:else if loadError}
     <div class="empty-state">
-      <h2>Notes are unavailable</h2>
+      <h2>Memos are unavailable</h2>
       <p>{loadError}</p>
       <button class="button secondary" onclick={() => void loadNotesPage(true)} type="button"
         >Try again</button
@@ -352,7 +352,7 @@
     </div>
   {:else if notes.length === 0}
     <div class="empty-state">
-      <h2>{query || selectedTag ? 'No notes found' : 'Your timeline is clear'}</h2>
+      <h2>{query || selectedTag ? 'No memos found' : 'Your timeline is clear'}</h2>
       <p>
         {query || selectedTag
           ? 'Try another keyword or tag.'
@@ -375,7 +375,7 @@
         class="button secondary load-more"
         disabled={loadingMore}
         onclick={() => void loadNotesPage(false)}
-        type="button">{loadingMore ? 'Loading…' : 'Load older notes'}</button
+        type="button">{loadingMore ? 'Loading…' : 'Load older memos'}</button
       >
     {/if}
   {/if}
@@ -383,14 +383,14 @@
 
 <ConfirmDialog
   busy={deleteBusy}
-  confirmLabel="Delete note"
+  confirmLabel="Delete memo"
   error={deleteError}
-  message="This note will be permanently deleted. This action cannot be undone."
+  message="This memo will be permanently deleted. This action cannot be undone."
   onCancel={cancelDelete}
   onConfirm={confirmDelete}
   onFallbackFocus={focusAfterDelete}
   open={Boolean(pendingDelete)}
-  title="Delete this note?"
+  title="Delete this memo?"
 />
 
 <style>
@@ -400,14 +400,8 @@
 
   .notes-header {
     align-items: center;
+    justify-content: flex-end;
     margin-bottom: 28px;
-  }
-
-  .notes-header h1 {
-    font-size: 30px;
-    font-weight: 700;
-    line-height: 38px;
-    letter-spacing: -0.035em;
   }
 
   .notes-header :global(.search-field) {
@@ -444,10 +438,6 @@
     .notes-header :global(.search-field) {
       width: 100%;
       max-width: none;
-    }
-
-    .notes-header h1 {
-      font-size: 26px;
     }
   }
 </style>

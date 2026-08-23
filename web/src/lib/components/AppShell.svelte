@@ -145,7 +145,7 @@
           >{current === 'home'
             ? 'Workspace'
             : current === 'notes'
-              ? 'Notes'
+              ? 'Memos'
               : current === 'tasks'
                 ? 'Tasks'
                 : 'Archive'}</span
@@ -198,10 +198,7 @@
       >
         <div class="todo-content">
           <header class="todo-header">
-            <div>
-              <h2>Todo</h2>
-              <p>All open tasks</p>
-            </div>
+            <h2 class="sr-only">Todo</h2>
             <button
               aria-label="Close Todo panel"
               bind:this={drawerClose}
@@ -223,10 +220,10 @@
         role="group"
       >
         <button
-          aria-label="Show Notes only"
+          aria-label="Show Memos only"
           aria-pressed={workspaceLayout === 'notes'}
           onclick={() => (workspaceLayout = 'notes')}
-          title="Notes only"
+          title="Memos only"
           type="button"
         >
           <svg aria-hidden="true" viewBox="0 0 24 18">
@@ -235,10 +232,10 @@
           </svg>
         </button>
         <button
-          aria-label="Show Notes and Todo"
+          aria-label="Show Memos and Todo"
           aria-pressed={workspaceLayout === 'split'}
           onclick={() => (workspaceLayout = 'split')}
-          title="Notes and Todo"
+          title="Memos and Todo"
           type="button"
         >
           <svg aria-hidden="true" viewBox="0 0 24 18">
@@ -357,22 +354,7 @@
 
   .todo-header {
     display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    padding-bottom: 22px;
-  }
-
-  .todo-header h2 {
-    margin-bottom: 2px;
-    font-size: 22px;
-    font-weight: 670;
-    letter-spacing: -0.02em;
-  }
-
-  .todo-header p {
-    margin-bottom: 0;
-    color: var(--color-text-muted);
-    font-size: 12px;
+    justify-content: flex-end;
   }
 
   .drawer-close,
@@ -386,8 +368,8 @@
 
   .global-notice {
     position: fixed;
-    top: 16px;
-    right: 16px;
+    top: calc(16px + env(safe-area-inset-top));
+    right: calc(16px + env(safe-area-inset-right));
     z-index: 90;
     display: flex;
     max-width: min(440px, calc(100vw - 32px));
@@ -563,10 +545,10 @@
       top: 0;
       z-index: 15;
       display: grid;
-      min-height: 56px;
+      min-height: calc(56px + env(safe-area-inset-top));
       grid-template-columns: 1fr auto 1fr;
       align-items: center;
-      padding: 8px 20px;
+      padding: calc(8px + env(safe-area-inset-top)) 20px 8px;
       background: color-mix(in oklch, var(--color-canvas), transparent 6%);
       border-bottom: 1px solid var(--color-border);
       backdrop-filter: blur(12px);
@@ -593,6 +575,7 @@
       z-index: 50;
       width: min(368px, calc(100vw - 64px));
       max-width: 100%;
+      height: 100dvh;
       transform: translateX(102%);
       box-shadow: -14px 0 44px color-mix(in oklch, var(--color-text), transparent 86%);
       visibility: hidden;
@@ -611,6 +594,10 @@
 
     .drawer-close {
       display: inline-grid;
+    }
+
+    .todo-header {
+      padding-bottom: 14px;
     }
 
     .drawer-backdrop {
@@ -638,12 +625,13 @@
     }
 
     .compact-topbar {
-      padding-inline: 16px;
+      padding-right: calc(16px + env(safe-area-inset-right));
+      padding-left: calc(16px + env(safe-area-inset-left));
     }
 
     .workspace-column {
       height: 100%;
-      padding-bottom: 64px;
+      padding-bottom: calc(64px + env(safe-area-inset-bottom));
     }
 
     .compact-logout {
@@ -652,7 +640,8 @@
 
     .todo-rail {
       width: min(100%, 390px);
-      padding: 24px 18px 82px;
+      padding: calc(24px + env(safe-area-inset-top)) calc(18px + env(safe-area-inset-right))
+        calc(82px + env(safe-area-inset-bottom)) calc(18px + env(safe-area-inset-left));
     }
   }
 </style>

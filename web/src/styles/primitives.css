@@ -198,7 +198,16 @@ kbd {
   }
 
   .button,
-  input {
+  input,
+  select,
+  .priority-toggle,
+  .tag-chip {
     min-height: 44px;
+  }
+
+  input,
+  textarea,
+  select {
+    font-size: 16px;
   }
 }

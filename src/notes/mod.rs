@@ -209,7 +209,7 @@ pub async fn list(
 pub async fn get(pool: &SqlitePool, workspace_id: i64, uid: &str) -> AppResult<Note> {
     let row = fetch_row(pool, workspace_id, uid)
         .await?
-        .ok_or_else(|| AppError::not_found("Note"))?;
+        .ok_or_else(|| AppError::not_found("Memo"))?;
     row_to_note(pool, row).await
 }
 
@@ -262,7 +262,7 @@ pub async fn update(
         .execute(&mut *transaction)
         .await?;
         if result.rows_affected() == 0 {
-            return Err(AppError::not_found("Note"));
+            return Err(AppError::not_found("Memo"));
         }
         let note_id =
             sqlx::query_scalar::<_, i64>("SELECT id FROM notes WHERE workspace_id = ? AND uid = ?")
@@ -296,7 +296,7 @@ pub async fn update(
         .execute(pool)
         .await?;
         if result.rows_affected() == 0 {
-            return Err(AppError::not_found("Note"));
+            return Err(AppError::not_found("Memo"));
         }
     }
     get(pool, workspace_id, uid).await
@@ -309,7 +309,7 @@ pub async fn delete(pool: &SqlitePool, workspace_id: i64, uid: &str) -> AppResul
         .execute(pool)
         .await?;
     if result.rows_affected() == 0 {
-        return Err(AppError::not_found("Note"));
+        return Err(AppError::not_found("Memo"));
     }
     Ok(())
 }
@@ -386,11 +386,11 @@ async fn insert_tags(
 
 fn validate_content(content: &str) -> AppResult<()> {
     if content.trim().is_empty() {
-        return Err(AppError::validation("Note content must not be empty"));
+        return Err(AppError::validation("Memo content must not be empty"));
     }
     if content.len() > MAX_NOTE_BYTES {
         return Err(AppError::validation(format!(
-            "Note content must not exceed {MAX_NOTE_BYTES} bytes"
+            "Memo content must not exceed {MAX_NOTE_BYTES} bytes"
         )));
     }
     Ok(())
@@ -459,7 +459,7 @@ fn scan_tags(text: &str, tags: &mut BTreeSet<String>) -> AppResult<()> {
             tags.insert(normalized);
             if tags.len() > MAX_TAGS_PER_NOTE {
                 return Err(AppError::validation(format!(
-                    "A note must not contain more than {MAX_TAGS_PER_NOTE} unique tags"
+                    "A memo must not contain more than {MAX_TAGS_PER_NOTE} unique tags"
                 )));
             }
         }

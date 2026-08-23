@@ -94,7 +94,7 @@ describe('AppShell modal boundaries', () => {
         '.sidebar .nav-item[title="Workspace"]',
       );
       expect(workspaceShortcut?.getAttribute('aria-current')).toBe('page');
-      expect(target.querySelector('.sidebar .nav-item[title="Notes"]')).not.toBeNull();
+      expect(target.querySelector('.sidebar .nav-item[title="Memos"]')).not.toBeNull();
       expect(target.querySelector('.sidebar .nav-item[title="Todo"]')).toBeNull();
       const todoButton = [
         ...target.querySelectorAll<HTMLButtonElement>('.compact-topbar button'),
@@ -158,7 +158,7 @@ describe('AppShell modal boundaries', () => {
       );
       expect(target.querySelectorAll('.sidebar .nav-item[aria-current="page"]')).toHaveLength(1);
       expect(target.querySelector('.sidebar .nav-item[title="Workspace"]')).not.toBeNull();
-      expect(target.querySelector('.sidebar .nav-item[title="Notes"]')).not.toBeNull();
+      expect(target.querySelector('.sidebar .nav-item[title="Memos"]')).not.toBeNull();
       expect(target.querySelector('.sidebar .nav-item[title="Tasks"]')).not.toBeNull();
       expect(target.querySelector('.sidebar .nav-item[title="Archive"]')).not.toBeNull();
       expect(target.querySelector('[aria-label="Workspace view"]')).toBeNull();
@@ -166,10 +166,10 @@ describe('AppShell modal boundaries', () => {
       const todo = target.querySelector<HTMLElement>('.todo-rail')!;
       const switcher = target.querySelector<HTMLElement>('[aria-label="Workspace layout"]')!;
       const notesOnly = switcher.querySelector<HTMLButtonElement>(
-        '[aria-label="Show Notes only"]',
+        '[aria-label="Show Memos only"]',
       )!;
       const split = switcher.querySelector<HTMLButtonElement>(
-        '[aria-label="Show Notes and Todo"]',
+        '[aria-label="Show Memos and Todo"]',
       )!;
       const todoOnly = switcher.querySelector<HTMLButtonElement>('[aria-label="Show Todo only"]')!;
 

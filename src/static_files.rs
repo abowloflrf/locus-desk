@@ -45,7 +45,7 @@ fn serve_asset(path: &str) -> Response {
     };
 
     let mime = mime_guess::from_path(path).first_or_octet_stream();
-    let cache_control = if path == "index.html" {
+    let cache_control = if matches!(path, "index.html" | "service-worker.js") {
         "no-cache"
     } else if path.starts_with("assets/") {
         "public, max-age=31536000, immutable"
@@ -96,5 +96,36 @@ mod tests {
     async fn missing_file_like_paths_do_not_fall_back_to_the_spa() {
         let response = serve(Uri::from_static("/missing.js")).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn serves_the_service_worker_without_http_caching() {
+        let response = serve(Uri::from_static("/service-worker.js")).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL).unwrap(),
+            "no-cache"
+        );
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "text/javascript"
+        );
+    }
+
+    #[tokio::test]
+    async fn serves_installable_app_metadata_and_icons() {
+        let manifest = serve(Uri::from_static("/manifest.webmanifest")).await;
+        assert_eq!(manifest.status(), StatusCode::OK);
+        assert_eq!(
+            manifest.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/manifest+json"
+        );
+
+        let icon = serve(Uri::from_static("/icons/apple-touch-icon.png")).await;
+        assert_eq!(icon.status(), StatusCode::OK);
+        assert_eq!(
+            icon.headers().get(header::CONTENT_TYPE).unwrap(),
+            "image/png"
+        );
     }
 }

@@ -1,12 +1,12 @@
 # Locus Desk
 
-Locus Desk is a local-first, self-hosted workspace for Markdown notes and daily tasks. The Svelte frontend is embedded in the Rust binary, so production only needs one executable and one writable data directory.
+Locus Desk is a local-first, self-hosted workspace for Markdown memos and personal tasks. The Svelte frontend is embedded in the Rust binary, so production only needs one executable and one writable data directory.
 
 Phase 0 includes:
 
 - Single-owner password authentication and workspace-isolated sessions.
-- Markdown note CRUD, search, tags, pinning, and archive.
-- Today and full task views with priority, date, optional time, completion, and recovery.
+- Markdown memo CRUD, search, tags, pinning, and archive.
+- An all-open Todo rail and a full task view with priority, date, optional time, completion, and recovery.
 - Sanitized GFM rendering and responsive desktop/mobile workspaces.
 - Consistent SQLite backup, portable JSON/Markdown export, and safe restore commands.
 
@@ -99,7 +99,7 @@ Data commands use `APP_DATA_DIR` and never overwrite an existing artifact:
 
 # Portable files in APP_DATA_DIR/exports
 ./locus-desk export json
-./locus-desk export markdown notes-and-tasks.md
+./locus-desk export markdown memos-and-tasks.md
 
 # Restore into a new absolute data directory (or an empty existing directory already at 0700)
 ./locus-desk restore /srv/locus-desk/data/backups/backup.sqlite3 /srv/locus-desk-restored

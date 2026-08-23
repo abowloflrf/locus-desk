@@ -629,6 +629,7 @@
       min-width: 44px;
       min-height: 44px;
       margin: 0;
+      place-items: start center;
     }
 
     .task-row-compact {
@@ -640,8 +641,29 @@
       display: grid;
     }
 
+    .row-more {
+      padding-top: 1px;
+      place-items: start center;
+    }
+
     .task-row-full .task-edit-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .task-edit-title input,
+    .task-edit-grid input[type='date'],
+    .task-priority-toggle,
+    .task-edit-footer .button {
+      min-height: 44px;
+    }
+
+    .task-edit-title input,
+    .task-edit-grid input[type='date'] {
+      font-size: 16px;
+    }
+
+    .task-edit-grid > * {
+      min-width: 0;
     }
   }
 

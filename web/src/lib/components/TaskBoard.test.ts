@@ -77,15 +77,13 @@ describe('TaskBoard focus and filtering', () => {
       title.value = 'Only once';
       title.dispatchEvent(new Event('input', { bubbles: true }));
       const form = target.querySelector<HTMLFormElement>('.task-create')!;
-      const submit = target.querySelector<HTMLButtonElement>('.task-add-button')!;
-      await vi.waitFor(() => expect(submit.disabled).toBe(false));
 
       form.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }));
       form.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }));
 
       expect(createTask).toHaveBeenCalledOnce();
       await tick();
-      expect(submit.disabled).toBe(true);
+      expect(title.disabled).toBe(true);
       pending.resolve(task('created', 'Only once'));
       await vi.waitFor(() => expect(title.value).toBe(''));
     } finally {

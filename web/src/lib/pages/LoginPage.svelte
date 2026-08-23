@@ -46,7 +46,7 @@
     <div>
       <p class="eyebrow">Personal workspace</p>
       <h1>Keep thoughts close.<br />Keep today clear.</h1>
-      <p>Notes and next actions, in one quiet place.</p>
+      <p>Memos and next actions, in one quiet place.</p>
     </div>
   </section>
 
@@ -87,6 +87,7 @@
     display: grid;
     height: 100%;
     min-height: 100vh;
+    min-height: 100dvh;
     grid-template-columns: minmax(360px, 0.92fr) minmax(430px, 1.08fr);
     overflow-y: auto;
     scrollbar-width: none;
@@ -177,7 +178,8 @@
 
     .login-intro {
       min-height: 250px;
-      padding: 26px 24px 34px;
+      padding: calc(26px + env(safe-area-inset-top)) calc(24px + env(safe-area-inset-right)) 34px
+        calc(24px + env(safe-area-inset-left));
       border-right: 0;
       border-bottom: 1px solid var(--color-border);
     }
@@ -188,7 +190,8 @@
     }
 
     .login-form-region {
-      padding: 36px 24px 48px;
+      padding: 36px calc(24px + env(safe-area-inset-right)) calc(48px + env(safe-area-inset-bottom))
+        calc(24px + env(safe-area-inset-left));
     }
   }
 </style>

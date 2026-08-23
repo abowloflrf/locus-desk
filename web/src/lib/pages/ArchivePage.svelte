@@ -90,7 +90,7 @@
       const returnedDuringRequest = notes.some((item) => item.uid === note.uid);
       notes = notes.filter((item) => item.uid !== note.uid);
       if (returnedDuringRequest) total = Math.max(0, total - 1);
-      actionStatus = 'Note restored.';
+      actionStatus = 'Memo restored.';
       void loadArchive(true);
     } catch (cause) {
       const matchesQuery =
@@ -102,7 +102,7 @@
         );
         total += 1;
       }
-      operationError = errorMessage(cause, 'Unable to restore the note.');
+      operationError = errorMessage(cause, 'Unable to restore the memo.');
       void loadArchive(true);
     } finally {
       markBusy(note.uid, false);
@@ -124,13 +124,13 @@
         notes = notes.filter((item) => item.uid !== updated.uid);
         if (wasVisible) {
           total = Math.max(0, total - 1);
-          actionStatus = 'Note updated and removed from the current view.';
+          actionStatus = 'Memo updated and removed from the current view.';
           await restoreListFocus(pageElement, focusSnapshot);
         }
       }
       void loadArchive(true);
     } catch (cause) {
-      operationError = errorMessage(cause, 'Unable to save the note.');
+      operationError = errorMessage(cause, 'Unable to save the memo.');
       void loadArchive(true);
       throw cause;
     } finally {
@@ -150,10 +150,10 @@
       total = Math.max(0, total - 1);
       pendingDelete = null;
       deleteError = null;
-      actionStatus = 'Note deleted.';
+      actionStatus = 'Memo deleted.';
       void loadArchive(true);
     } catch (cause) {
-      deleteError = errorMessage(cause, 'Unable to delete the note.');
+      deleteError = errorMessage(cause, 'Unable to delete the memo.');
       void loadArchive(true);
     } finally {
       deleteBusy = false;
@@ -205,13 +205,13 @@
 <div bind:this={pageElement} class="page archive-page">
   <header class="page-header">
     <div>
-      <p class="eyebrow">Notes</p>
+      <p class="eyebrow">Memos</p>
       <h1>Archive</h1>
-      <p class="page-description">Notes kept out of the active timeline.</p>
+      <p class="page-description">Memos kept out of the active timeline.</p>
     </div>
     <label class="search-field compact-search">
       <Icon name="search" size={17} />
-      <span class="sr-only">Search archived notes</span>
+      <span class="sr-only">Search archived memos</span>
       <input oninput={handleSearch} placeholder="Search archive" type="search" value={query} />
     </label>
   </header>
@@ -221,7 +221,7 @@
     {actionStatus ?? ''}
   </div>
   <div class="list-toolbar">
-    <span>{total} archived {total === 1 ? 'note' : 'notes'}</span>
+    <span>{total} archived {total === 1 ? 'memo' : 'memos'}</span>
     {#if loading && notes.length > 0}<span aria-live="polite">Updating…</span>{/if}
   </div>
 
@@ -237,8 +237,8 @@
     </div>
   {:else if notes.length === 0}
     <div class="empty-state">
-      <h2>{query ? 'No archived notes found' : 'Nothing archived yet'}</h2>
-      <p>{query ? 'Try another keyword.' : 'Archived notes will stay available here.'}</p>
+      <h2>{query ? 'No archived memos found' : 'Nothing archived yet'}</h2>
+      <p>{query ? 'Try another keyword.' : 'Archived memos will stay available here.'}</p>
     </div>
   {:else}
     <NoteTimeline
@@ -255,7 +255,7 @@
         class="button secondary load-more"
         disabled={loadingMore}
         onclick={() => void loadArchive(false)}
-        type="button">{loadingMore ? 'Loading…' : 'Load older notes'}</button
+        type="button">{loadingMore ? 'Loading…' : 'Load older memos'}</button
       >
     {/if}
   {/if}
@@ -263,12 +263,12 @@
 
 <ConfirmDialog
   busy={deleteBusy}
-  confirmLabel="Delete note"
+  confirmLabel="Delete memo"
   error={deleteError}
-  message="This archived note will be permanently deleted."
+  message="This archived memo will be permanently deleted."
   onCancel={cancelDelete}
   onConfirm={confirmDelete}
   onFallbackFocus={focusAfterDelete}
   open={Boolean(pendingDelete)}
-  title="Delete this note?"
+  title="Delete this memo?"
 />

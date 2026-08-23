@@ -740,12 +740,12 @@ pub fn render_markdown(export: &PortableExport) -> String {
         .expect("writing to a String should not fail");
     }
 
-    writeln!(&mut output, "\n## Notes").expect("writing to a String should not fail");
+    writeln!(&mut output, "\n## Memos").expect("writing to a String should not fail");
     if export.notes.is_empty() {
-        writeln!(&mut output, "\n_No notes._").expect("writing to a String should not fail");
+        writeln!(&mut output, "\n_No memos._").expect("writing to a String should not fail");
     }
     for note in &export.notes {
-        writeln!(&mut output, "\n### Note `{}`", markdown_code(&note.uid))
+        writeln!(&mut output, "\n### Memo `{}`", markdown_code(&note.uid))
             .expect("writing to a String should not fail");
         writeln!(&mut output).expect("writing to a String should not fail");
         writeln!(

@@ -49,7 +49,7 @@ describe('inline editor focus', () => {
     });
 
     try {
-      const editButton = target.querySelector<HTMLButtonElement>('[aria-label="Edit note"]');
+      const editButton = target.querySelector<HTMLButtonElement>('[aria-label="Edit memo"]');
       editButton?.click();
       await vi.waitFor(() => expect(document.activeElement?.tagName).toBe('TEXTAREA'));
       expect((document.activeElement as HTMLTextAreaElement).style.height).toBe('48px');
@@ -60,7 +60,7 @@ describe('inline editor focus', () => {
         new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' }),
       );
       await vi.waitFor(() =>
-        expect(document.activeElement?.getAttribute('aria-label')).toBe('Edit note'),
+        expect(document.activeElement?.getAttribute('aria-label')).toBe('Edit memo'),
       );
       expect(target.querySelector('.note-item')?.classList.contains('editing')).toBe(false);
     } finally {
@@ -84,7 +84,7 @@ describe('inline editor focus', () => {
     });
 
     try {
-      target.querySelector<HTMLButtonElement>('[aria-label="Edit note"]')?.click();
+      target.querySelector<HTMLButtonElement>('[aria-label="Edit memo"]')?.click();
       const editor = await vi.waitFor(() => {
         const textarea = target.querySelector<HTMLTextAreaElement>('textarea');
         expect(textarea).not.toBeNull();
