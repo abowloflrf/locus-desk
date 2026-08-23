@@ -36,11 +36,13 @@
   let pageTitle = $derived(
     route === 'login'
       ? 'Sign in · Locus Desk'
-      : route === 'tasks'
-        ? 'Tasks · Locus Desk'
-        : route === 'archive'
-          ? 'Archive · Locus Desk'
-          : 'Notes · Locus Desk',
+      : route === 'home'
+        ? 'Workspace · Locus Desk'
+        : route === 'notes'
+          ? 'Notes · Locus Desk'
+          : route === 'tasks'
+            ? 'Tasks · Locus Desk'
+            : 'Archive · Locus Desk',
   );
 
   $effect(() => {
@@ -195,7 +197,7 @@
     if (authStatus !== 'authenticated') return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === 'k') {
       event.preventDefault();
-      navigate('home');
+      navigate('notes');
       setTimeout(() => window.dispatchEvent(new Event('locus:focus-search')), 0);
     }
   }

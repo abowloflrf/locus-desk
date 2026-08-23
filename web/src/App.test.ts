@@ -136,6 +136,15 @@ describe('App navigation focus', () => {
       skipLink.focus();
       expect(document.activeElement).toBe(skipLink);
 
+      target.querySelector<HTMLAnchorElement>('.nav-item[title="Notes"]')?.click();
+      await vi.waitFor(() => expect(window.location.pathname).toBe('/notes'));
+      await vi.waitFor(() => expect(document.activeElement?.id).toBe('main-content'));
+      expect(target.querySelector('.todo-rail')).toBeNull();
+
+      target.querySelector<HTMLAnchorElement>('.nav-item[title="Workspace"]')?.click();
+      await vi.waitFor(() => expect(window.location.pathname).toBe('/'));
+      await vi.waitFor(() => expect(target.querySelector('.todo-rail')).not.toBeNull());
+
       target.querySelector<HTMLAnchorElement>('.nav-item[title="Tasks"]')?.click();
       await vi.waitFor(() => expect(window.location.pathname).toBe('/tasks'));
       await vi.waitFor(() => expect(document.activeElement?.id).toBe('main-content'));

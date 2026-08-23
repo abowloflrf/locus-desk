@@ -7,34 +7,27 @@
     current,
     session,
     onNavigate,
-    onWorkspaceViewChange,
     onLogout,
     todoOpen,
-    workspaceView,
     blocked = false,
   }: {
     current: ProtectedRoute;
     session: SessionInfo;
     onNavigate: (route: ProtectedRoute) => void;
-    onWorkspaceViewChange: (view: 'split' | 'notes' | 'todo') => void;
     onLogout: () => void | Promise<void>;
     todoOpen: boolean;
-    workspaceView: 'split' | 'notes' | 'todo';
     blocked?: boolean;
   } = $props();
 
   const primaryItems: Array<{
     label: string;
-    route?: ProtectedRoute;
+    route: ProtectedRoute;
     icon: IconName;
-    disabled?: boolean;
   }> = [
-    { icon: 'note', label: 'Workspace', route: 'home' },
+    { icon: 'today', label: 'Workspace', route: 'home' },
+    { icon: 'note', label: 'Notes', route: 'notes' },
     { icon: 'tasks', label: 'Tasks', route: 'tasks' },
     { icon: 'archive', label: 'Archive', route: 'archive' },
-    { disabled: true, icon: 'library', label: 'Library' },
-    { disabled: true, icon: 'reader', label: 'Reader' },
-    { disabled: true, icon: 'chat', label: 'Chat' },
   ];
 
   function openRoute(event: MouseEvent, route: ProtectedRoute): void {
@@ -42,14 +35,8 @@
     onNavigate(route);
   }
 
-  function activateItem(event: MouseEvent, item: { route?: ProtectedRoute }): void {
-    event.preventDefault();
-    if (item.route) onNavigate(item.route);
-  }
-
   function focusSearch(): void {
-    if (workspaceView === 'todo') onWorkspaceViewChange('notes');
-    onNavigate('home');
+    onNavigate('notes');
     setTimeout(() => window.dispatchEvent(new Event('locus:focus-search')), 0);
   }
 </script>
@@ -67,53 +54,17 @@
 
   <nav class="primary-nav">
     {#each primaryItems as item}
-      {#if item.route && !item.disabled}
-        <a
-          aria-current={current === item.route ? 'page' : undefined}
-          class:active={current === item.route}
-          class="nav-item"
-          href={item.route === 'home' ? '/' : `/${item.route}`}
-          onclick={(event) => activateItem(event, item)}
-          title={item.label}
-        >
-          <Icon name={item.icon} />
-          <span>{item.label}</span>
-        </a>
-      {:else}
-        <span
-          aria-disabled="true"
-          class="nav-item disabled"
-          title={`${item.label} is coming later`}
-        >
-          <Icon name={item.icon} />
-          <span>{item.label}</span>
-        </span>
-      {/if}
-      {#if item.route === 'home' && current === 'home'}
-        <div aria-label="Workspace view" class="workspace-view-control" role="group">
-          <button
-            aria-label="Show Notes and Todo"
-            aria-pressed={workspaceView === 'split'}
-            class:active={workspaceView === 'split'}
-            onclick={() => onWorkspaceViewChange('split')}
-            type="button">Both</button
-          >
-          <button
-            aria-label="Show Notes only"
-            aria-pressed={workspaceView === 'notes'}
-            class:active={workspaceView === 'notes'}
-            onclick={() => onWorkspaceViewChange('notes')}
-            type="button">Notes</button
-          >
-          <button
-            aria-label="Show Todo only"
-            aria-pressed={workspaceView === 'todo'}
-            class:active={workspaceView === 'todo'}
-            onclick={() => onWorkspaceViewChange('todo')}
-            type="button">Todo</button
-          >
-        </div>
-      {/if}
+      <a
+        aria-current={current === item.route ? 'page' : undefined}
+        class:active={current === item.route}
+        class="nav-item"
+        href={item.route === 'home' ? '/' : `/${item.route}`}
+        onclick={(event) => openRoute(event, item.route)}
+        title={item.label}
+      >
+        <Icon name={item.icon} />
+        <span>{item.label}</span>
+      </a>
     {/each}
   </nav>
 
@@ -196,35 +147,8 @@
     gap: 3px;
   }
 
-  .workspace-view-control {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 2px;
-    padding: 3px;
-    margin: 1px 8px 7px;
-    background: var(--color-surface-muted);
-    border-radius: var(--radius-control);
-  }
-
-  .workspace-view-control button {
-    min-width: 0;
-    min-height: 26px;
-    padding: 3px 4px;
-    color: var(--color-text-muted);
-    background: transparent;
-    border: 0;
-    border-radius: 6px;
-    font-size: 10px;
-  }
-
-  .workspace-view-control button.active {
-    color: var(--color-text);
-    background: var(--color-surface);
-    box-shadow: 0 1px 3px color-mix(in oklch, var(--color-text), transparent 92%);
-    font-weight: 620;
-  }
-
   .nav-item {
+    position: relative;
     display: flex;
     width: 100%;
     min-height: 38px;
@@ -242,7 +166,7 @@
       background-color 150ms ease;
   }
 
-  .nav-item:hover:not(.disabled),
+  .nav-item:hover,
   .nav-item.active {
     color: var(--color-text);
     background: var(--color-surface-muted);
@@ -254,9 +178,15 @@
     font-weight: 620;
   }
 
-  .nav-item.disabled {
-    opacity: 0.58;
-    cursor: default;
+  .nav-item.active::before {
+    position: absolute;
+    top: 10px;
+    bottom: 10px;
+    left: 0;
+    width: 2px;
+    background: var(--color-accent);
+    border-radius: 2px;
+    content: '';
   }
 
   .sidebar-divider {
@@ -331,8 +261,7 @@
     .brand-name,
     .nav-item > span,
     .search-nav kbd,
-    .sidebar-user,
-    .workspace-view-control {
+    .sidebar-user {
       display: none;
     }
 
@@ -374,13 +303,12 @@
     .brand,
     .sidebar-divider,
     .search-nav,
-    .sidebar-footer,
-    .primary-nav .nav-item.disabled {
+    .sidebar-footer {
       display: none;
     }
 
     .primary-nav {
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(4, 1fr);
       gap: 4px;
     }
 

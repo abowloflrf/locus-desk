@@ -27,9 +27,11 @@
     onDismissNotice: () => void;
   } = $props();
 
+  type WorkspaceLayout = 'notes' | 'split' | 'todo';
+
   let compact = $state(false);
   let todoOpen = $state(false);
-  let workspaceView = $state<'split' | 'notes' | 'todo'>('split');
+  let workspaceLayout = $state<WorkspaceLayout>('split');
   let todoButton = $state<HTMLButtonElement>();
   let drawerClose = $state<HTMLButtonElement>();
   let drawer = $state<HTMLElement>();
@@ -67,10 +69,6 @@
     if (restoreFocus) requestAnimationFrame(() => todoButton?.focus());
   }
 
-  function setWorkspaceView(view: 'split' | 'notes' | 'todo'): void {
-    workspaceView = view;
-  }
-
   function handleWindowKeydown(event: KeyboardEvent): void {
     if (!todoOpen) return;
     if (event.defaultPrevented || document.querySelector('dialog[open]')) return;
@@ -102,16 +100,10 @@
 
 <svelte:window onkeydown={handleWindowKeydown} />
 
-<div
-  class:todo-open={todoOpen}
-  class:workspace-notes={current === 'home' && workspaceView === 'notes'}
-  class:workspace-split={current === 'home' && workspaceView === 'split'}
-  class:workspace-todo={current === 'home' && workspaceView === 'todo'}
-  class="app-shell"
->
+<div class:todo-open={todoOpen} class="app-shell">
   <a
     class="skip-link"
-    href={current === 'home' && !compact && workspaceView === 'todo'
+    href={!compact && current === 'home' && workspaceLayout === 'todo'
       ? '#todo-panel'
       : '#main-content'}
     inert={compact && todoOpen}>Skip to content</a
@@ -127,91 +119,148 @@
       <button class="button secondary" onclick={onDismissNotice} type="button">Dismiss</button>
     </div>
   {/if}
-  <Sidebar
-    blocked={compact && todoOpen}
-    {current}
-    {onLogout}
-    {onNavigate}
-    onWorkspaceViewChange={setWorkspaceView}
-    {session}
-    {todoOpen}
-    {workspaceView}
-  />
+  <Sidebar blocked={compact && todoOpen} {current} {onLogout} {onNavigate} {session} {todoOpen} />
 
-  <div class="workspace-column" inert={compact && todoOpen}>
-    <header class="compact-topbar">
-      <a
-        href="/"
-        onclick={(event) => {
-          event.preventDefault();
-          onNavigate('home');
-        }}>Locus</a
-      >
-      <span>{current === 'home' ? 'Workspace' : current === 'tasks' ? 'Tasks' : 'Archive'}</span>
-      <div class="compact-topbar-actions">
-        {#if current === 'home'}
+  <div
+    class:has-workspace-layout={current === 'home'}
+    class:layout-notes={current === 'home' && workspaceLayout === 'notes'}
+    class:layout-split={current === 'home' && workspaceLayout === 'split'}
+    class:layout-todo={current === 'home' && workspaceLayout === 'todo'}
+    class="workspace-stage"
+  >
+    <div
+      class="workspace-column"
+      inert={(compact && todoOpen) ||
+        (!compact && current === 'home' && workspaceLayout === 'todo')}
+    >
+      <header class="compact-topbar">
+        <a
+          href="/"
+          onclick={(event) => {
+            event.preventDefault();
+            onNavigate('home');
+          }}>Locus</a
+        >
+        <span
+          >{current === 'home'
+            ? 'Workspace'
+            : current === 'notes'
+              ? 'Notes'
+              : current === 'tasks'
+                ? 'Tasks'
+                : 'Archive'}</span
+        >
+        <div class="compact-topbar-actions">
+          {#if current === 'home'}
+            <button
+              bind:this={todoButton}
+              aria-controls="todo-panel"
+              aria-expanded={todoOpen}
+              class="button secondary"
+              onclick={() => void openTodo()}
+              type="button">Todo</button
+            >
+          {/if}
           <button
-            bind:this={todoButton}
-            aria-controls="todo-panel"
-            aria-expanded={todoOpen}
-            class="button secondary"
-            onclick={() => void openTodo()}
-            type="button">Todo</button
+            aria-label="Sign out"
+            class="icon-button compact-logout"
+            onclick={() => void onLogout()}
+            title="Sign out"
+            type="button"
           >
-        {/if}
+            <Icon name="logout" />
+          </button>
+        </div>
+      </header>
+      <main class="workspace-main" id="main-content" tabindex="-1">{@render children()}</main>
+    </div>
+
+    {#if current === 'home'}
+      <button
+        aria-label="Close Todo panel"
+        class:visible={todoOpen}
+        class="drawer-backdrop"
+        onclick={() => closeTodo()}
+        tabindex="-1"
+        type="button"
+      ></button>
+      <aside
+        aria-hidden={compact ? !todoOpen : workspaceLayout === 'notes'}
+        aria-label="Todo tasks"
+        aria-modal={compact ? 'true' : undefined}
+        class:open={todoOpen}
+        class="todo-rail"
+        bind:this={drawer}
+        id="todo-panel"
+        inert={compact ? !todoOpen : workspaceLayout === 'notes'}
+        role={compact ? 'dialog' : 'complementary'}
+        tabindex="-1"
+      >
+        <div class="todo-content">
+          <header class="todo-header">
+            <div>
+              <h2>Todo</h2>
+              <p>All open tasks</p>
+            </div>
+            <button
+              aria-label="Close Todo panel"
+              bind:this={drawerClose}
+              class="icon-button drawer-close"
+              onclick={() => closeTodo()}
+              type="button"><Icon name="close" /></button
+            >
+          </header>
+          <TaskBoard mode="todo" {refreshToken} today={session.workspace.today} />
+        </div>
+      </aside>
+
+      <div
+        aria-label="Workspace layout"
+        class:show-notes={workspaceLayout === 'notes'}
+        class:show-split={workspaceLayout === 'split'}
+        class:show-todo={workspaceLayout === 'todo'}
+        class="workspace-layout-switcher"
+        role="group"
+      >
         <button
-          aria-label="Sign out"
-          class="icon-button compact-logout"
-          onclick={() => void onLogout()}
-          title="Sign out"
+          aria-label="Show Notes only"
+          aria-pressed={workspaceLayout === 'notes'}
+          onclick={() => (workspaceLayout = 'notes')}
+          title="Notes only"
           type="button"
         >
-          <Icon name="logout" />
+          <svg aria-hidden="true" viewBox="0 0 24 18">
+            <rect height="15" rx="2.5" width="21" x="1.5" y="1.5"></rect>
+            <path d="M5.5 6.5h13M5.5 10h9"></path>
+          </svg>
+        </button>
+        <button
+          aria-label="Show Notes and Todo"
+          aria-pressed={workspaceLayout === 'split'}
+          onclick={() => (workspaceLayout = 'split')}
+          title="Notes and Todo"
+          type="button"
+        >
+          <svg aria-hidden="true" viewBox="0 0 24 18">
+            <rect height="15" rx="2.5" width="21" x="1.5" y="1.5"></rect>
+            <path d="M15.5 2v14M5.5 6.5h6M5.5 10h4M18.5 6.5h1M18.5 10h1"></path>
+          </svg>
+        </button>
+        <button
+          aria-label="Show Todo only"
+          aria-pressed={workspaceLayout === 'todo'}
+          onclick={() => (workspaceLayout = 'todo')}
+          title="Todo only"
+          type="button"
+        >
+          <svg aria-hidden="true" viewBox="0 0 24 18">
+            <rect height="15" rx="2.5" width="21" x="1.5" y="1.5"></rect>
+            <path d="m5 6.5 1 1 1.8-2M10.5 6.5h8M5 11l1 1 1.8-2M10.5 11h8"></path>
+          </svg>
         </button>
       </div>
-    </header>
-    <main class="workspace-main" id="main-content" tabindex="-1">{@render children()}</main>
+    {/if}
   </div>
-
-  {#if current === 'home'}
-    <button
-      aria-label="Close Todo panel"
-      class:visible={todoOpen}
-      class="drawer-backdrop"
-      onclick={() => closeTodo()}
-      tabindex="-1"
-      type="button"
-    ></button>
-    <aside
-      aria-hidden={compact && !todoOpen}
-      aria-label="Todo tasks"
-      aria-modal={compact ? 'true' : undefined}
-      class:open={todoOpen}
-      class="todo-rail"
-      bind:this={drawer}
-      id="todo-panel"
-      inert={compact && !todoOpen}
-      role={compact ? 'dialog' : 'complementary'}
-      tabindex="-1"
-    >
-      <div class="todo-content">
-        <header class="todo-header">
-          <div>
-            <h2>Todo</h2>
-            <p>All open tasks</p>
-          </div>
-          <button
-            aria-label="Close Todo panel"
-            bind:this={drawerClose}
-            class="icon-button drawer-close"
-            onclick={() => closeTodo()}
-            type="button"><Icon name="close" /></button
-          >
-        </header>
-        <TaskBoard mode="todo" {refreshToken} today={session.workspace.today} />
-      </div>
-    </aside>
-  {/if}
 </div>
 
 <style>
@@ -223,33 +272,18 @@
     overflow: hidden;
   }
 
-  .app-shell.workspace-split {
-    grid-template-columns: 224px minmax(0, 1fr) 336px;
+  .workspace-stage {
+    position: relative;
+    display: grid;
+    min-width: 0;
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr);
+    overflow: hidden;
   }
 
   .todo-content {
     width: 100%;
     min-width: 0;
-  }
-
-  @media (min-width: 1200px) {
-    .app-shell.workspace-notes .todo-rail {
-      display: none;
-    }
-
-    .app-shell.workspace-todo .workspace-column {
-      display: none;
-    }
-
-    .app-shell.workspace-todo .todo-rail {
-      grid-column: 2;
-      border-left: 0;
-    }
-
-    .app-shell.workspace-todo .todo-content {
-      width: min(100%, 720px);
-      margin-inline: auto;
-    }
   }
 
   .skip-link {
@@ -309,7 +343,7 @@
     min-width: 0;
     height: 100%;
     flex-direction: column;
-    padding: 32px 24px 22px;
+    padding: 32px 24px 76px;
     overflow-x: hidden;
     overflow-y: auto;
     background: var(--color-surface);
@@ -346,6 +380,10 @@
     display: none;
   }
 
+  .workspace-layout-switcher {
+    display: none;
+  }
+
   .global-notice {
     position: fixed;
     top: 16px;
@@ -372,12 +410,152 @@
     flex: none;
   }
 
+  @media (min-width: 1200px) {
+    .workspace-stage.has-workspace-layout {
+      grid-template-columns: calc(100% - 336px) 336px;
+      transition: grid-template-columns 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+
+    .workspace-stage.layout-notes {
+      grid-template-columns: 100% 0%;
+    }
+
+    .workspace-stage.layout-todo {
+      grid-template-columns: 0% 100%;
+    }
+
+    .workspace-stage.has-workspace-layout .workspace-column,
+    .workspace-stage.has-workspace-layout .todo-rail {
+      opacity: 1;
+      transform: translateX(0);
+      visibility: visible;
+      transition:
+        opacity 160ms ease,
+        transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        padding 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        border-color 160ms ease,
+        visibility 0ms step-start;
+    }
+
+    .workspace-stage.layout-notes .todo-rail {
+      padding-right: 0;
+      padding-left: 0;
+      border-left-color: transparent;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateX(16px);
+      visibility: hidden;
+      transition:
+        opacity 140ms ease,
+        transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        padding 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        border-color 160ms ease,
+        visibility 200ms step-end;
+    }
+
+    .workspace-stage.layout-todo .workspace-column {
+      opacity: 0;
+      pointer-events: none;
+      transform: translateX(-16px);
+      visibility: hidden;
+      transition:
+        opacity 140ms ease,
+        transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        visibility 200ms step-end;
+    }
+
+    .workspace-stage.layout-todo .todo-rail {
+      border-left-color: transparent;
+    }
+
+    .workspace-stage.layout-todo .todo-content {
+      width: min(100%, 720px);
+      margin-inline: auto;
+    }
+
+    .workspace-layout-switcher {
+      position: absolute;
+      bottom: 18px;
+      left: 50%;
+      z-index: 30;
+      display: flex;
+      gap: 2px;
+      padding: 3px;
+      background: color-mix(in oklch, var(--color-surface), transparent 4%);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-surface);
+      box-shadow: var(--shadow-soft);
+      transform: translateX(-50%);
+    }
+
+    .workspace-layout-switcher::before {
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 40px;
+      height: 40px;
+      background: var(--color-accent-soft);
+      border-radius: var(--radius-control);
+      content: '';
+      transition: transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+
+    .workspace-layout-switcher.show-split::before {
+      transform: translateX(42px);
+    }
+
+    .workspace-layout-switcher.show-todo::before {
+      transform: translateX(84px);
+    }
+
+    .workspace-layout-switcher button {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      width: 40px;
+      height: 40px;
+      padding: 0;
+      color: var(--color-text-muted);
+      background: transparent;
+      border: 0;
+      border-radius: var(--radius-control);
+      place-items: center;
+      transition:
+        color 150ms ease,
+        transform 150ms ease;
+    }
+
+    .workspace-layout-switcher button:hover {
+      color: var(--color-text);
+    }
+
+    .workspace-layout-switcher button:active {
+      transform: scale(0.94);
+    }
+
+    .workspace-layout-switcher button[aria-pressed='true'] {
+      color: var(--color-accent-hover);
+    }
+
+    .workspace-layout-switcher svg {
+      width: 24px;
+      height: 18px;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 1.35;
+    }
+  }
+
   @media (max-width: 1199px) {
-    .app-shell,
-    .app-shell.workspace-split,
-    .app-shell.workspace-notes,
-    .app-shell.workspace-todo {
+    .app-shell {
       grid-template-columns: 64px minmax(0, 1fr);
+    }
+
+    .workspace-stage {
+      display: block;
+      height: 100%;
     }
 
     .compact-topbar {
@@ -455,10 +633,7 @@
   }
 
   @media (max-width: 767px) {
-    .app-shell,
-    .app-shell.workspace-split,
-    .app-shell.workspace-notes,
-    .app-shell.workspace-todo {
+    .app-shell {
       display: block;
     }
 

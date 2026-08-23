@@ -94,7 +94,7 @@ describe('AppShell modal boundaries', () => {
         '.sidebar .nav-item[title="Workspace"]',
       );
       expect(workspaceShortcut?.getAttribute('aria-current')).toBe('page');
-      expect(target.querySelector('.sidebar .nav-item[title="Notes"]')).toBeNull();
+      expect(target.querySelector('.sidebar .nav-item[title="Notes"]')).not.toBeNull();
       expect(target.querySelector('.sidebar .nav-item[title="Todo"]')).toBeNull();
       const todoButton = [
         ...target.querySelectorAll<HTMLButtonElement>('.compact-topbar button'),
@@ -122,7 +122,7 @@ describe('AppShell modal boundaries', () => {
     }
   });
 
-  it('uses one Workspace destination and supports split or focused desktop views', async () => {
+  it('switches between the three desktop Workspace layouts without unmounting either surface', async () => {
     vi.stubGlobal(
       'matchMedia',
       vi.fn(
@@ -152,24 +152,60 @@ describe('AppShell modal boundaries', () => {
 
     try {
       await vi.waitFor(() =>
-        expect(target.querySelector('.app-shell')?.classList.contains('workspace-split')).toBe(
+        expect(target.querySelector('.workspace-stage')?.classList.contains('layout-split')).toBe(
           true,
         ),
       );
       expect(target.querySelectorAll('.sidebar .nav-item[aria-current="page"]')).toHaveLength(1);
       expect(target.querySelector('.sidebar .nav-item[title="Workspace"]')).not.toBeNull();
+      expect(target.querySelector('.sidebar .nav-item[title="Notes"]')).not.toBeNull();
+      expect(target.querySelector('.sidebar .nav-item[title="Tasks"]')).not.toBeNull();
+      expect(target.querySelector('.sidebar .nav-item[title="Archive"]')).not.toBeNull();
+      expect(target.querySelector('[aria-label="Workspace view"]')).toBeNull();
+      const notes = target.querySelector<HTMLElement>('.workspace-column')!;
+      const todo = target.querySelector<HTMLElement>('.todo-rail')!;
+      const switcher = target.querySelector<HTMLElement>('[aria-label="Workspace layout"]')!;
+      const notesOnly = switcher.querySelector<HTMLButtonElement>(
+        '[aria-label="Show Notes only"]',
+      )!;
+      const split = switcher.querySelector<HTMLButtonElement>(
+        '[aria-label="Show Notes and Todo"]',
+      )!;
+      const todoOnly = switcher.querySelector<HTMLButtonElement>('[aria-label="Show Todo only"]')!;
 
-      target.querySelector<HTMLButtonElement>('[aria-label="Show Notes only"]')?.click();
-      await tick();
-      expect(target.querySelector('.app-shell')?.classList.contains('workspace-notes')).toBe(true);
+      expect(split.getAttribute('aria-pressed')).toBe('true');
+      expect(inertState(notes)).toBe(false);
+      expect(inertState(todo)).toBe(false);
 
-      target.querySelector<HTMLButtonElement>('[aria-label="Show Todo only"]')?.click();
+      notesOnly.click();
       await tick();
-      expect(target.querySelector('.app-shell')?.classList.contains('workspace-todo')).toBe(true);
+      expect(target.querySelector('.workspace-stage')?.classList.contains('layout-notes')).toBe(
+        true,
+      );
+      expect(notesOnly.getAttribute('aria-pressed')).toBe('true');
+      expect(inertState(notes)).toBe(false);
+      expect(inertState(todo)).toBe(true);
+      expect(target.querySelector('.skip-link')?.getAttribute('href')).toBe('#main-content');
 
-      target.querySelector<HTMLButtonElement>('[aria-label="Show Notes and Todo"]')?.click();
+      todoOnly.click();
       await tick();
-      expect(target.querySelector('.app-shell')?.classList.contains('workspace-split')).toBe(true);
+      expect(target.querySelector('.workspace-stage')?.classList.contains('layout-todo')).toBe(
+        true,
+      );
+      expect(todoOnly.getAttribute('aria-pressed')).toBe('true');
+      expect(inertState(notes)).toBe(true);
+      expect(inertState(todo)).toBe(false);
+      expect(target.querySelector('.skip-link')?.getAttribute('href')).toBe('#todo-panel');
+
+      split.click();
+      await tick();
+      expect(target.querySelector('.workspace-stage')?.classList.contains('layout-split')).toBe(
+        true,
+      );
+      expect(inertState(notes)).toBe(false);
+      expect(inertState(todo)).toBe(false);
+      expect(target.querySelector('.workspace-column')).toBe(notes);
+      expect(target.querySelector('.todo-rail')).toBe(todo);
     } finally {
       await unmount(component);
     }
