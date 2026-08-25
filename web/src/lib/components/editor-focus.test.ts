@@ -134,4 +134,45 @@ describe('inline editor focus', () => {
       await unmount(component);
     }
   });
+
+  it('moves from the task title to the details without submitting on Enter', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const target = document.createElement('div');
+    document.body.append(target);
+    const component = mount(TaskRow, {
+      props: {
+        busy: false,
+        onDelete: vi.fn(),
+        onSave,
+        onToggle: vi.fn().mockResolvedValue(undefined),
+        task,
+        today: '2026-08-23',
+      },
+      target,
+    });
+
+    try {
+      target.querySelector<HTMLButtonElement>('[aria-label="Edit A task to edit"]')?.click();
+      await vi.waitFor(() => expect(document.activeElement?.tagName).toBe('INPUT'));
+
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          bubbles: true,
+          cancelable: true,
+          isComposing: true,
+          key: 'Enter',
+        }),
+      );
+      expect(document.activeElement?.tagName).toBe('INPUT');
+
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter' }),
+      );
+
+      expect(document.activeElement?.tagName).toBe('TEXTAREA');
+      expect(onSave).not.toHaveBeenCalled();
+    } finally {
+      await unmount(component);
+    }
+  });
 });

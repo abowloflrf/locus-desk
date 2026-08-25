@@ -33,6 +33,7 @@
   let actionsOpen = $state(false);
   let actionsElement = $state<HTMLDivElement>();
   let titleInput = $state<HTMLInputElement>();
+  let descriptionInput = $state<HTMLTextAreaElement>();
   let editButton = $state<HTMLButtonElement>();
   let moreButton = $state<HTMLButtonElement>();
   let dateLabel = $derived(taskDateLabel(task, today));
@@ -90,6 +91,14 @@
     }
   }
 
+  function handleTitleKeydown(event: KeyboardEvent): void {
+    if (event.isComposing) return;
+    handleEditorKeydown(event);
+    if (event.defaultPrevented || event.key !== 'Enter') return;
+    event.preventDefault();
+    descriptionInput?.focus();
+  }
+
   function closeActions(restoreFocus = false): void {
     actionsOpen = false;
     if (restoreFocus) requestAnimationFrame(() => moreButton?.focus());
@@ -133,13 +142,14 @@
             bind:this={titleInput}
             disabled={busy}
             maxlength="500"
-            onkeydown={handleEditorKeydown}
+            onkeydown={handleTitleKeydown}
             bind:value={title}
           />
         </label>
         <label class="field task-edit-details">
           <span class="sr-only">Details</span>
           <textarea
+            bind:this={descriptionInput}
             disabled={busy}
             onkeydown={handleEditorKeydown}
             rows="2"
