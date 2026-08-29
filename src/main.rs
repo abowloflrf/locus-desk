@@ -1,9 +1,9 @@
-use std::error::Error;
+use std::{error::Error, future::IntoFuture, io};
 
 use locus_desk::{
     commands::{self, Command},
     config::Config,
-    db,
+    db, jobs,
     state::AppState,
 };
 use tokio::net::TcpListener;
@@ -51,9 +51,32 @@ async fn serve() -> Result<(), Box<dyn Error>> {
         "starting Locus Desk"
     );
 
-    axum::serve(listener, locus_desk::app(state))
+    let (worker_shutdown, worker_shutdown_rx) = tokio::sync::watch::channel(false);
+    let mut worker = tokio::spawn(jobs::run_worker(state.clone(), worker_shutdown_rx));
+    let server = axum::serve(listener, locus_desk::app(state))
         .with_graceful_shutdown(shutdown_signal())
-        .await?;
+        .into_future();
+    tokio::pin!(server);
+    let (server_result, worker_finished) = tokio::select! {
+        result = &mut server => (result, false),
+        result = &mut worker => {
+            let message = match result {
+                Ok(()) => "content worker exited unexpectedly".to_owned(),
+                Err(error) => format!("content worker failed: {error}"),
+            };
+            (Err(io::Error::other(message)), true)
+        }
+    };
+    let _ = worker_shutdown.send(true);
+    if !worker_finished
+        && tokio::time::timeout(std::time::Duration::from_secs(5), &mut worker)
+            .await
+            .is_err()
+    {
+        worker.abort();
+        let _ = worker.await;
+    }
+    server_result?;
 
     Ok(())
 }

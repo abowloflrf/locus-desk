@@ -1,4 +1,5 @@
 mod auth;
+mod library;
 mod notes;
 mod tasks;
 
@@ -26,6 +27,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/health", get(health))
         .route("/bootstrap/status", get(bootstrap_status))
         .merge(auth::router())
+        .merge(library::router())
         .merge(notes::router())
         .merge(tasks::router())
         .method_not_allowed_fallback(method_not_allowed)

@@ -11,6 +11,7 @@
   import type { SessionInfo } from './lib/api/types';
   import AppShell from './lib/components/AppShell.svelte';
   import ArchivePage from './lib/pages/ArchivePage.svelte';
+  import LibraryPage from './lib/pages/LibraryPage.svelte';
   import LoginPage from './lib/pages/LoginPage.svelte';
   import NotesPage from './lib/pages/NotesPage.svelte';
   import TasksPage from './lib/pages/TasksPage.svelte';
@@ -40,9 +41,11 @@
         ? 'Workspace · Locus Desk'
         : route === 'notes'
           ? 'Memos · Locus Desk'
-          : route === 'tasks'
-            ? 'Tasks · Locus Desk'
-            : 'Archive · Locus Desk',
+          : route === 'library'
+            ? 'Library · Locus Desk'
+            : route === 'tasks'
+              ? 'Tasks · Locus Desk'
+              : 'Archive · Locus Desk',
   );
 
   $effect(() => {
@@ -234,6 +237,8 @@
   >
     {#if route === 'tasks'}
       <TasksPage refreshToken={taskRefreshToken} {session} />
+    {:else if route === 'library'}
+      <LibraryPage {session} />
     {:else if route === 'archive'}
       <ArchivePage {session} />
     {:else}

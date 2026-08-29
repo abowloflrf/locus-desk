@@ -10,6 +10,12 @@ Phase 0 includes:
 - Sanitized GFM rendering and responsive desktop/mobile workspaces.
 - Consistent SQLite backup, portable JSON/Markdown export, and safe restore commands.
 
+Phase 1 is in progress. The Library now saves and deduplicates URLs, captures selections and notes,
+fetches pages through a persistent retrying worker, extracts and sanitizes readable content, and
+provides an offline text reader. Reader content is searchable and included in portable exports;
+SQLite backups retain the full source snapshot. Browser-extension authentication, offline images,
+and the 50-site acceptance run remain future Phase 1 work.
+
 See the [living design document](docs/rust-svelte-mvp-design.md) for the product boundaries and architecture.
 
 ## Development

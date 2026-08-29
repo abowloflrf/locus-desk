@@ -2,9 +2,9 @@
 
 > 文档状态：持续维护（Living Document）
 >
-> 当前阶段：Phase 0B — 完成，Phase 1/2 待选择
+> 当前阶段：Phase 1 — 进行中
 >
-> 文档版本：0.9
+> 文档版本：1.1
 >
 > 最近更新：2026-08-24
 >
@@ -934,9 +934,11 @@ Memos + Todo MVP 不需要提前建立完整对象层；在加入 Library 时通
 - 未读、已读、星标、归档状态。
 - 抓取时间、内容哈希和正文版本。
 
-浏览器插件只负责采集 URL、页面标题、用户选区和必要的页面快照。后端异步执行 URL 规范化、去重、正文抽取、HTML 清洗、图片处理和搜索索引。
+当前 Web 端只负责采集 URL、页面标题、用户选区和备注。后端通过持久化任务异步执行 URL 规范化、去重、安全抓取、正文抽取和 HTML 清洗；图片离线化和浏览器插件仍未实现。保存后的阅读正文不依赖原站在线，但当前只保证文本和结构离线可读，不承诺图片或页面视觉还原。
 
-写入接口必须支持幂等键，避免用户重复点击或插件重试时生成多个条目。插件认证使用独立的作用域 API Token，不复用浏览器登录 Cookie。
+写入接口支持幂等键，避免用户重复点击或未来插件重试时生成多个条目。未来插件认证使用独立的作用域 API Token，不复用浏览器登录 Cookie；第二切片仍只开放现有会话认证 API。
+
+Phase 1 第二切片将内容分为三个 workspace 隔离的 content-addressed Blob：`SOURCE_HTML`、`READER_HTML` 和 `READER_TEXT`。原始 HTML 只用于完整 SQLite 备份与未来重新抽取；阅读接口只返回服务端白名单清洗后的 HTML 和纯文本，前端渲染前再执行一次显式 DOMPurify 白名单。相同内容按 SHA-256 去重，Library 条目删除或重新抓取后同步清理无引用 Blob。
 
 ### 8.5 轻量任务管理
 
@@ -1013,7 +1015,9 @@ HTTP API ──▶ jobs table ──▶ Worker
                             └── Retry / Dead letter
 ```
 
-任务记录包含类型、参数、状态、尝试次数、下次执行时间、租约和最后错误。Worker 必须支持进程重启恢复、指数退避和幂等执行。Phase 0 不实现 jobs 表，但领域服务不得依赖请求内完成所有未来处理。
+任务记录包含类型、状态、尝试次数、下次执行时间、租约和最后错误。Phase 1 第二切片已在同一二进制中启动一个持久化 worker：Library 创建或手动重试时幂等排入 `FETCH_LIBRARY_ITEM`；worker 原子领取 60 秒租约，最多尝试 5 次，失败按 5/10/20/40 秒退避，最后进入 `DEAD` 并将条目标记为 `FAILED`。进程重启后会继续领取到期的 `PENDING` / `RETRY` 或过期 `RUNNING` 作业；发布内容前重新核对 lease owner，迟到 worker 不能覆盖新结果。
+
+安全抓取只接受无 userinfo 的 HTTP/HTTPS URL，禁用环境代理和自动重定向。每一跳都重新解析 DNS、拒绝私网/环回/link-local/CGNAT/文档网段/组播及保留地址，并把已审核 IP 固定给该次连接；最多 5 次重定向，连接 5 秒、单次请求 20 秒、整个抓取 40 秒。响应必须是 HTML，只自动解压 gzip/deflate，未知编码在读取正文前拒绝，解压后正文上限为 2 MiB。正文候选按 selector 分组各最多检查 8 个，只清洗最终候选；相对 URL 改写前预估膨胀，Reader HTML 与纯文本各限制 8 MiB。公开错误和日志不包含目标 URL、DNS 结果或响应正文。
 
 ### 8.9 长期架构原则
 
@@ -1061,7 +1065,7 @@ APP_COOKIE_SECURE=true \
 - 测试始终创建临时数据库，测试代码不得读取 `production` 配置或真实个人数据目录。
 - 本地开发建议使用仓库根下的 `./var/dev/`；`make dev` 保证 API 子进程从仓库根启动，`/web/var/` 也被忽略以防旧工作流把敏感开发库加入 Git。
 - 生产环境必须显式设置绝对 `APP_DATA_DIR`，未设置时拒绝以 `production` 启动。Unix 上既有顶层目录必须由服务账户持有并预先设置为精确的 `0700`；启动时同时校验目录所有者 UID 与进程有效 UID，拒绝文件系统根、符号链接和仍有 group/other 权限的既有目录，且不会静默修改其权限。
-- Phase 0 只创建数据库、备份和导出三个独立子目录；附件、抓取缓存和独立日志目录在对应领域落地时再引入。
+- 当前仍只创建数据库、备份和导出三个独立子目录；Phase 1 Blob 与任务记录保存在 SQLite 中，以保持单文件一致性备份。未来附件或图片缓存需要独立文件存储时再增加受保护目录。
 - Unix 上新建数据目录及三个子目录使用 `0700`，SQLite 主文件和当前 WAL/SHM 使用 `0600`；备份和导出文件同样按私有文件创建。
 - 备份与导出命令从当前 `APP_DATA_DIR` 读取数据库，托管输出只接受不带目录分量的文件名且不覆盖已有文件；恢复命令显式接收源备份和目标数据目录。
 
@@ -1082,7 +1086,7 @@ Phase 0B 已实现以下数据保护基线，长期自用期间继续通过真�
 - 已有数据库的 schema 版本落后于内嵌 migration 时，启动会先创建 `pre-migration-<timestamp>-schema-<version>.sqlite3`；备份失败则中止迁移。空库首次迁移不创建无意义备份。
 - 每个 SQLite 备份内含唯一一行元数据：创建时间、应用版本、schema version 和 Git commit；恢复时元数据必须与快照 schema 一致。
 - 默认命名的手工备份与迁移前备份作为两个独立保留桶，各保留最近 7 个 UTC 日备份和额外 4 个较早 UTC 周备份。每次清理显式保护刚生成的产物，避免系统时钟回拨或未来日期文件将其淘汰；校验失败的托管样式文件、自定义文件名和符号链接不参与自动清理，清理范围严格限制在 `backups/`。
-- JSON/Markdown 导出包含可迁移的用户、workspace、Memos、标签和任务数据，但排除密码哈希、session、数据库内部整数 ID 和文件系统路径；导出事务先执行外键一致性检查，避免 `INNER JOIN` 对损坏数据静默漏项。Markdown 导出用于脱离应用阅读，SQLite 备份用于完整恢复。
+- JSON/Markdown portable export v3 包含可迁移的用户、workspace、Memos、标签、任务、Library 元数据、清洗后的阅读 HTML/纯文本和 Blob manifest/link，但排除密码哈希、session、数据库内部整数 ID、文件系统路径和 `SOURCE_HTML` 原始正文。导出事务先执行外键一致性检查，避免 `INNER JOIN` 对损坏数据静默漏项。Markdown 导出用于脱离应用阅读，SQLite 备份包含原始快照并用于完整恢复。
 - 恢复只允许写入新的空绝对数据目录，或由服务账户持有且已是 `0700` 的空既有目录；不覆盖已有数据库，也不接纳带 WAL/SHM 伴随文件的源或目标。最终发布使用同目录原子 no-replace 链接，消除检查与发布之间的跨进程覆盖竞态；失败后仅残留空 `db/` 时允许在同一目标重试。
 - 恢复源在 Unix 上通过 `O_NOFOLLOW` 打开并持有同一文件描述符复制，复制前后复核 inode、长度、修改时间和 SQLite companion，防止路径替换或误复制活动 WAL 数据库。备份、导出、恢复使用带版本的私有临时文件协议；启动或重试时只回收同一账户、`0600`、所属 PID 已退出且复核 inode 未变化的遗留文件，不删除自定义或仍在使用的文件。
 - 新建数据目录按层设置 `0700`，并同步新目录及其父目录；生成文件在原子发布前同步内容，发布后同步直接父目录，收紧断电后的持久性边界。
@@ -1121,6 +1125,7 @@ Phase 0 已同时提供多阶段 Docker 镜像和 Compose 入口；构建参数�
 - Cookie 使用 `HttpOnly`、`SameSite=Lax`，生产 HTTPS 启用 `Secure`。
 - 所有 SQL 使用绑定参数。
 - Markdown 输出必须清洗，不直接信任生成的 HTML。
+- Library 抓取逐跳执行 SSRF 地址校验和 DNS 固定，禁用代理与自动重定向，并限制协议、跳数、时间、类型和解压后大小；服务端抽取正文后使用显式白名单清洗，前端渲染前再次清洗。
 - 单条 Memo 最多提取 64 个唯一标签，单标签最多 64 个 Unicode 字符，超限在开启写事务前返回 422。
 - 修改型 API 只接受 JSON，并校验同源 `Origin`/`Host`。
 - 所有业务查询在数据访问层绑定 `workspace_id`；跨 workspace 访问统一返回 404，避免泄露资源存在性。
@@ -1258,7 +1263,7 @@ Phase 0B 完成后并行持续验证：
 
 ## 12. 测试与验收
 
-第 12 节是 Phase 0 验收矩阵，不等同于“每个排列组合都必须有一条自动化测试”。核心行为和高风险边界优先自动化；浏览器布局、独立二进制和恢复启动采用记录化冒烟；需要时间积累的搜索质量和连续自用作为非阻塞的持续验证。下表状态描述 2026-08-23 的实际覆盖。
+第 12 节记录 Phase 0 验收矩阵和后续纵向切片的增量证据，不等同于“每个排列组合都必须有一条自动化测试”。核心行为和高风险边界优先自动化；浏览器布局、独立二进制和恢复启动采用记录化冒烟；需要时间积累的搜索质量和连续自用作为非阻塞的持续验证。Phase 0 表格描述 2026-08-23 的覆盖，Phase 1 前两个切片记录更新于 2026-08-24。
 
 ### 12.1 Phase 0 验收矩阵
 
@@ -1310,7 +1315,28 @@ Vitest 当前覆盖：
 
 当前没有为每个乐观更新失败排列、所有 Todo/Tasks 过滤组合或像素级响应式布局复制 mock 测试；这些路径由最小高风险竞态测试、真实后端浏览器冒烟和实现中的回滚/请求失效约束共同建立信心。若自用期间出现状态不同步、焦点或回滚缺陷，先新增最小复现测试再修复。
 
-### 12.4 构建检查
+### 12.4 Phase 1 纵向切片验证
+
+Library 基础模型与手工 URL 入库首切片已覆盖：
+
+- schema v1 → v2 迁移保留 Memo、Task、标签、UID 和自增 ID，并为现有数据回填共享 object 身份；真实应用升级路径会先生成可恢复的 schema v1 快照。
+- URL 标准化、fragment 移除、userinfo/协议/长度边界、同 URL capture 保留、幂等重试与冲突、同 URL 和同幂等键并发提交、累计标签上限均由数据库或 HTTP 测试覆盖。
+- Library 列表、搜索、标签、详情、read/star/archive、PATCH 空值与并发字段合并、workspace 隔离和删除级联均通过真实 SQLite + HTTP 测试；列表不返回无界 capture 历史，详情按需加载完整 captures。
+- portable export format v2 保留 Library 的 nullable 字段、标签和 captures；JSON/Markdown 导出排除秘密，schema v2 快照恢复后 Library 可读且可再次备份。
+- 前端覆盖手工采集防重、重复 URL 刷新、搜索请求世代隔离、详情 `Esc`/焦点、read/star/archive 乐观回滚、危险删除确认，以及桌面、中屏和移动导航契约。
+
+第二切片的 **持久化内容流水线 + 离线阅读** 已覆盖：
+
+- schema v2 → v3 回填既有 Library 抓取任务；Blob 长度/hash、workspace 复合外键、活跃任务唯一约束、过期 lease 索引和作业默认值均由真实 SQLite 迁移测试覆盖。
+- 安全抓取覆盖受限 IPv4/IPv6、逐跳 DNS 审核与 IP 固定、userinfo、手动重定向上限、非 HTML、解压后 2 MiB 限制、固定 UA 和不含目标细节的公开错误；测试不访问外部网络。
+- 正文抽取覆盖中文元数据、有界候选评分、同 host canonical、危险标签/属性/协议、相对链接改写及膨胀限制、空正文和正文 hash；服务端 Ammonia 与前端 DOMPurify 均使用显式白名单。
+- worker 覆盖原子领取、60 秒 lease、指数退避、5 次后失败、过期任务接管、迟到 worker 不可发布、相同正文 Blob 去重、阅读正文搜索、手动重试、删除级联和孤立 Blob 清理。
+- content/retry API、`PENDING` 轮询清理、`FAILED` / `NOT_FETCHED` 重试、READY 阅读入口、离线安全正文、`Esc` 与焦点恢复、移动端目标尺寸和 reduced-motion 契约均有后端或组件测试。
+- portable export format v3 保留 Library 新元数据、安全 Reader HTML/纯文本与 Blob manifest/link，不输出 `SOURCE_HTML` 原始正文；schema v3 备份恢复验证元数据、Reader Blob、任务快照和外键一致性。
+
+这些证据完成前两个切片的实现门禁，不替代作用域 API Token、浏览器插件、图片离线化和 50 站点真实退出条件。
+
+### 12.5 构建检查
 
 本地与 CI 使用同一组锁定依赖检查：
 
@@ -1325,9 +1351,9 @@ pnpm --dir web build
 cargo build --release --locked
 ```
 
-2026-08-23 的最终结果为 Rust 47 tests、Vitest 9 files / 35 tests、Svelte 0 errors / 0 warnings；格式化、Clippy `-D warnings`、前端生产构建和 release 构建全部通过。仓库通过 `make check`、`make test` 和 `make build` 汇总这些命令；CI 还在干净 checkout 中重新安装锁定的前端依赖并构建包含静态资源的 release 二进制。
+2026-08-24 完成 Phase 1 第二切片后，结果为 Rust 93 tests、Vitest 17 files / 68 tests、Svelte 0 errors / 0 warnings；Rust/前端格式检查、Clippy `-D warnings`、前端生产构建和 release 构建全部通过。仓库通过 `make check`、`make test` 和 `make build` 汇总这些命令；CI 还会在干净 checkout 中重新安装锁定的前端依赖并构建包含静态资源的 release 二进制。
 
-### 12.5 记录化冒烟与持续观察
+### 12.6 记录化冒烟与持续观察
 
 2026-08-23 已在全新源数据目录完成以下闭环：启动并登录；创建包含 Markdown、中文、代码块和标签的 Memo；搜索正文和标签；编辑、置顶、取消置顶、归档、恢复和删除；在任务右栏与 Tasks 页面创建、编辑、完成、恢复和删除任务；重启后核对持久化；直接刷新 `/archive` 和 `/tasks`；在 1440px 和 360px 下核对主要操作。2026-08-24 将右栏产品语义明确为全部未完成 Todo，并由组件测试覆盖日期变化后任务仍保留、完成后移出。
 
@@ -1354,10 +1380,10 @@ cargo build --release --locked
 | --- | --- | --- | --- |
 | Phase 0A | 完成 | Memos + Todo 可运行核心 | 无 |
 | Phase 0B | 完成 | 完整 MVP、数据保护与恢复闭环 | Phase 0A |
-| Phase 1 | 候选 | Library + 网页剪藏闭环 | Phase 0B 数据安全 |
+| Phase 1 | 进行中 | Library + 网页剪藏闭环 | Phase 0B 数据安全 |
 | Phase 2 | 候选 | Tasks 成为可靠的轻量行动系统 | Phase 0 使用数据 |
 | Phase 3 | 候选 | RSS 发现、阅读与沉淀闭环 | Phase 1 内容流水线 |
-| Phase 4 | 候选 | 跨模块对象、搜索、关系与引用 | Memos/Library/Tasks/Reader 稳定 |
+| Phase 4 | 候选 | 跨模块搜索、关系与引用 | Memos/Library/Tasks/Reader 稳定 |
 | Phase 5 | 候选 | 有引用、可控写入的 Agent Chat | Phase 4 检索与权限 |
 | Phase 6 | 候选 | 小规模好友与 workspace 协作 | 真实共享需求 |
 
@@ -1391,6 +1417,10 @@ cargo build --release --locked
 
 ### 13.4 Phase 1：Library 与网页剪藏
 
+状态：**进行中（2026-08-24）**。
+
+开始日期：2026-08-24。完整阶段仍以 50 个不同站点的真实保存与阅读样本作为退出条件；实现按可恢复、可验证的纵向切片推进。
+
 目标：从 URL 到可阅读、可搜索、可长期保存的知识条目形成闭环。
 
 - 交付：手工保存 URL、书签/文章状态、正文抽取、安全 HTML、原文快照、选区与备注、去重、标签和阅读页。
@@ -1399,6 +1429,29 @@ cargo build --release --locked
 - 验证：相同 URL/幂等键不会重复入库；恶意 HTML 被清洗；抓取失败可重试；原站不可访问时仍能读取已保存内容。
 - 退出条件：至少保存并实际阅读 50 条不同站点内容，失败原因可观察，导出与恢复包含 Library 数据和 blobs 清单。
 - 非目标：多人协作标注、网页高保真离线镜像、全浏览器覆盖和自动分类 Agent。
+
+第一切片为 **Library 基础模型 + 手工 URL 入库**：
+
+- 交付：登录用户可以提交 URL、标题、选区、备注、标签和可选幂等键；可以在 `/library` 列出、搜索、查看、标记已读/未读、星标、归档、恢复和删除条目。
+- 对象层：Phase 1 创建 `objects` 并为已有 Memo、Task 回填对象身份；Library 使用独立的强类型表。Phase 4 在该身份层上补跨模块搜索、关系和引用，不重复创建共享对象层。
+- 状态语义：`item_kind` 区分 `BOOKMARK` / `ARTICLE`，`status` 区分 `ACTIVE` / `ARCHIVED`，`read_at` 单独表达阅读状态，`starred` 单独表达重点；`processing_status` 使用 `NOT_FETCHED` / `PENDING` / `READY` / `FAILED`，避免把归档、阅读和抓取状态混为一个枚举。
+- URL 语义：只接受不含 userinfo 的 HTTP/HTTPS URL；保存前去除 fragment，并采用标准 URL 解析结果统一 scheme、host、默认端口和空路径。第一切片不擅自移除查询参数；抓取后发现的 canonical URL 在后续流水线切片处理。
+- 去重语义：`(workspace_id, normalized_url)` 由数据库唯一约束保证一个知识条目；同一 URL 的再次采集保留新的选区与备注记录。幂等键在 workspace 内唯一，同一键重试返回原结果，同一键用于不同 URL 返回冲突。不同 workspace 可以保存相同 URL。
+- 迁移影响：只新增有序 migration；现有 Memo、Task 的 UID 继续作为对应 object UID，原数据、标签和会话必须完整保留。升级仍先执行自动备份。
+- 数据保护：portable JSON/Markdown export、schema 校验和恢复演练在第一切片同步支持 Library 数据；后续引入 blobs 时再扩展 blobs 清单和一致性恢复范围。
+- 验收样本：覆盖大小写 host、默认端口、带 fragment、相同 URL 并发提交、幂等重试/冲突、跨 workspace 同 URL 与越权访问、空值/超长字段/非 HTTP 协议、刷新后状态保持，以及 schema v2 备份恢复后再次备份。
+- 本切片非目标：联网抓取、正文抽取、安全 HTML、原始 blobs、后台 worker、作用域 API Token、浏览器插件、图片离线化和跨模块统一搜索。
+
+第二切片为 **持久化内容流水线 + 离线阅读**：
+
+- 交付：创建 Library 条目后自动排队抓取；详情显示排队、失败和可阅读状态，失败可手动重试；READY 条目可进入沉浸式阅读器，正文同时进入 Library 关键词搜索。
+- 作业语义：`PENDING` / `RETRY` / `RUNNING` 活跃作业在条目内唯一，worker 使用 60 秒 lease、最多 5 次尝试和指数退避；进程重启可接管到期作业，旧 lease 持有者不能发布。
+- 网络边界：只抓取公开 HTTP/HTTPS 地址，每跳重新验证 DNS 并固定已审核 IP，禁用代理和自动跳转，限制 5 次 redirect、40 秒总预算、HTML 类型、gzip/deflate 编码和解压后 2 MiB 大小。
+- 内容边界：保存原始 HTML、安全 Reader HTML 和纯文本三种 content-addressed Blob；正文抽取使用有界候选评分，canonical 只接受同 host，相对链接与 Reader 输出有独立膨胀/大小限制，服务端和浏览器各执行一次显式 HTML 白名单。
+- 数据保护：SQLite 备份完整保留原始 Blob；portable export v3 只输出安全阅读内容和 Blob manifest/link，不输出原始网页正文。恢复校验覆盖 schema v3、Library 元数据、Reader Blob、作业快照与 workspace 外键。
+- 非目标：浏览器插件与作用域 API Token、图片离线化、高保真页面镜像、付费墙/登录态页面抓取、JavaScript 渲染页面和跨模块统一搜索。
+
+前两个切片已经完成 migration、API、worker、UI、portable export、备份恢复和第 12.4 节自动化门禁。Phase 1 继续保持“进行中”；下一步是作用域 API Token 与浏览器插件、真实 50 站点验收，再根据失败样本决定图片离线化和抽取规则扩展。退出条件通过前不会标记完整阶段完成。
 
 ### 13.5 Phase 2：任务增强
 
@@ -1424,7 +1477,7 @@ cargo build --release --locked
 
 目标：让各模块可共同检索和互相引用，同时保持各自强类型数据模型。
 
-- 交付：共享对象层、跨模块标签、对象关系、统一搜索、稳定引用 URI、内容分块与定位。
+- 交付：扩展 Phase 1 建立的对象身份层，加入跨模块标签、对象关系、统一搜索、稳定引用 URI、内容分块与定位。
 - 搜索演进：先完成字段过滤和关键词相关性，再评估 FTS5 tokenizer；Embedding 仍不是本阶段默认交付物。
 - 验证：所有结果先经过 workspace 过滤；引用能定位到原对象和片段；索引可全量重建且不修改领域数据。
 - 退出条件：Memos、Library、Tasks 和已保存 RSS 可从一个入口找回，搜索结果具备类型、来源和匹配片段。
@@ -1568,6 +1621,10 @@ cargo build --release --locked
 | D-009 | 2026-08-23 | 正式产品名确定为 Locus Desk；仓库、二进制和默认数据命名统一使用 locus-desk | 已接受 |
 | D-010 | 2026-08-23 | B5 搜索评估与连续 7 天自用是非阻塞持续验证，不作为 Phase 1/2 开发的必要依赖 | 已接受 |
 | D-011 | 2026-08-24 | 首页右栏展示全部未完成 Todo；产品与用户可见文案统一使用 Memos，`notes`/`Note` 仅保留为内部实现名 | 已接受 |
+| D-012 | 2026-08-24 | Phase 1 先交付手工 URL 入库纵向切片；同 URL 共享一个 Library 条目，多次选区和备注作为独立 capture 保留 | 已接受 |
+| D-013 | 2026-08-24 | Phase 1 建立并回填共享对象身份；Phase 4 在其上交付跨模块搜索、关系和引用 | 已接受 |
+| D-014 | 2026-08-24 | Phase 1 内容抓取使用持久化 SQLite job、短租约与有界重试；所有重定向逐跳执行 SSRF 审核和 DNS 固定 | 已接受 |
+| D-015 | 2026-08-24 | 原始网页只进入完整 SQLite 备份；portable export 仅携带安全阅读正文与 Blob manifest，前后端执行双层 HTML 白名单 | 已接受 |
 
 ### 16.6 版本维度
 
@@ -1593,3 +1650,5 @@ cargo build --release --locked
 | 0.7 | 2026-08-23 | 补充最终自动化数量、release 备份恢复闭环、目录所有权和 Markdown/Today 状态一致性验收证据 |
 | 0.8 | 2026-08-23 | 将 B5 搜索评估与连续 7 天自用调整为非阻塞持续验证，并将 Phase 0B 标记为完成 |
 | 0.9 | 2026-08-24 | 将首页任务语义明确为全部未完成 Todo，并将产品术语统一为 Memos |
+| 1.0 | 2026-08-24 | 启动 Phase 1，明确 Library 手工 URL 入库首切片、对象回填、状态、去重、迁移与验收语义 |
+| 1.1 | 2026-08-24 | 记录 Phase 1 持久化抓取、SSRF 边界、正文清洗、Blob、离线阅读、导出恢复与第二切片验证证据 |

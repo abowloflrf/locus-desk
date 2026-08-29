@@ -11,6 +11,7 @@
 <div
   aria-live={tone === 'error' ? 'assertive' : 'polite'}
   class:status-error={tone === 'error'}
+  class:status-success={tone === 'success'}
   class="status-message"
 >
   {@render children()}
@@ -31,5 +32,11 @@
     color: var(--color-danger);
     background: var(--color-danger-soft);
     border-left-color: var(--color-danger);
+  }
+
+  .status-message.status-success {
+    color: var(--color-accent-hover);
+    background: var(--color-accent-soft);
+    border-left-color: var(--color-accent);
   }
 </style>

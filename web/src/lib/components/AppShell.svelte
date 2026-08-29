@@ -146,9 +146,11 @@
             ? 'Workspace'
             : current === 'notes'
               ? 'Memos'
-              : current === 'tasks'
-                ? 'Tasks'
-                : 'Archive'}</span
+              : current === 'library'
+                ? 'Library'
+                : current === 'tasks'
+                  ? 'Tasks'
+                  : 'Archive'}</span
         >
         <div class="compact-topbar-actions">
           {#if current === 'home'}

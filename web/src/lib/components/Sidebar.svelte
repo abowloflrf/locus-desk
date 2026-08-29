@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { tick } from 'svelte';
+
   import type { SessionInfo } from '../api/types';
   import type { ProtectedRoute } from '../routes';
   import Icon, { type IconName } from './Icon.svelte';
@@ -26,12 +28,27 @@
   }> = [
     { icon: 'today', label: 'Workspace', route: 'home' },
     { icon: 'note', label: 'Memos', route: 'notes' },
+    { icon: 'library', label: 'Library', route: 'library' },
     { icon: 'tasks', label: 'Tasks', route: 'tasks' },
     { icon: 'archive', label: 'Archive', route: 'archive' },
   ];
 
+  let moreOpen = $state(false);
+  let moreButton = $state<HTMLButtonElement>();
+  let archiveMenuItem = $state<HTMLAnchorElement>();
+
+  $effect(() => {
+    current;
+    moreOpen = false;
+  });
+
+  $effect(() => {
+    if (blocked) moreOpen = false;
+  });
+
   function openRoute(event: MouseEvent, route: ProtectedRoute): void {
     event.preventDefault();
+    moreOpen = false;
     onNavigate(route);
   }
 
@@ -39,7 +56,35 @@
     onNavigate('notes');
     setTimeout(() => window.dispatchEvent(new Event('locus:focus-search')), 0);
   }
+
+  async function toggleMore(): Promise<void> {
+    if (moreOpen) {
+      moreOpen = false;
+      await tick();
+      moreButton?.focus();
+      return;
+    }
+    moreOpen = true;
+    await tick();
+    archiveMenuItem?.focus();
+  }
+
+  async function closeMore(): Promise<void> {
+    if (!moreOpen) return;
+    moreOpen = false;
+    await tick();
+    moreButton?.focus();
+  }
+
+  function handleWindowKeydown(event: KeyboardEvent): void {
+    if (moreOpen && event.key === 'Escape') {
+      event.preventDefault();
+      void closeMore();
+    }
+  }
 </script>
+
+<svelte:window onkeydown={handleWindowKeydown} />
 
 <aside class:todo-open={todoOpen} class="sidebar" aria-label="Main navigation" inert={blocked}>
   <a
@@ -52,11 +97,35 @@
     <span class="brand-name">Locus Desk</span>
   </a>
 
+  {#if moreOpen}
+    <button
+      aria-label="Close more navigation"
+      class="mobile-more-backdrop"
+      onclick={() => void closeMore()}
+      tabindex="-1"
+      type="button"
+    ></button>
+    <div aria-label="More navigation" class="mobile-more-menu" role="menu">
+      <p>More</p>
+      <a
+        aria-current={current === 'archive' ? 'page' : undefined}
+        bind:this={archiveMenuItem}
+        href="/archive"
+        onclick={(event) => openRoute(event, 'archive')}
+        role="menuitem"
+      >
+        <Icon name="archive" />
+        <span>Archive</span>
+      </a>
+    </div>
+  {/if}
+
   <nav class="primary-nav">
     {#each primaryItems as item}
       <a
         aria-current={current === item.route ? 'page' : undefined}
         class:active={current === item.route}
+        class:mobile-overflow-item={item.route === 'archive'}
         class="nav-item"
         href={item.route === 'home' ? '/' : `/${item.route}`}
         onclick={(event) => openRoute(event, item.route)}
@@ -66,6 +135,19 @@
         <span>{item.label}</span>
       </a>
     {/each}
+    <button
+      aria-expanded={moreOpen}
+      aria-haspopup="menu"
+      aria-label="More navigation"
+      bind:this={moreButton}
+      class:active={current === 'archive'}
+      class="nav-item mobile-more-trigger"
+      onclick={() => void toggleMore()}
+      type="button"
+    >
+      <Icon name="more" />
+      <span>More</span>
+    </button>
   </nav>
 
   <div class="sidebar-divider"></div>
@@ -146,6 +228,12 @@
   .primary-nav {
     display: grid;
     gap: 3px;
+  }
+
+  .mobile-more-trigger,
+  .mobile-more-menu,
+  .mobile-more-backdrop {
+    display: none;
   }
 
   .nav-item {
@@ -309,7 +397,9 @@
     }
 
     .primary-nav {
-      grid-template-columns: repeat(4, 1fr);
+      position: relative;
+      z-index: 2;
+      grid-template-columns: repeat(5, 1fr);
       gap: 4px;
     }
 
@@ -324,6 +414,65 @@
 
     .primary-nav .nav-item > span {
       display: inline;
+    }
+
+    .primary-nav .mobile-overflow-item {
+      display: none;
+    }
+
+    .primary-nav .mobile-more-trigger {
+      display: flex;
+    }
+
+    .mobile-more-backdrop {
+      position: fixed;
+      inset: 0 0 calc(64px + env(safe-area-inset-bottom));
+      z-index: 1;
+      display: block;
+      padding: 0;
+      background: color-mix(in oklch, var(--color-text), transparent 82%);
+      border: 0;
+    }
+
+    .mobile-more-menu {
+      position: absolute;
+      right: calc(12px + env(safe-area-inset-right));
+      bottom: calc(100% + 8px);
+      z-index: 3;
+      display: grid;
+      width: min(240px, calc(100vw - 24px));
+      padding: 8px;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-surface);
+      box-shadow: var(--shadow-floating);
+    }
+
+    .mobile-more-menu p {
+      padding: 6px 9px 7px;
+      margin: 0;
+      color: var(--color-text-muted);
+      font-size: 10px;
+      font-weight: 650;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .mobile-more-menu a {
+      display: flex;
+      min-height: 44px;
+      gap: 10px;
+      align-items: center;
+      padding: 8px 10px;
+      border-radius: var(--radius-control);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .mobile-more-menu a:hover,
+    .mobile-more-menu a[aria-current='page'] {
+      color: var(--color-accent-hover);
+      background: var(--color-accent-soft);
     }
   }
 </style>

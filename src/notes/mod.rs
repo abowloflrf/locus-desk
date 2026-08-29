@@ -98,13 +98,29 @@ pub async fn create(
     let tags = extract_tags(&request.content)?;
     let uid = Ulid::generate().to_string();
     let mut transaction = pool.begin().await?;
+    let object = sqlx::query(
+        r#"
+        INSERT INTO objects
+          (uid, workspace_id, creator_id, object_type, created_at, updated_at)
+        VALUES (?, ?, ?, 'NOTE', ?, ?)
+        "#,
+    )
+    .bind(&uid)
+    .bind(workspace_id)
+    .bind(creator_id)
+    .bind(now)
+    .bind(now)
+    .execute(&mut *transaction)
+    .await?;
+    let object_id = object.last_insert_rowid();
     let result = sqlx::query(
         r#"
         INSERT INTO notes
-          (uid, workspace_id, creator_id, content, status, pinned, created_at, updated_at)
-        VALUES (?, ?, ?, ?, 'ACTIVE', 0, ?, ?)
+          (object_id, uid, workspace_id, creator_id, content, status, pinned, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'ACTIVE', 0, ?, ?)
         "#,
     )
+    .bind(object_id)
     .bind(&uid)
     .bind(workspace_id)
     .bind(creator_id)
@@ -114,7 +130,7 @@ pub async fn create(
     .execute(&mut *transaction)
     .await?;
     let note_id = result.last_insert_rowid();
-    insert_tags(&mut transaction, note_id, &tags).await?;
+    insert_tags(&mut transaction, note_id, object_id, &tags).await?;
     transaction.commit().await?;
     get(pool, workspace_id, &uid).await
 }
@@ -238,76 +254,81 @@ pub async fn update(
     }
 
     let status_value = status.map(NoteStatus::as_str);
-    if let Some(content_value) = content.as_deref() {
-        let tags = extract_tags(content_value)?;
-        let mut transaction = pool.begin().await?;
-        let result = sqlx::query(
-            r#"
-            UPDATE notes SET
-              content = ?,
-              status = CASE WHEN ? THEN ? ELSE status END,
-              pinned = CASE WHEN ? THEN ? ELSE pinned END,
-              updated_at = ?
-            WHERE workspace_id = ? AND uid = ?
-            "#,
-        )
-        .bind(content_value)
-        .bind(status.is_some())
-        .bind(status_value)
-        .bind(pinned.is_some())
-        .bind(pinned)
-        .bind(now)
-        .bind(workspace_id)
-        .bind(uid)
-        .execute(&mut *transaction)
-        .await?;
-        if result.rows_affected() == 0 {
-            return Err(AppError::not_found("Memo"));
-        }
-        let note_id =
-            sqlx::query_scalar::<_, i64>("SELECT id FROM notes WHERE workspace_id = ? AND uid = ?")
-                .bind(workspace_id)
-                .bind(uid)
-                .fetch_one(&mut *transaction)
-                .await?;
+    let tags = content.as_deref().map(extract_tags).transpose()?;
+    let mut transaction = pool.begin().await?;
+    let result = sqlx::query(
+        r#"
+        UPDATE notes SET
+          content = CASE WHEN ? THEN ? ELSE content END,
+          status = CASE WHEN ? THEN ? ELSE status END,
+          pinned = CASE WHEN ? THEN ? ELSE pinned END,
+          updated_at = ?
+        WHERE workspace_id = ? AND uid = ?
+        "#,
+    )
+    .bind(content.is_some())
+    .bind(content.as_deref())
+    .bind(status.is_some())
+    .bind(status_value)
+    .bind(pinned.is_some())
+    .bind(pinned)
+    .bind(now)
+    .bind(workspace_id)
+    .bind(uid)
+    .execute(&mut *transaction)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::not_found("Memo"));
+    }
+    let (note_id, object_id) = sqlx::query_as::<_, (i64, i64)>(
+        "SELECT id, object_id FROM notes WHERE workspace_id = ? AND uid = ?",
+    )
+    .bind(workspace_id)
+    .bind(uid)
+    .fetch_one(&mut *transaction)
+    .await?;
+    if let Some(tags) = tags.as_deref() {
         sqlx::query("DELETE FROM note_tags WHERE note_id = ?")
             .bind(note_id)
             .execute(&mut *transaction)
             .await?;
-        insert_tags(&mut transaction, note_id, &tags).await?;
-        transaction.commit().await?;
-    } else {
-        let result = sqlx::query(
-            r#"
-            UPDATE notes SET
-              status = CASE WHEN ? THEN ? ELSE status END,
-              pinned = CASE WHEN ? THEN ? ELSE pinned END,
-              updated_at = ?
-            WHERE workspace_id = ? AND uid = ?
-            "#,
-        )
-        .bind(status.is_some())
-        .bind(status_value)
-        .bind(pinned.is_some())
-        .bind(pinned)
-        .bind(now)
-        .bind(workspace_id)
-        .bind(uid)
-        .execute(pool)
-        .await?;
-        if result.rows_affected() == 0 {
-            return Err(AppError::not_found("Memo"));
-        }
+        sqlx::query("DELETE FROM object_tags WHERE object_id = ?")
+            .bind(object_id)
+            .execute(&mut *transaction)
+            .await?;
+        insert_tags(&mut transaction, note_id, object_id, tags).await?;
     }
+    let object_update = sqlx::query(
+        "UPDATE objects SET updated_at = ? WHERE id = ? AND workspace_id = ? AND object_type = 'NOTE'",
+    )
+    .bind(now)
+    .bind(object_id)
+    .bind(workspace_id)
+    .execute(&mut *transaction)
+    .await?;
+    if object_update.rows_affected() != 1 {
+        return Err(AppError::Internal("Memo object is missing".to_owned()));
+    }
+    transaction.commit().await?;
     get(pool, workspace_id, uid).await
 }
 
 pub async fn delete(pool: &SqlitePool, workspace_id: i64, uid: &str) -> AppResult<()> {
-    let result = sqlx::query("DELETE FROM notes WHERE workspace_id = ? AND uid = ?")
-        .bind(workspace_id)
-        .bind(uid)
-        .execute(pool)
-        .await?;
+    let result = sqlx::query(
+        r#"
+        DELETE FROM objects
+        WHERE workspace_id = ? AND uid = ? AND object_type = 'NOTE'
+          AND id IN (
+            SELECT object_id FROM notes WHERE workspace_id = ? AND uid = ?
+          )
+        "#,
+    )
+    .bind(workspace_id)
+    .bind(uid)
+    .bind(workspace_id)
+    .bind(uid)
+    .execute(pool)
+    .await?;
     if result.rows_affected() == 0 {
         return Err(AppError::not_found("Memo"));
     }
@@ -372,11 +393,17 @@ async fn row_to_note(pool: &SqlitePool, row: NoteRow) -> AppResult<Note> {
 async fn insert_tags(
     transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     note_id: i64,
+    object_id: i64,
     tags: &[String],
 ) -> AppResult<()> {
     for tag in tags {
         sqlx::query("INSERT INTO note_tags (note_id, tag) VALUES (?, ?)")
             .bind(note_id)
+            .bind(tag)
+            .execute(&mut **transaction)
+            .await?;
+        sqlx::query("INSERT INTO object_tags (object_id, tag) VALUES (?, ?)")
+            .bind(object_id)
             .bind(tag)
             .execute(&mut **transaction)
             .await?;

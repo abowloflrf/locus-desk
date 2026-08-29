@@ -64,6 +64,43 @@ afterEach(() => {
 });
 
 describe('AppShell modal boundaries', () => {
+  it('opens mobile More on Archive and returns focus with Escape', async () => {
+    const target = document.createElement('div');
+    document.body.append(target);
+    const children = createRawSnippet(() => ({ render: () => '<h1>Notes</h1>' }));
+    const component = mount(AppShell, {
+      props: {
+        children,
+        current: 'notes',
+        onDismissNotice: vi.fn(),
+        onLogout: vi.fn(),
+        onNavigate: vi.fn(),
+        session,
+      },
+      target,
+    });
+
+    try {
+      await tick();
+      const more = target.querySelector<HTMLButtonElement>('.mobile-more-trigger')!;
+      more.click();
+      const archive = await vi.waitFor(() => {
+        const link = target.querySelector<HTMLAnchorElement>('.mobile-more-menu [role="menuitem"]');
+        expect(link).not.toBeNull();
+        return link!;
+      });
+      expect(document.activeElement).toBe(archive);
+      expect(more.getAttribute('aria-expanded')).toBe('true');
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      await vi.waitFor(() => expect(target.querySelector('.mobile-more-menu')).toBeNull());
+      expect(document.activeElement).toBe(more);
+      expect(more.getAttribute('aria-expanded')).toBe('false');
+    } finally {
+      await unmount(component);
+    }
+  });
+
   it('isolates the notice and preserves the Todo drawer while a native dialog is open', async () => {
     const target = document.createElement('div');
     document.body.append(target);
@@ -95,6 +132,7 @@ describe('AppShell modal boundaries', () => {
       );
       expect(workspaceShortcut?.getAttribute('aria-current')).toBe('page');
       expect(target.querySelector('.sidebar .nav-item[title="Memos"]')).not.toBeNull();
+      expect(target.querySelector('.sidebar .nav-item[title="Library"]')).not.toBeNull();
       expect(target.querySelector('.sidebar .nav-item[title="Todo"]')).toBeNull();
       const todoButton = [
         ...target.querySelectorAll<HTMLButtonElement>('.compact-topbar button'),
@@ -159,6 +197,7 @@ describe('AppShell modal boundaries', () => {
       expect(target.querySelectorAll('.sidebar .nav-item[aria-current="page"]')).toHaveLength(1);
       expect(target.querySelector('.sidebar .nav-item[title="Workspace"]')).not.toBeNull();
       expect(target.querySelector('.sidebar .nav-item[title="Memos"]')).not.toBeNull();
+      expect(target.querySelector('.sidebar .nav-item[title="Library"]')).not.toBeNull();
       expect(target.querySelector('.sidebar .nav-item[title="Tasks"]')).not.toBeNull();
       expect(target.querySelector('.sidebar .nav-item[title="Archive"]')).not.toBeNull();
       expect(target.querySelector('[aria-label="Workspace view"]')).toBeNull();

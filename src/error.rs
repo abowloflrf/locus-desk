@@ -70,6 +70,10 @@ impl AppError {
         )
     }
 
+    pub fn conflict(message: impl Into<Cow<'static, str>>) -> Self {
+        Self::client(StatusCode::CONFLICT, "conflict", message)
+    }
+
     pub fn rate_limited() -> Self {
         Self::client(
             StatusCode::TOO_MANY_REQUESTS,

@@ -16,7 +16,7 @@ use sqlx::{
     sqlite::SqliteConnectOptions,
 };
 
-const EXPORT_FORMAT_VERSION: u32 = 1;
+const EXPORT_FORMAT_VERSION: u32 = 3;
 const BACKUP_METADATA_TABLE: &str = "locus_backup_metadata";
 const BACKUP_METADATA_CREATE_SQL: &str = r#"
 CREATE TABLE locus_backup_metadata (
@@ -37,6 +37,37 @@ const REQUIRED_SCHEMA_V1_TABLES: &[&str] = &[
     "notes",
     "note_tags",
     "tasks",
+    "_sqlx_migrations",
+];
+const REQUIRED_SCHEMA_V2_TABLES: &[&str] = &[
+    "users",
+    "workspaces",
+    "workspace_members",
+    "sessions",
+    "objects",
+    "notes",
+    "note_tags",
+    "tasks",
+    "object_tags",
+    "library_items",
+    "library_captures",
+    "_sqlx_migrations",
+];
+const REQUIRED_SCHEMA_V3_TABLES: &[&str] = &[
+    "users",
+    "workspaces",
+    "workspace_members",
+    "sessions",
+    "objects",
+    "notes",
+    "note_tags",
+    "tasks",
+    "object_tags",
+    "library_items",
+    "library_captures",
+    "blobs",
+    "object_blobs",
+    "jobs",
     "_sqlx_migrations",
 ];
 
@@ -60,6 +91,8 @@ pub struct PortableExport {
     pub workspaces: Vec<ExportWorkspace>,
     pub notes: Vec<ExportNote>,
     pub tasks: Vec<ExportTask>,
+    pub library_items: Vec<ExportLibraryItem>,
+    pub blobs: Vec<ExportBlobManifest>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -112,6 +145,66 @@ pub struct ExportTask {
     pub completed_at_unix_ms: Option<i64>,
     pub created_at_unix_ms: i64,
     pub updated_at_unix_ms: i64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportLibraryItem {
+    pub uid: String,
+    pub workspace_uid: String,
+    pub creator_uid: String,
+    pub original_url: String,
+    pub normalized_url: String,
+    pub canonical_url: Option<String>,
+    pub title: String,
+    pub site_name: Option<String>,
+    pub author: Option<String>,
+    pub published_at_unix_ms: Option<i64>,
+    pub excerpt: String,
+    pub fetched_at_unix_ms: Option<i64>,
+    pub content_hash: Option<String>,
+    pub content_version: i64,
+    pub item_kind: String,
+    pub status: String,
+    pub read_at_unix_ms: Option<i64>,
+    pub starred: bool,
+    pub processing_status: String,
+    pub last_error: Option<String>,
+    pub tags: Vec<String>,
+    pub captures: Vec<ExportLibraryCapture>,
+    pub blob_links: Vec<ExportObjectBlobLink>,
+    pub reader_safe_html: Option<String>,
+    pub reader_text: Option<String>,
+    pub created_at_unix_ms: i64,
+    pub updated_at_unix_ms: i64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportLibraryCapture {
+    pub uid: String,
+    pub selected_text: String,
+    pub note: String,
+    pub captured_title: Option<String>,
+    pub created_at_unix_ms: i64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportBlobManifest {
+    pub uid: String,
+    pub workspace_uid: String,
+    pub sha256: String,
+    pub mime_type: String,
+    pub byte_len: i64,
+    pub created_at_unix_ms: i64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportObjectBlobLink {
+    pub blob_uid: String,
+    pub purpose: String,
 }
 
 #[derive(Debug)]
@@ -427,6 +520,229 @@ pub async fn collect_portable_export(pool: &SqlitePool) -> DataManagementResult<
         });
     }
 
+    let mut tags_by_library_item = BTreeMap::<String, Vec<String>>::new();
+    for row in sqlx::query(
+        r#"
+        SELECT objects.uid AS object_uid, object_tags.tag
+        FROM object_tags
+        JOIN objects ON objects.id = object_tags.object_id
+        WHERE objects.object_type = 'LIBRARY_ITEM'
+        ORDER BY objects.uid ASC, object_tags.tag ASC
+        "#,
+    )
+    .fetch_all(&mut *transaction)
+    .await?
+    {
+        let object_uid: String = row.try_get("object_uid")?;
+        let tag: String = row.try_get("tag")?;
+        tags_by_library_item
+            .entry(object_uid)
+            .or_default()
+            .push(tag);
+    }
+
+    let mut captures_by_library_item = BTreeMap::<String, Vec<ExportLibraryCapture>>::new();
+    for row in sqlx::query(
+        r#"
+        SELECT
+            objects.uid AS object_uid,
+            library_captures.uid,
+            library_captures.selected_text,
+            library_captures.note,
+            library_captures.captured_title,
+            library_captures.created_at
+        FROM library_captures
+        JOIN library_items ON library_items.id = library_captures.library_item_id
+        JOIN objects ON objects.id = library_items.object_id
+        ORDER BY objects.uid ASC, library_captures.created_at ASC, library_captures.id ASC
+        "#,
+    )
+    .fetch_all(&mut *transaction)
+    .await?
+    {
+        let object_uid: String = row.try_get("object_uid")?;
+        captures_by_library_item
+            .entry(object_uid)
+            .or_default()
+            .push(ExportLibraryCapture {
+                uid: row.try_get("uid")?,
+                selected_text: row.try_get("selected_text")?,
+                note: row.try_get("note")?,
+                captured_title: row.try_get("captured_title")?,
+                created_at_unix_ms: row.try_get("created_at")?,
+            });
+    }
+
+    let blobs = sqlx::query(
+        r#"
+        SELECT
+            blobs.uid,
+            workspaces.uid AS workspace_uid,
+            blobs.sha256,
+            blobs.mime_type,
+            blobs.byte_len,
+            blobs.created_at
+        FROM blobs
+        JOIN workspaces ON workspaces.id = blobs.workspace_id
+        ORDER BY blobs.created_at ASC, blobs.id ASC
+        "#,
+    )
+    .fetch_all(&mut *transaction)
+    .await?
+    .into_iter()
+    .map(|row| {
+        Ok(ExportBlobManifest {
+            uid: row.try_get("uid")?,
+            workspace_uid: row.try_get("workspace_uid")?,
+            sha256: row.try_get("sha256")?,
+            mime_type: row.try_get("mime_type")?,
+            byte_len: row.try_get("byte_len")?,
+            created_at_unix_ms: row.try_get("created_at")?,
+        })
+    })
+    .collect::<Result<Vec<_>, sqlx::Error>>()?;
+
+    let mut blob_links_by_library_item = BTreeMap::<String, Vec<ExportObjectBlobLink>>::new();
+    for row in sqlx::query(
+        r#"
+        SELECT
+            objects.uid AS object_uid,
+            blobs.uid AS blob_uid,
+            object_blobs.purpose
+        FROM object_blobs
+        JOIN objects
+          ON objects.id = object_blobs.object_id
+         AND objects.workspace_id = object_blobs.workspace_id
+        JOIN blobs
+          ON blobs.id = object_blobs.blob_id
+         AND blobs.workspace_id = object_blobs.workspace_id
+        WHERE objects.object_type = 'LIBRARY_ITEM'
+        ORDER BY objects.uid ASC, object_blobs.purpose ASC
+        "#,
+    )
+    .fetch_all(&mut *transaction)
+    .await?
+    {
+        let object_uid: String = row.try_get("object_uid")?;
+        blob_links_by_library_item
+            .entry(object_uid)
+            .or_default()
+            .push(ExportObjectBlobLink {
+                blob_uid: row.try_get("blob_uid")?,
+                purpose: row.try_get("purpose")?,
+            });
+    }
+
+    let mut reader_html_by_library_item = BTreeMap::<String, String>::new();
+    let mut reader_text_by_library_item = BTreeMap::<String, String>::new();
+    for row in sqlx::query(
+        r#"
+        SELECT
+            objects.uid AS object_uid,
+            object_blobs.purpose,
+            blobs.body
+        FROM object_blobs
+        JOIN objects
+          ON objects.id = object_blobs.object_id
+         AND objects.workspace_id = object_blobs.workspace_id
+        JOIN blobs
+          ON blobs.id = object_blobs.blob_id
+         AND blobs.workspace_id = object_blobs.workspace_id
+        WHERE objects.object_type = 'LIBRARY_ITEM'
+          AND object_blobs.purpose IN ('READER_HTML', 'READER_TEXT')
+        ORDER BY objects.uid ASC, object_blobs.purpose ASC
+        "#,
+    )
+    .fetch_all(&mut *transaction)
+    .await?
+    {
+        let object_uid: String = row.try_get("object_uid")?;
+        let purpose: String = row.try_get("purpose")?;
+        let body = String::from_utf8(row.try_get::<Vec<u8>, _>("body")?).map_err(|error| {
+            DataManagementError::InvalidDatabaseValue {
+                field: "blobs.body",
+                reason: format!("{purpose} for object {object_uid} is not valid UTF-8: {error}"),
+            }
+        })?;
+        match purpose.as_str() {
+            "READER_HTML" => {
+                reader_html_by_library_item.insert(object_uid, body);
+            }
+            "READER_TEXT" => {
+                reader_text_by_library_item.insert(object_uid, body);
+            }
+            _ => unreachable!("reader content query only selects reader purposes"),
+        }
+    }
+
+    let mut library_items = Vec::new();
+    for row in sqlx::query(
+        r#"
+        SELECT
+            objects.uid,
+            workspaces.uid AS workspace_uid,
+            users.uid AS creator_uid,
+            library_items.original_url,
+            library_items.normalized_url,
+            library_items.canonical_url,
+            library_items.title,
+            library_items.site_name,
+            library_items.author,
+            library_items.published_at,
+            library_items.excerpt,
+            library_items.fetched_at,
+            library_items.content_hash,
+            library_items.content_version,
+            library_items.item_kind,
+            library_items.status,
+            library_items.read_at,
+            library_items.starred,
+            library_items.processing_status,
+            library_items.last_error,
+            objects.created_at,
+            objects.updated_at
+        FROM library_items
+        JOIN objects ON objects.id = library_items.object_id
+        JOIN workspaces ON workspaces.id = objects.workspace_id
+        JOIN users ON users.id = objects.creator_id
+        ORDER BY objects.created_at ASC, objects.id ASC
+        "#,
+    )
+    .fetch_all(&mut *transaction)
+    .await?
+    {
+        let uid: String = row.try_get("uid")?;
+        library_items.push(ExportLibraryItem {
+            tags: tags_by_library_item.remove(&uid).unwrap_or_default(),
+            captures: captures_by_library_item.remove(&uid).unwrap_or_default(),
+            blob_links: blob_links_by_library_item.remove(&uid).unwrap_or_default(),
+            reader_safe_html: reader_html_by_library_item.remove(&uid),
+            reader_text: reader_text_by_library_item.remove(&uid),
+            uid,
+            workspace_uid: row.try_get("workspace_uid")?,
+            creator_uid: row.try_get("creator_uid")?,
+            original_url: row.try_get("original_url")?,
+            normalized_url: row.try_get("normalized_url")?,
+            canonical_url: row.try_get("canonical_url")?,
+            title: row.try_get("title")?,
+            site_name: row.try_get("site_name")?,
+            author: row.try_get("author")?,
+            published_at_unix_ms: row.try_get("published_at")?,
+            excerpt: row.try_get("excerpt")?,
+            fetched_at_unix_ms: row.try_get("fetched_at")?,
+            content_hash: row.try_get("content_hash")?,
+            content_version: row.try_get("content_version")?,
+            item_kind: row.try_get("item_kind")?,
+            status: row.try_get("status")?,
+            read_at_unix_ms: row.try_get("read_at")?,
+            starred: row.try_get::<i64, _>("starred")? != 0,
+            processing_status: row.try_get("processing_status")?,
+            last_error: row.try_get("last_error")?,
+            created_at_unix_ms: row.try_get("created_at")?,
+            updated_at_unix_ms: row.try_get("updated_at")?,
+        });
+    }
+
     transaction.commit().await?;
 
     Ok(PortableExport {
@@ -438,6 +754,8 @@ pub async fn collect_portable_export(pool: &SqlitePool) -> DataManagementResult<
         workspaces,
         notes,
         tasks,
+        library_items,
+        blobs,
     })
 }
 
@@ -823,6 +1141,158 @@ pub fn render_markdown(export: &PortableExport) -> String {
         }
     }
 
+    writeln!(&mut output, "\n## Library").expect("writing to a String should not fail");
+    if export.library_items.is_empty() {
+        writeln!(&mut output, "\n_No library items._")
+            .expect("writing to a String should not fail");
+    }
+    for item in &export.library_items {
+        writeln!(
+            &mut output,
+            "\n### {} (`{}`)",
+            markdown_inline(&item.title),
+            markdown_code(&item.uid)
+        )
+        .expect("writing to a String should not fail");
+        writeln!(
+            &mut output,
+            "\n- Workspace: `{}`",
+            markdown_code(&item.workspace_uid)
+        )
+        .expect("writing to a String should not fail");
+        writeln!(
+            &mut output,
+            "- Original URL: `{}`",
+            markdown_code(&item.original_url)
+        )
+        .expect("writing to a String should not fail");
+        if let Some(canonical_url) = item
+            .canonical_url
+            .as_deref()
+            .filter(|value| *value != item.original_url.as_str())
+        {
+            writeln!(
+                &mut output,
+                "- Canonical URL: `{}`",
+                markdown_code(canonical_url)
+            )
+            .expect("writing to a String should not fail");
+        }
+        writeln!(&mut output, "- Kind: {}", markdown_inline(&item.item_kind))
+            .expect("writing to a String should not fail");
+        writeln!(&mut output, "- Status: {}", markdown_inline(&item.status))
+            .expect("writing to a String should not fail");
+        if let Some(author) = &item.author {
+            writeln!(&mut output, "- Author: {}", markdown_inline(author))
+                .expect("writing to a String should not fail");
+        }
+        if let Some(published_at) = item.published_at_unix_ms {
+            writeln!(&mut output, "- Published at (Unix ms): {published_at}")
+                .expect("writing to a String should not fail");
+        }
+        if let Some(fetched_at) = item.fetched_at_unix_ms {
+            writeln!(&mut output, "- Fetched at (Unix ms): {fetched_at}")
+                .expect("writing to a String should not fail");
+        }
+        writeln!(&mut output, "- Content version: {}", item.content_version)
+            .expect("writing to a String should not fail");
+        if let Some(content_hash) = &item.content_hash {
+            writeln!(
+                &mut output,
+                "- Content hash: `{}`",
+                markdown_code(content_hash)
+            )
+            .expect("writing to a String should not fail");
+        }
+        writeln!(&mut output, "- Read: {}", item.read_at_unix_ms.is_some())
+            .expect("writing to a String should not fail");
+        writeln!(&mut output, "- Starred: {}", item.starred)
+            .expect("writing to a String should not fail");
+        if !item.tags.is_empty() {
+            let tags = item
+                .tags
+                .iter()
+                .map(|tag| format!("`{}`", markdown_code(tag)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            writeln!(&mut output, "- Tags: {tags}").expect("writing to a String should not fail");
+        }
+        if !item.blob_links.is_empty() {
+            writeln!(&mut output, "- Blobs:").expect("writing to a String should not fail");
+            for link in &item.blob_links {
+                writeln!(
+                    &mut output,
+                    "  - {}: `{}`",
+                    markdown_inline(&link.purpose),
+                    markdown_code(&link.blob_uid)
+                )
+                .expect("writing to a String should not fail");
+            }
+        }
+        if !item.excerpt.is_empty() {
+            writeln!(&mut output, "\n**Excerpt**\n\n{}", item.excerpt)
+                .expect("writing to a String should not fail");
+        }
+        if let Some(reader_text) = &item.reader_text {
+            writeln!(&mut output, "\n**Reader text**\n\n{reader_text}")
+                .expect("writing to a String should not fail");
+        }
+        if let Some(reader_safe_html) = &item.reader_safe_html {
+            writeln!(&mut output, "\n**Reader safe HTML**\n\n{reader_safe_html}")
+                .expect("writing to a String should not fail");
+        }
+        for capture in &item.captures {
+            writeln!(
+                &mut output,
+                "\n#### Capture `{}`",
+                markdown_code(&capture.uid)
+            )
+            .expect("writing to a String should not fail");
+            if !capture.selected_text.is_empty() {
+                writeln!(&mut output, "\n**Selection**\n\n{}", capture.selected_text)
+                    .expect("writing to a String should not fail");
+            }
+            if !capture.note.is_empty() {
+                writeln!(&mut output, "\n**Note**\n\n{}", capture.note)
+                    .expect("writing to a String should not fail");
+            }
+        }
+        writeln!(&mut output, "\n---").expect("writing to a String should not fail");
+    }
+
+    writeln!(&mut output, "\n## Blob manifest").expect("writing to a String should not fail");
+    if export.blobs.is_empty() {
+        writeln!(&mut output, "\n_No blobs._").expect("writing to a String should not fail");
+    }
+    for blob in &export.blobs {
+        writeln!(
+            &mut output,
+            "\n- `{}` ({}, {} bytes)",
+            markdown_code(&blob.uid),
+            markdown_inline(&blob.mime_type),
+            blob.byte_len
+        )
+        .expect("writing to a String should not fail");
+        writeln!(
+            &mut output,
+            "  - Workspace: `{}`",
+            markdown_code(&blob.workspace_uid)
+        )
+        .expect("writing to a String should not fail");
+        writeln!(
+            &mut output,
+            "  - SHA-256: `{}`",
+            markdown_code(&blob.sha256)
+        )
+        .expect("writing to a String should not fail");
+        writeln!(
+            &mut output,
+            "  - Created at (Unix ms): {}",
+            blob.created_at_unix_ms
+        )
+        .expect("writing to a String should not fail");
+    }
+
     output
 }
 
@@ -911,6 +1381,8 @@ async fn validate_sqlite_snapshot(path: &Path) -> DataManagementResult<()> {
     }
     let required_tables = match schema_version {
         1 => REQUIRED_SCHEMA_V1_TABLES,
+        2 => REQUIRED_SCHEMA_V2_TABLES,
+        3 => REQUIRED_SCHEMA_V3_TABLES,
         _ => {
             return Err(DataManagementError::InvalidBackup {
                 path: path.to_owned(),
@@ -1966,6 +2438,162 @@ mod tests {
     };
 
     #[tokio::test]
+    async fn content_pipeline_migration_backfills_library_jobs_and_enforces_boundaries() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(":memory:")
+                    .create_if_missing(true)
+                    .foreign_keys(true),
+            )
+            .await
+            .expect("migration test database should open");
+        sqlx::raw_sql(include_str!("../migrations/0001_initial.sql"))
+            .execute(&pool)
+            .await
+            .expect("schema v1 should apply");
+        sqlx::query(
+            "INSERT INTO users (id, uid, username, password_hash, created_at, updated_at) VALUES (1, 'user', 'owner', 'hash', 1000, 1000)",
+        )
+        .execute(&pool)
+        .await
+        .expect("user fixture should insert");
+        sqlx::query(
+            "INSERT INTO workspaces (id, uid, name, timezone, created_by, created_at, updated_at) VALUES (10, 'workspace-a', 'A', 'UTC', 1, 1000, 1000)",
+        )
+        .execute(&pool)
+        .await
+        .expect("workspace fixture should insert");
+        sqlx::raw_sql(include_str!("../migrations/0002_phase1_library.sql"))
+            .execute(&pool)
+            .await
+            .expect("schema v2 should apply");
+
+        let long_object_uid = format!("library_{}", "x".repeat(160));
+        sqlx::query(
+            "INSERT INTO objects (id, uid, workspace_id, creator_id, object_type, created_at, updated_at) VALUES (20, ?, 10, 1, 'LIBRARY_ITEM', 1200, 1300)",
+        )
+        .bind(long_object_uid)
+        .execute(&pool)
+        .await
+        .expect("Library object fixture should insert");
+        sqlx::query(
+            "INSERT INTO library_items (id, object_id, workspace_id, original_url, normalized_url, processing_status) VALUES (30, 20, 10, 'https://example.test', 'https://example.test/', 'NOT_FETCHED')",
+        )
+        .execute(&pool)
+        .await
+        .expect("Library item fixture should insert");
+
+        sqlx::raw_sql(include_str!(
+            "../migrations/0003_phase1_content_pipeline.sql"
+        ))
+        .execute(&pool)
+        .await
+        .expect("schema v3 should apply");
+
+        let item = sqlx::query(
+            r#"
+            SELECT author, published_at, excerpt, fetched_at, content_hash,
+                   content_version, processing_status
+            FROM library_items
+            WHERE id = 30
+            "#,
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("migrated Library item should be readable");
+        assert_eq!(item.get::<Option<String>, _>("author"), None);
+        assert_eq!(item.get::<Option<i64>, _>("published_at"), None);
+        assert_eq!(item.get::<String, _>("excerpt"), "");
+        assert_eq!(item.get::<Option<i64>, _>("fetched_at"), None);
+        assert_eq!(item.get::<Option<String>, _>("content_hash"), None);
+        assert_eq!(item.get::<i64, _>("content_version"), 0);
+        assert_eq!(item.get::<String, _>("processing_status"), "PENDING");
+
+        let job = sqlx::query(
+            r#"
+            SELECT uid, workspace_id, object_id, status, attempt_count, max_attempts,
+                   run_after, lease_owner, lease_expires_at
+            FROM jobs
+            "#,
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("backfilled job should be readable");
+        let job_uid = job.get::<String, _>("uid");
+        assert!(job_uid.starts_with("job_"));
+        assert!(job_uid.len() <= 128);
+        assert_eq!(job.get::<i64, _>("workspace_id"), 10);
+        assert_eq!(job.get::<i64, _>("object_id"), 20);
+        assert_eq!(job.get::<String, _>("status"), "PENDING");
+        assert_eq!(job.get::<i64, _>("attempt_count"), 0);
+        assert_eq!(job.get::<i64, _>("max_attempts"), 5);
+        assert_eq!(job.get::<i64, _>("run_after"), 1300);
+        assert_eq!(job.get::<Option<String>, _>("lease_owner"), None);
+        assert_eq!(job.get::<Option<i64>, _>("lease_expires_at"), None);
+
+        let duplicate_active = sqlx::query(
+            r#"
+            INSERT INTO jobs (
+              uid, workspace_id, object_id, job_type, status, attempt_count,
+              max_attempts, run_after, created_at, updated_at
+            ) VALUES ('job_duplicate', 10, 20, 'FETCH_LIBRARY_ITEM', 'RETRY', 1, 5, 1400, 1400, 1400)
+            "#,
+        )
+        .execute(&pool)
+        .await;
+        assert!(duplicate_active.is_err());
+        sqlx::query(
+            r#"
+            INSERT INTO jobs (
+              uid, workspace_id, object_id, job_type, status, attempt_count,
+              max_attempts, run_after, created_at, updated_at
+            ) VALUES ('job_completed', 10, 20, 'FETCH_LIBRARY_ITEM', 'COMPLETED', 5, 5, 1400, 1400, 1400)
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .expect("completed job should not conflict with an active job");
+
+        sqlx::query(
+            "INSERT INTO workspaces (id, uid, name, timezone, created_by, created_at, updated_at) VALUES (11, 'workspace-b', 'B', 'UTC', 1, 1000, 1000)",
+        )
+        .execute(&pool)
+        .await
+        .expect("second workspace fixture should insert");
+        sqlx::query(
+            "INSERT INTO blobs (id, uid, workspace_id, sha256, mime_type, byte_len, body, created_at) VALUES (40, 'blob-b', 11, ?, 'text/plain', 1, X'41', 1400)",
+        )
+        .bind("a".repeat(64))
+        .execute(&pool)
+        .await
+        .expect("cross-workspace blob fixture should insert");
+        let duplicate_hash = sqlx::query(
+            "INSERT INTO blobs (uid, workspace_id, sha256, mime_type, byte_len, body, created_at) VALUES ('blob-b-duplicate', 11, ?, 'text/plain', 1, X'41', 1401)",
+        )
+        .bind("a".repeat(64))
+        .execute(&pool)
+        .await;
+        assert!(duplicate_hash.is_err());
+        let cross_workspace_link = sqlx::query(
+            "INSERT INTO object_blobs (object_id, workspace_id, blob_id, purpose) VALUES (20, 10, 40, 'READER_TEXT')",
+        )
+        .execute(&pool)
+        .await;
+        assert!(cross_workspace_link.is_err());
+
+        let mismatched_length = sqlx::query(
+            "INSERT INTO blobs (uid, workspace_id, sha256, mime_type, byte_len, body, created_at) VALUES ('blob-invalid', 10, ?, 'text/plain', 2, X'41', 1400)",
+        )
+        .bind("b".repeat(64))
+        .execute(&pool)
+        .await;
+        assert!(mismatched_length.is_err());
+        pool.close().await;
+    }
+
+    #[tokio::test]
     async fn backup_is_consistent_and_never_overwrites_a_destination() {
         let fixture = Fixture::new().await;
         let backup = fixture.root.path().join("backups/locus-desk.sqlite3");
@@ -1996,7 +2624,7 @@ mod tests {
             metadata.get::<String, _>("application_version"),
             env!("CARGO_PKG_VERSION")
         );
-        assert_eq!(metadata.get::<i64, _>("schema_version"), 1);
+        assert_eq!(metadata.get::<i64, _>("schema_version"), 3);
         assert!(!metadata.get::<String, _>("git_commit").is_empty());
 
         let error = create_sqlite_backup(&fixture.pool, &fixture.backups, &backup)
@@ -2025,15 +2653,62 @@ mod tests {
         assert!(!json.contains("passwordHash"));
         assert!(!json.contains("tokenHash"));
         let payload: Value = serde_json::from_str(&json).expect("JSON export should be valid");
-        assert_eq!(payload["schemaVersion"], 1);
+        assert_eq!(payload["formatVersion"], 3);
+        assert_eq!(payload["schemaVersion"], 3);
         assert_eq!(payload["notes"][0]["tags"][0], "中文");
         assert_eq!(payload["tasks"][0]["title"], "Ship the safe export");
+        assert_eq!(payload["libraryItems"][0]["uid"], "library_01");
+        assert_eq!(payload["libraryItems"][0]["canonicalUrl"], Value::Null);
+        assert_eq!(payload["libraryItems"][0]["author"], "Ada Example");
+        assert_eq!(payload["libraryItems"][0]["publishedAtUnixMs"], Value::Null);
+        assert_eq!(payload["libraryItems"][0]["excerpt"], "A portable excerpt.");
+        assert_eq!(payload["libraryItems"][0]["fetchedAtUnixMs"], 1400);
+        assert_eq!(payload["libraryItems"][0]["contentVersion"], 2);
+        assert_eq!(
+            payload["libraryItems"][0]["contentHash"],
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        );
+        assert_eq!(
+            payload["libraryItems"][0]["readerSafeHtml"],
+            "<article><p>Safe reader body.</p></article>"
+        );
+        assert_eq!(
+            payload["libraryItems"][0]["readerText"],
+            "Safe reader body."
+        );
+        assert_eq!(
+            payload["libraryItems"][0]["blobLinks"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+        assert_eq!(
+            payload["libraryItems"][0]["captures"][0]["selectedText"],
+            "A saved passage"
+        );
+        assert_eq!(payload["blobs"].as_array().unwrap().len(), 3);
+        assert_eq!(payload["blobs"][0]["uid"], "blob_source_01");
+        assert_eq!(payload["blobs"][0]["mimeType"], "text/html");
+        assert!(
+            !payload["blobs"][0]
+                .as_object()
+                .expect("blob manifest should be an object")
+                .contains_key("body")
+        );
+        assert!(!json.contains("UNSAFE_SOURCE_ONLY_8f3a"));
 
         let markdown =
             fs::read_to_string(markdown_path).expect("Markdown export should be readable");
         assert!(markdown.contains("# Original note"));
         assert!(markdown.contains("你好, world."));
         assert!(markdown.contains("Ship the safe export"));
+        assert!(markdown.contains("A saved article"));
+        assert!(markdown.contains("A saved passage"));
+        assert!(markdown.contains("A portable excerpt."));
+        assert!(markdown.contains("Safe reader body."));
+        assert!(markdown.contains("blob_source_01"));
+        assert!(!markdown.contains("UNSAFE_SOURCE_ONLY_8f3a"));
         assert!(!markdown.contains("secret-password-hash"));
         assert!(!markdown.contains("secret-session-hash"));
     }
@@ -2091,6 +2766,50 @@ mod tests {
             row.get::<String, _>("content"),
             "# Original note\n\n你好, world."
         );
+        let library = sqlx::query(
+            r#"
+            SELECT
+                library_items.title,
+                library_items.author,
+                library_items.published_at,
+                library_items.excerpt,
+                library_items.fetched_at,
+                library_items.content_hash,
+                library_items.content_version,
+                library_captures.selected_text,
+                CAST(blobs.body AS TEXT) AS reader_text
+            FROM library_items
+            JOIN library_captures ON library_captures.library_item_id = library_items.id
+            JOIN object_blobs
+              ON object_blobs.object_id = library_items.object_id
+             AND object_blobs.workspace_id = library_items.workspace_id
+             AND object_blobs.purpose = 'READER_TEXT'
+            JOIN blobs
+              ON blobs.id = object_blobs.blob_id
+             AND blobs.workspace_id = object_blobs.workspace_id
+            "#,
+        )
+        .fetch_one(&restored_pool)
+        .await
+        .expect("restored Library data should be readable");
+        assert_eq!(library.get::<String, _>("title"), "A saved article");
+        assert_eq!(library.get::<String, _>("author"), "Ada Example");
+        assert_eq!(library.get::<Option<i64>, _>("published_at"), None);
+        assert_eq!(library.get::<String, _>("excerpt"), "A portable excerpt.");
+        assert_eq!(library.get::<i64, _>("fetched_at"), 1400);
+        assert_eq!(
+            library.get::<String, _>("content_hash"),
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        );
+        assert_eq!(library.get::<i64, _>("content_version"), 2);
+        assert_eq!(library.get::<String, _>("selected_text"), "A saved passage");
+        assert_eq!(library.get::<String, _>("reader_text"), "Safe reader body.");
+        let completed_jobs: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE status = 'COMPLETED'")
+                .fetch_one(&restored_pool)
+                .await
+                .expect("restored jobs should be readable");
+        assert_eq!(completed_jobs, 1);
         restored_pool.close().await;
 
         let restored_pool = open_writable_database(&target).await;
@@ -2446,9 +3165,23 @@ mod tests {
             "INSERT INTO users (id, uid, username, password_hash, created_at, updated_at) VALUES (9911223399, 'user_01', 'owner', 'secret-password-hash', 1000, 1000)",
             "INSERT INTO workspaces (id, uid, name, timezone, created_by, created_at, updated_at) VALUES (8811223399, 'workspace_01', 'Personal', 'Asia/Singapore', 9911223399, 1000, 1000)",
             "INSERT INTO workspace_members (workspace_id, user_id, role, created_at) VALUES (8811223399, 9911223399, 'OWNER', 1000)",
-            "INSERT INTO notes (id, uid, workspace_id, creator_id, content, status, pinned, created_at, updated_at) VALUES (7711223399, 'note_01', 8811223399, 9911223399, '# Original note\n\n你好, world.', 'ACTIVE', 1, 1100, 1100)",
+            "INSERT INTO objects (id, uid, workspace_id, creator_id, object_type, created_at, updated_at) VALUES (5511223399, 'note_01', 8811223399, 9911223399, 'NOTE', 1100, 1100)",
+            "INSERT INTO objects (id, uid, workspace_id, creator_id, object_type, created_at, updated_at) VALUES (5511223398, 'task_01', 8811223399, 9911223399, 'TASK', 1200, 1200)",
+            "INSERT INTO objects (id, uid, workspace_id, creator_id, object_type, created_at, updated_at) VALUES (5511223397, 'library_01', 8811223399, 9911223399, 'LIBRARY_ITEM', 1300, 1300)",
+            "INSERT INTO notes (id, object_id, uid, workspace_id, creator_id, content, status, pinned, created_at, updated_at) VALUES (7711223399, 5511223399, 'note_01', 8811223399, 9911223399, '# Original note\n\n你好, world.', 'ACTIVE', 1, 1100, 1100)",
             "INSERT INTO note_tags (note_id, tag) VALUES (7711223399, '中文')",
-            "INSERT INTO tasks (id, uid, workspace_id, creator_id, title, description, status, priority, due_date, due_time, sort_key, completed_at, created_at, updated_at) VALUES (6611223399, 'task_01', 8811223399, 9911223399, 'Ship the safe export', 'Verify the generated files.', 'TODO', 1, '2026-08-23', '18:30', 0, NULL, 1200, 1200)",
+            "INSERT INTO object_tags (object_id, tag) VALUES (5511223399, '中文')",
+            "INSERT INTO object_tags (object_id, tag) VALUES (5511223397, 'reading')",
+            "INSERT INTO tasks (id, object_id, uid, workspace_id, creator_id, title, description, status, priority, due_date, due_time, sort_key, completed_at, created_at, updated_at) VALUES (6611223399, 5511223398, 'task_01', 8811223399, 9911223399, 'Ship the safe export', 'Verify the generated files.', 'TODO', 1, '2026-08-23', '18:30', 0, NULL, 1200, 1200)",
+            "INSERT INTO library_items (id, object_id, workspace_id, original_url, normalized_url, canonical_url, title, site_name, item_kind, status, read_at, starred, processing_status, last_error, author, published_at, excerpt, fetched_at, content_hash, content_version) VALUES (4411223399, 5511223397, 8811223399, 'https://example.com/article', 'https://example.com/article', NULL, 'A saved article', 'Example', 'ARTICLE', 'ACTIVE', NULL, 1, 'READY', NULL, 'Ada Example', NULL, 'A portable excerpt.', 1400, 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', 2)",
+            "INSERT INTO library_captures (id, uid, library_item_id, workspace_id, idempotency_key, selected_text, note, captured_title, created_at) VALUES (3311223399, 'capture_01', 4411223399, 8811223399, 'fixture-capture', 'A saved passage', 'Read this again.', 'A saved article', 1300)",
+            "INSERT INTO blobs (id, uid, workspace_id, sha256, mime_type, byte_len, body, created_at) VALUES (2211223399, 'blob_source_01', 8811223399, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'text/html', length(CAST('<html>UNSAFE_SOURCE_ONLY_8f3a</html>' AS BLOB)), CAST('<html>UNSAFE_SOURCE_ONLY_8f3a</html>' AS BLOB), 1310)",
+            "INSERT INTO blobs (id, uid, workspace_id, sha256, mime_type, byte_len, body, created_at) VALUES (2211223398, 'blob_reader_html_01', 8811223399, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'text/html', length(CAST('<article><p>Safe reader body.</p></article>' AS BLOB)), CAST('<article><p>Safe reader body.</p></article>' AS BLOB), 1320)",
+            "INSERT INTO blobs (id, uid, workspace_id, sha256, mime_type, byte_len, body, created_at) VALUES (2211223397, 'blob_reader_text_01', 8811223399, 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', 'text/plain', length(CAST('Safe reader body.' AS BLOB)), CAST('Safe reader body.' AS BLOB), 1330)",
+            "INSERT INTO object_blobs (object_id, workspace_id, blob_id, purpose) VALUES (5511223397, 8811223399, 2211223399, 'SOURCE_HTML')",
+            "INSERT INTO object_blobs (object_id, workspace_id, blob_id, purpose) VALUES (5511223397, 8811223399, 2211223398, 'READER_HTML')",
+            "INSERT INTO object_blobs (object_id, workspace_id, blob_id, purpose) VALUES (5511223397, 8811223399, 2211223397, 'READER_TEXT')",
+            "INSERT INTO jobs (id, uid, workspace_id, object_id, job_type, status, attempt_count, max_attempts, run_after, lease_owner, lease_expires_at, last_error, created_at, updated_at) VALUES (1111223399, 'job_fixture_01', 8811223399, 5511223397, 'FETCH_LIBRARY_ITEM', 'COMPLETED', 1, 5, 1300, NULL, NULL, NULL, 1300, 1400)",
             "INSERT INTO sessions (token_hash, user_id, active_workspace_id, created_at, expires_at) VALUES ('secret-session-hash', 9911223399, 8811223399, 1000, 2000)",
         ] {
             sqlx::query(statement)

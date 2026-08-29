@@ -124,14 +124,31 @@ pub async fn create(
     validate_priority(request.priority)?;
     validate_schedule(request.due_date.as_deref(), request.due_time.as_deref())?;
     let uid = Ulid::generate().to_string();
+    let mut transaction = pool.begin().await?;
+    let object = sqlx::query(
+        r#"
+        INSERT INTO objects
+          (uid, workspace_id, creator_id, object_type, created_at, updated_at)
+        VALUES (?, ?, ?, 'TASK', ?, ?)
+        "#,
+    )
+    .bind(&uid)
+    .bind(workspace_id)
+    .bind(creator_id)
+    .bind(now)
+    .bind(now)
+    .execute(&mut *transaction)
+    .await?;
+    let object_id = object.last_insert_rowid();
     sqlx::query(
         r#"
         INSERT INTO tasks (
-          uid, workspace_id, creator_id, title, description, status, priority,
+          object_id, uid, workspace_id, creator_id, title, description, status, priority,
           due_date, due_time, sort_key, completed_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, 'TODO', ?, ?, ?, 0, NULL, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, 'TODO', ?, ?, ?, 0, NULL, ?, ?)
         "#,
     )
+    .bind(object_id)
     .bind(&uid)
     .bind(workspace_id)
     .bind(creator_id)
@@ -142,8 +159,9 @@ pub async fn create(
     .bind(request.due_time.as_deref())
     .bind(now)
     .bind(now)
-    .execute(pool)
+    .execute(&mut *transaction)
     .await?;
+    transaction.commit().await?;
     get(pool, workspace_id, &uid).await
 }
 
@@ -258,6 +276,7 @@ pub async fn update(
     let due_time_value = due_time
         .as_ref()
         .and_then(|value| value.as_ref().map(String::as_str));
+    let mut transaction = pool.begin().await?;
     let result = sqlx::query(
         r#"
         UPDATE tasks
@@ -306,7 +325,7 @@ pub async fn update(
     .bind(due_time_value)
     .bind(due_date.is_some())
     .bind(due_date_value)
-    .execute(pool)
+    .execute(&mut *transaction)
     .await?;
     if result.rows_affected() == 0 {
         let exists = sqlx::query_scalar::<_, i64>(
@@ -314,22 +333,51 @@ pub async fn update(
         )
         .bind(workspace_id)
         .bind(uid)
-        .fetch_one(pool)
+        .fetch_one(&mut *transaction)
         .await?;
         if exists == 0 {
             return Err(AppError::not_found("Task"));
         }
         return Err(AppError::validation("dueTime requires dueDate"));
     }
+    let object_id = sqlx::query_scalar::<_, i64>(
+        "SELECT object_id FROM tasks WHERE workspace_id = ? AND uid = ?",
+    )
+    .bind(workspace_id)
+    .bind(uid)
+    .fetch_one(&mut *transaction)
+    .await?;
+    let object_update = sqlx::query(
+        "UPDATE objects SET updated_at = ? WHERE id = ? AND workspace_id = ? AND object_type = 'TASK'",
+    )
+    .bind(now)
+    .bind(object_id)
+    .bind(workspace_id)
+    .execute(&mut *transaction)
+    .await?;
+    if object_update.rows_affected() != 1 {
+        return Err(AppError::Internal("Task object is missing".to_owned()));
+    }
+    transaction.commit().await?;
     get(pool, workspace_id, uid).await
 }
 
 pub async fn delete(pool: &SqlitePool, workspace_id: i64, uid: &str) -> AppResult<()> {
-    let result = sqlx::query("DELETE FROM tasks WHERE workspace_id = ? AND uid = ?")
-        .bind(workspace_id)
-        .bind(uid)
-        .execute(pool)
-        .await?;
+    let result = sqlx::query(
+        r#"
+        DELETE FROM objects
+        WHERE workspace_id = ? AND uid = ? AND object_type = 'TASK'
+          AND id IN (
+            SELECT object_id FROM tasks WHERE workspace_id = ? AND uid = ?
+          )
+        "#,
+    )
+    .bind(workspace_id)
+    .bind(uid)
+    .bind(workspace_id)
+    .bind(uid)
+    .execute(pool)
+    .await?;
     if result.rows_affected() == 0 {
         return Err(AppError::not_found("Task"));
     }

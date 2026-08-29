@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import App from './App.svelte';
 import { getSession, login, logout } from './lib/api/auth';
+import { listLibraryItems } from './lib/api/library';
 import { listNotes, listTags } from './lib/api/notes';
 import { listTasks } from './lib/api/tasks';
 import type { SessionInfo } from './lib/api/types';
@@ -19,6 +20,16 @@ vi.mock('./lib/api/notes', () => ({
   listNotes: vi.fn(),
   listTags: vi.fn(),
   updateNote: vi.fn(),
+}));
+
+vi.mock('./lib/api/library', () => ({
+  createLibraryItem: vi.fn(),
+  deleteLibraryItem: vi.fn(),
+  getLibraryContent: vi.fn(),
+  getLibraryItem: vi.fn(),
+  listLibraryItems: vi.fn(),
+  retryLibraryItem: vi.fn(),
+  updateLibraryItem: vi.fn(),
 }));
 
 vi.mock('./lib/api/tasks', () => ({
@@ -50,6 +61,7 @@ beforeEach(() => {
     ),
   );
   vi.mocked(listNotes).mockResolvedValue({ items: [], page: 1, pageSize: 30, total: 0 });
+  vi.mocked(listLibraryItems).mockResolvedValue({ items: [], page: 1, pageSize: 30, total: 0 });
   vi.mocked(listTags).mockResolvedValue({ items: [] });
   vi.mocked(listTasks).mockResolvedValue({ items: [] });
   vi.mocked(login).mockResolvedValue(newSession);
@@ -140,6 +152,11 @@ describe('App navigation focus', () => {
       await vi.waitFor(() => expect(window.location.pathname).toBe('/notes'));
       await vi.waitFor(() => expect(document.activeElement?.id).toBe('main-content'));
       expect(target.querySelector('.todo-rail')).toBeNull();
+
+      target.querySelector<HTMLAnchorElement>('.nav-item[title="Library"]')?.click();
+      await vi.waitFor(() => expect(window.location.pathname).toBe('/library'));
+      await vi.waitFor(() => expect(target.querySelector('.library-page')).not.toBeNull());
+      await vi.waitFor(() => expect(document.activeElement?.id).toBe('main-content'));
 
       target.querySelector<HTMLAnchorElement>('.nav-item[title="Workspace"]')?.click();
       await vi.waitFor(() => expect(window.location.pathname).toBe('/'));

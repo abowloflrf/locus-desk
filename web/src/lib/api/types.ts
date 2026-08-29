@@ -104,6 +104,84 @@ export interface ListTagsResponse {
   items: string[];
 }
 
+export type LibraryItemKind = 'BOOKMARK' | 'ARTICLE';
+export type LibraryItemStatus = 'ACTIVE' | 'ARCHIVED';
+export type LibraryProcessingStatus = 'NOT_FETCHED' | 'PENDING' | 'READY' | 'FAILED';
+
+export interface LibraryCapture {
+  uid: string;
+  selectedText: string;
+  note: string;
+  capturedTitle: string | null;
+  createdAt: string;
+}
+
+export interface LibraryItem {
+  uid: string;
+  originalUrl: string;
+  normalizedUrl: string;
+  canonicalUrl: string | null;
+  title: string;
+  siteName: string | null;
+  author: string | null;
+  publishedAt: string | null;
+  excerpt: string;
+  itemKind: LibraryItemKind;
+  status: LibraryItemStatus;
+  readAt: string | null;
+  starred: boolean;
+  processingStatus: LibraryProcessingStatus;
+  lastError: string | null;
+  fetchedAt: string | null;
+  contentVersion: number;
+  contentAvailable: boolean;
+  tags: string[];
+  captures: LibraryCapture[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LibraryContentResponse {
+  safeHtml: string;
+  plainText: string;
+  fetchedAt: string;
+  contentVersion: number;
+}
+
+export interface CreateLibraryItemRequest {
+  url: string;
+  title?: string;
+  selection?: string;
+  note?: string;
+  tags?: string[];
+  idempotencyKey?: string;
+}
+
+export interface UpdateLibraryItemRequest {
+  title?: string;
+  status?: LibraryItemStatus;
+  read?: boolean;
+  starred?: boolean;
+  tags?: string[];
+}
+
+export interface ListLibraryItemsParams {
+  status?: LibraryItemStatus;
+  q?: string;
+  tag?: string;
+  read?: boolean;
+  starred?: boolean;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ListLibraryItemsResponse {
+  items: LibraryItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
 export interface ApiErrorPayload {
   error: {
     code: string;
