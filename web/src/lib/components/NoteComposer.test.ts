@@ -26,7 +26,9 @@ describe('note composer submission', () => {
       const submittedDraft = '    Submitted draft  \n';
       textarea.value = submittedDraft;
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
-      const submitButton = target.querySelector<HTMLButtonElement>('.composer-submit button')!;
+      const submitButton = target.querySelector<HTMLButtonElement>('.composer-submit')!;
+      expect(target.querySelector('#composer-hint')).toBeNull();
+      expect(submitButton.closest('[data-slot="input-group"]')).not.toBeNull();
       expect(submitButton.textContent?.trim()).toBe('Save');
       await vi.waitFor(() => expect(submitButton.disabled).toBe(false));
       submitButton.click();

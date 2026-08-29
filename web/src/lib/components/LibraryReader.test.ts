@@ -57,7 +57,9 @@ describe('LibraryReader', () => {
 
       expect(readerSource).toContain('min-height: 44px');
       expect(readerSource).toContain('@media (max-width: 767px)');
-      expect(readerSource).toContain('padding: 12px 16px 72px');
+      expect(readerSource).toContain('env(safe-area-inset-top)');
+      expect(readerSource).toContain('calc(48px + env(safe-area-inset-bottom))');
+      expect(readerSource).toContain('.reader-heading h1:focus-visible');
     } finally {
       await unmount(component);
     }
@@ -74,9 +76,51 @@ describe('LibraryReader', () => {
     await unmount(component);
     expect(signal?.aborted).toBe(true);
   });
+
+  it('shows pending and failed capture states without requesting unavailable content', async () => {
+    const pending = mountReader({
+      item: libraryItem({ contentAvailable: false, processingStatus: 'PENDING' }),
+    });
+
+    try {
+      await vi.waitFor(() => expect(pending.target.textContent).toContain('Preparing article…'));
+      expect(getLibraryContent).not.toHaveBeenCalled();
+    } finally {
+      await unmount(pending.component);
+    }
+
+    vi.clearAllMocks();
+    const onRetry = vi.fn();
+    const failed = mountReader({
+      item: libraryItem({
+        contentAvailable: false,
+        lastError: 'The source timed out.',
+        processingStatus: 'FAILED',
+      }),
+      onRetry,
+    });
+
+    try {
+      await vi.waitFor(() => expect(failed.target.textContent).toContain('The source timed out.'));
+      const retry = [...failed.target.querySelectorAll<HTMLButtonElement>('button')].find(
+        (button) => button.textContent?.trim() === 'Retry',
+      )!;
+      retry.click();
+      expect(onRetry).toHaveBeenCalledOnce();
+      expect(getLibraryContent).not.toHaveBeenCalled();
+    } finally {
+      await unmount(failed.component);
+    }
+  });
 });
 
-function mountReader(overrides: { onBack?: () => void } = {}): {
+function mountReader(
+  overrides: {
+    item?: LibraryItem;
+    onBack?: () => void;
+    onRetry?: (item: LibraryItem) => void;
+  } = {},
+): {
   component: ReturnType<typeof mount>;
   target: HTMLDivElement;
 } {
@@ -84,8 +128,9 @@ function mountReader(overrides: { onBack?: () => void } = {}): {
   document.body.append(target);
   const component = mount(LibraryReader, {
     props: {
-      item: libraryItem(),
+      item: overrides.item ?? libraryItem(),
       onBack: overrides.onBack ?? vi.fn(),
+      onRetry: overrides.onRetry,
       onToggleRead: vi.fn(),
       timeZone: 'Asia/Singapore',
     },
@@ -94,7 +139,7 @@ function mountReader(overrides: { onBack?: () => void } = {}): {
   return { component, target };
 }
 
-function libraryItem(): LibraryItem {
+function libraryItem(overrides: Partial<LibraryItem> = {}): LibraryItem {
   return {
     author: 'Ada Reader',
     canonicalUrl: 'https://example.com/article',
@@ -118,6 +163,7 @@ function libraryItem(): LibraryItem {
     title: 'A readable article',
     uid: 'library-1',
     updatedAt: '2026-08-24T03:00:00.000Z',
+    ...overrides,
   };
 }
 

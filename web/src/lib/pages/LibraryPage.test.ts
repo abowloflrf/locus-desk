@@ -97,16 +97,22 @@ describe('LibraryPage', () => {
 
     try {
       await vi.waitFor(() => expect(target.textContent).toContain('Alpha'));
-      const url = target.querySelector<HTMLInputElement>('#library-url')!;
+      target.querySelector<HTMLButtonElement>('[aria-label="Add a link"]')!.click();
+      await tick();
+      const url = document.body.querySelector<HTMLInputElement>('#library-url')!;
       url.value = 'https://example.com/alpha';
       url.dispatchEvent(new Event('input', { bubbles: true }));
-      const save = target.querySelector<HTMLButtonElement>('.save-link')!;
+      const save = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(
+        (button) => button.textContent?.trim() === 'Save',
+      )!;
       await vi.waitFor(() => expect(save.disabled).toBe(false));
       save.click();
 
       await vi.waitFor(() => expect(createLibraryItem).toHaveBeenCalledOnce());
       await vi.waitFor(() =>
-        expect(target.querySelector('.library-toolbar p')?.textContent).toBe('1 item in this view'),
+        expect(target.querySelector('[data-library-count]')?.textContent).toContain(
+          '1 item in this view',
+        ),
       );
       expect(target.querySelectorAll('[data-focus-uid="alpha"]')).toHaveLength(1);
     } finally {
@@ -127,7 +133,7 @@ describe('LibraryPage', () => {
     try {
       await vi.waitFor(() => expect(listLibraryItems).toHaveBeenCalledOnce());
       const initialSignal = vi.mocked(listLibraryItems).mock.calls[0]?.[1];
-      const search = target.querySelector<HTMLInputElement>('[placeholder="Search Library"]')!;
+      const search = target.querySelector<HTMLInputElement>('[placeholder="Search links"]')!;
       search.value = 'fresh';
       search.dispatchEvent(new Event('input', { bubbles: true }));
       expect(initialSignal?.aborted).toBe(true);
@@ -138,10 +144,15 @@ describe('LibraryPage', () => {
       await Promise.resolve();
       expect(target.textContent).not.toContain('Stale result');
 
-      const archivedFilter = [...target.querySelectorAll<HTMLButtonElement>('button')].find(
-        (button) => button.textContent?.trim() === 'Archived',
-      )!;
-      archivedFilter.click();
+      target.querySelector<HTMLButtonElement>('[aria-label="Status: Active"]')!.click();
+      const archivedOption = await vi.waitFor(() => {
+        const option = [
+          ...document.body.querySelectorAll<HTMLElement>('[role="menuitemradio"]'),
+        ].find((entry) => entry.textContent?.trim() === 'Archived');
+        expect(option).not.toBeUndefined();
+        return option!;
+      });
+      archivedOption.click();
       await tick();
       expect(target.textContent).not.toContain('Fresh result');
       expect(target.querySelector('.library-results')?.getAttribute('aria-busy')).toBe('true');
@@ -149,6 +160,42 @@ describe('LibraryPage', () => {
       expect(vi.mocked(listLibraryItems).mock.calls[2]?.[0]).toEqual(
         expect.objectContaining({ q: 'fresh', status: 'ARCHIVED' }),
       );
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it('keeps list rows compact and only surfaces exceptional processing states', async () => {
+    const ready = item('ready', 'Ready article', {
+      excerpt: 'This summary belongs in the preview.',
+      processingStatus: 'READY',
+    });
+    const pending = item('pending', 'Pending article', { processingStatus: 'PENDING' });
+    vi.mocked(listLibraryItems).mockResolvedValue(page([ready, pending]));
+    const { component, target } = mountPage();
+
+    try {
+      const readyRow = await vi.waitFor(() => {
+        const row = target.querySelector<HTMLElement>('[data-library-select="ready"]');
+        expect(row).not.toBeNull();
+        return row!;
+      });
+      const pendingRow = target.querySelector<HTMLElement>('[data-library-select="pending"]')!;
+
+      expect(readyRow.textContent).not.toContain('This summary belongs in the preview.');
+      expect(readyRow.querySelector('.processing-state')).toBeNull();
+      expect(readyRow.querySelector('.unread-mark')).not.toBeNull();
+      expect(pendingRow.textContent).toContain('Processing');
+
+      const favicon = readyRow.querySelector<HTMLImageElement>('.item-favicon img')!;
+      expect(favicon.src).toBe(
+        'https://www.google.com/s2/favicons?domain_url=https%3A%2F%2Fexample.com&sz=64',
+      );
+      expect(favicon.getAttribute('loading')).toBe('lazy');
+      expect(favicon.getAttribute('referrerpolicy')).toBe('no-referrer');
+      favicon.dispatchEvent(new Event('error'));
+      expect(favicon.hidden).toBe(true);
+      expect(readyRow.querySelector('.item-favicon')?.textContent?.trim()).toBe('E');
     } finally {
       await unmount(component);
     }
@@ -162,16 +209,14 @@ describe('LibraryPage', () => {
     const { component, target } = mountPage();
 
     try {
-      const star = await vi.waitFor(() => {
-        const button = target.querySelector<HTMLButtonElement>('[aria-label="Star Alpha"]');
-        expect(button).not.toBeNull();
-        return button!;
-      });
+      const star = await openLibraryAction(target, 'Alpha', 'Star Alpha');
       star.click();
-      await vi.waitFor(() => expect(star.getAttribute('aria-pressed')).toBe('true'));
+      await vi.waitFor(() => expect(updateLibraryItem).toHaveBeenCalledOnce());
+      expect(target.querySelector('[data-focus-uid="alpha"]')?.classList).toContain('busy');
 
       update.reject(new Error('Star update failed.'));
-      await vi.waitFor(() => expect(star.getAttribute('aria-pressed')).toBe('false'));
+      await vi.waitFor(() => expect(target.querySelector('.status-error')).not.toBeNull());
+      expect(await openLibraryAction(target, 'Alpha', 'Star Alpha')).not.toBeNull();
       expect(target.querySelector('.status-error')?.textContent).toContain('Star update failed.');
       expect(target.querySelector('.status-error')?.getAttribute('aria-live')).toBe('assertive');
     } finally {
@@ -188,11 +233,7 @@ describe('LibraryPage', () => {
     const { component, target } = mountPage();
 
     try {
-      const archive = await vi.waitFor(() => {
-        const button = target.querySelector<HTMLButtonElement>('[aria-label="Archive Alpha"]');
-        expect(button).not.toBeNull();
-        return button!;
-      });
+      const archive = await openLibraryAction(target, 'Alpha', 'Archive Alpha');
       archive.focus();
       archive.click();
       await vi.waitFor(() => expect(target.querySelector('[data-focus-uid="alpha"]')).toBeNull());
@@ -220,7 +261,7 @@ describe('LibraryPage', () => {
         (query: string) =>
           ({
             addEventListener: vi.fn(),
-            matches: true,
+            matches: query === '(max-width: 1199px)',
             media: query,
             removeEventListener: vi.fn(),
           }) as unknown as MediaQueryList,
@@ -252,16 +293,71 @@ describe('LibraryPage', () => {
       select.click();
 
       await vi.waitFor(() =>
-        expect(target.textContent).toContain('Keep the content pipeline observable.'),
+        expect(document.body.textContent).toContain('Keep the content pipeline observable.'),
       );
-      const detailPanel = target.querySelector<HTMLElement>('.library-detail')!;
-      expect(detailPanel.getAttribute('aria-modal')).toBe('true');
+      const detailPanel = document.body.querySelector<HTMLElement>('[data-slot="sheet-content"]')!;
       expect(detailPanel.getAttribute('role')).toBe('dialog');
       expect(document.activeElement?.textContent).toContain('Alpha');
 
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-      await vi.waitFor(() => expect(detailPanel.getAttribute('aria-hidden')).toBe('true'));
+      document.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' }));
+      await vi.waitFor(() =>
+        expect(document.body.querySelector('[data-slot="sheet-content"]')).toBeNull(),
+      );
       expect(document.activeElement).toBe(select);
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it('opens a mobile article directly in the full reader and restores the list on Back', async () => {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(
+        (query: string) =>
+          ({
+            addEventListener: vi.fn(),
+            matches: query === '(max-width: 1199px)' || query === '(max-width: 767px)',
+            media: query,
+            removeEventListener: vi.fn(),
+          }) as unknown as MediaQueryList,
+      ),
+    );
+    const ready = item('alpha', 'Alpha', {
+      contentAvailable: true,
+      contentVersion: 1,
+      processingStatus: 'READY',
+    });
+    vi.mocked(listLibraryItems).mockResolvedValue(page([ready]));
+    const onImmersiveChange = vi.fn();
+    const { component, target } = mountPage(onImmersiveChange);
+
+    try {
+      const select = await vi.waitFor(() => {
+        const button = target.querySelector<HTMLButtonElement>('[data-library-select="alpha"]');
+        expect(button).not.toBeNull();
+        return button!;
+      });
+      select.focus();
+      select.click();
+
+      await vi.waitFor(() => expect(target.querySelector('.library-reader')).not.toBeNull());
+      expect(target.querySelector('.library-reader.preview')).toBeNull();
+      expect(document.body.querySelector('[data-slot="sheet-content"]')).toBeNull();
+      expect(getLibraryItem).not.toHaveBeenCalled();
+      expect(onImmersiveChange).toHaveBeenLastCalledWith(true);
+
+      const back = [...target.querySelectorAll<HTMLButtonElement>('button')].find(
+        (button) => button.textContent?.trim() === 'Back to Library',
+      )!;
+      back.click();
+
+      const restored = await vi.waitFor(() => {
+        const button = target.querySelector<HTMLButtonElement>('[data-library-select="alpha"]');
+        expect(button).not.toBeNull();
+        return button!;
+      });
+      await vi.waitFor(() => expect(document.activeElement).toBe(restored));
+      expect(onImmersiveChange).toHaveBeenLastCalledWith(false);
     } finally {
       await unmount(component);
     }
@@ -280,27 +376,25 @@ describe('LibraryPage', () => {
     const { component, target } = mountPage();
 
     try {
-      const deleteButton = await vi.waitFor(() => {
-        const button = target.querySelector<HTMLButtonElement>('[aria-label="Delete Alpha"]');
-        expect(button).not.toBeNull();
-        return button!;
-      });
+      const deleteButton = await openLibraryAction(target, 'Alpha', 'Delete Alpha');
       deleteButton.focus();
       deleteButton.click();
-      await vi.waitFor(() => expect(target.querySelector('dialog')?.open).toBe(true));
-      const confirm = target.querySelector<HTMLButtonElement>('.confirm-dialog .button.danger')!;
+      await waitForDialog(true);
+      const confirm = document.body.querySelector<HTMLButtonElement>(
+        '[data-slot="alert-dialog-action"]',
+      )!;
       confirm.click();
 
       await vi.waitFor(() =>
-        expect(target.querySelector('.confirm-dialog [role="alert"]')?.textContent).toContain(
+        expect(document.body.querySelector('[role="alert"]')?.textContent).toContain(
           'Delete failed.',
         ),
       );
-      expect(target.querySelector('dialog')?.open).toBe(true);
+      expect(document.body.querySelector('[data-slot="alert-dialog-content"]')).not.toBeNull();
       expect(target.querySelector('[data-focus-uid="alpha"]')).not.toBeNull();
 
       confirm.click();
-      await vi.waitFor(() => expect(target.querySelector('dialog')?.open).toBe(false));
+      await waitForDialog(false);
       await vi.waitFor(() => expect(target.querySelector('[data-focus-uid="alpha"]')).toBeNull());
       await vi.waitFor(() =>
         expect(
@@ -394,7 +488,7 @@ describe('LibraryPage', () => {
     }
   });
 
-  it('opens ready content and restores the Read button focus when the reader closes with Escape', async () => {
+  it('previews ready content and restores the expand button after full-screen reading', async () => {
     const ready = item('alpha', 'Alpha', {
       contentAvailable: true,
       contentVersion: 1,
@@ -411,25 +505,26 @@ describe('LibraryPage', () => {
         return button!;
       });
       select.click();
-      const read = await vi.waitFor(() => {
-        const button = target.querySelector<HTMLButtonElement>('[data-library-read="alpha"]');
+      const expand = await vi.waitFor(() => {
+        expect(target.querySelector('.library-reader.preview')).not.toBeNull();
+        const button = target.querySelector<HTMLButtonElement>('[data-library-expand="alpha"]');
         expect(button).not.toBeNull();
         return button!;
       });
-      read.focus();
-      read.click();
+      expand.focus();
+      expand.click();
 
       await vi.waitFor(() => expect(document.activeElement?.id).toBe('library-reader-title'));
-      expect(target.querySelector('.library-reader')).not.toBeNull();
+      expect(target.querySelector('.library-reader.preview')).toBeNull();
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
 
       const restored = await vi.waitFor(() => {
-        const button = target.querySelector<HTMLButtonElement>('[data-library-read="alpha"]');
+        const button = target.querySelector<HTMLButtonElement>('[data-library-expand="alpha"]');
         expect(button).not.toBeNull();
         return button!;
       });
       await vi.waitFor(() => expect(document.activeElement).toBe(restored));
-      expect(target.querySelector('.library-reader')).toBeNull();
+      expect(target.querySelector('.library-reader.preview')).not.toBeNull();
     } finally {
       await unmount(component);
     }
@@ -545,7 +640,7 @@ describe('LibraryPage', () => {
       target.querySelector<HTMLButtonElement>('[data-library-select="alpha"]')!.click();
       await flushUpdates();
       const detailSignal = vi.mocked(getLibraryItem).mock.calls[0]?.[1];
-      target.querySelector<HTMLButtonElement>('[data-library-read="alpha"]')!.click();
+      target.querySelector<HTMLButtonElement>('[data-library-expand="alpha"]')!.click();
       await flushUpdates();
       expect(detailSignal?.aborted).toBe(true);
 
@@ -561,10 +656,40 @@ describe('LibraryPage', () => {
   });
 });
 
-function mountPage(): { component: ReturnType<typeof mount>; target: HTMLDivElement } {
+function mountPage(onImmersiveChange?: (open: boolean) => void): {
+  component: ReturnType<typeof mount>;
+  target: HTMLDivElement;
+} {
   const target = document.createElement('div');
   document.body.append(target);
-  return { component: mount(LibraryPage, { props: { session }, target }), target };
+  return {
+    component: mount(LibraryPage, { props: { onImmersiveChange, session }, target }),
+    target,
+  };
+}
+
+async function openLibraryAction(
+  target: HTMLElement,
+  title: string,
+  actionLabel: string,
+): Promise<HTMLElement> {
+  const trigger = await vi.waitFor(() => {
+    const button = target.querySelector<HTMLButtonElement>(`[aria-label="Actions for ${title}"]`);
+    expect(button).not.toBeNull();
+    return button!;
+  });
+  trigger.click();
+  return vi.waitFor(() => {
+    const action = document.body.querySelector<HTMLElement>(`[aria-label="${actionLabel}"]`);
+    expect(action).not.toBeNull();
+    return action!;
+  });
+}
+
+async function waitForDialog(open: boolean): Promise<void> {
+  await vi.waitFor(() =>
+    expect(Boolean(document.body.querySelector('[data-slot="alert-dialog-content"]'))).toBe(open),
+  );
 }
 
 function page(items: LibraryItem[]): ListLibraryItemsResponse {

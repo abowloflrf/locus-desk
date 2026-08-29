@@ -19,10 +19,14 @@ afterEach(() => {
 });
 
 describe('TaskBoard focus and filtering', () => {
-  it('loads every open Todo task, shows dates, and exposes compact actions', async () => {
+  it('loads every open Todo task and keeps each summary to its title and first detail line', async () => {
     const alpha = task('alpha', 'Alpha');
     const timed = { ...task('timed', 'Timed'), dueTime: '16:00' };
-    const undated = { ...task('undated', 'Undated'), dueDate: null };
+    const undated = {
+      ...task('undated', 'Undated'),
+      description: 'First detail line\nHidden detail line',
+      dueDate: null,
+    };
     const priority = { ...task('priority', 'Priority item'), dueDate: null, priority: 1 as const };
     vi.mocked(listTasks).mockResolvedValue({ items: [alpha, timed, undated, priority] });
     const target = document.createElement('div');
@@ -39,13 +43,16 @@ describe('TaskBoard focus and filtering', () => {
       expect(target.querySelector('#priority-todo')?.textContent).toContain('1');
       expect(
         target.querySelector('[data-focus-uid="priority"] [aria-label="Priority task"]'),
-      ).not.toBeNull();
-      expect(target.querySelector('[data-focus-uid="alpha"]')?.textContent).toContain('Today');
-      expect(target.querySelector('[data-focus-uid="timed"]')?.textContent).toContain('16:00');
-      expect(target.querySelector('[data-focus-uid="undated"]')?.classList).toContain(
-        'task-row-compact',
+      ).toBeNull();
+      expect(target.querySelector('[data-focus-uid="alpha"]')?.textContent).not.toContain('Today');
+      expect(target.querySelector('[data-focus-uid="timed"]')?.textContent).not.toContain('16:00');
+      expect(target.querySelector('[data-focus-uid="undated"]')?.textContent).toContain(
+        'First detail line',
       );
-      expect(target.querySelector('[data-focus-uid="alpha"]')?.classList).not.toContain(
+      expect(target.querySelector('[data-focus-uid="undated"]')?.textContent).not.toContain(
+        'Hidden detail line',
+      );
+      expect(target.querySelector('[data-focus-uid="alpha"]')?.classList).toContain(
         'task-row-compact',
       );
 
@@ -148,28 +155,55 @@ describe('TaskBoard focus and filtering', () => {
       });
       expect(target.querySelector('#regular-todo')?.textContent).toContain('Regular');
       edit.click();
-      const dueDate = await vi.waitFor(() => {
-        const input = target.querySelector<HTMLInputElement>(
-          '[data-focus-uid="alpha"] input[type="date"]',
+      const dueDateTrigger = await vi.waitFor(() => {
+        const button = target.querySelector<HTMLButtonElement>(
+          '[data-focus-uid="alpha"] [aria-label^="Due date "]',
         );
-        expect(input).not.toBeNull();
-        return input!;
+        expect(button).not.toBeNull();
+        return button!;
       });
+      expect(target.querySelector('[data-focus-uid="alpha"] input[type="date"]')).toBeNull();
       expect(target.querySelector('[data-focus-uid="alpha"] input[type="time"]')).toBeNull();
-      expect(
-        target.querySelector('[data-focus-uid="alpha"] .task-edit-copy textarea'),
-      ).not.toBeNull();
-      dueDate.value = '2026-08-24';
-      dueDate.dispatchEvent(new Event('input', { bubbles: true }));
+      const editSurface = target.querySelector<HTMLElement>(
+        '[data-focus-uid="alpha"] .task-edit-copy[data-slot="input-group"]',
+      );
+      expect(editSurface?.querySelector('textarea')).not.toBeNull();
+      expect(dueDateTrigger.closest('[data-slot="input-group"]')).toBe(editSurface);
+      const highPriority = target.querySelector<HTMLButtonElement>(
+        '[data-focus-uid="alpha"] [aria-label="High priority"]',
+      )!;
+      expect(highPriority.textContent?.trim()).toBe('');
+      expect(highPriority.closest('[data-slot="input-group"]')).toBe(editSurface);
+      highPriority.click();
+      dueDateTrigger.click();
+      const august24 = await vi.waitFor(() => {
+        const button = document.body.querySelector<HTMLButtonElement>(
+          '[data-bits-day][data-value="2026-08-24"]',
+        );
+        expect(button).not.toBeNull();
+        return button!;
+      });
+      august24.click();
+      await vi.waitFor(() =>
+        expect(
+          target.querySelector('[data-focus-uid="alpha"] [aria-label="Due date 2026-08-24"]'),
+        ).not.toBeNull(),
+      );
       target
         .querySelector<HTMLFormElement>('[data-focus-uid="alpha"] .task-edit-form')
         ?.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }));
 
-      await vi.waitFor(() =>
-        expect(target.querySelector('[data-focus-uid="alpha"]')?.textContent).toContain('Aug 24'),
-      );
+      await vi.waitFor(() => expect(updateTask).toHaveBeenCalledOnce());
       expect(target.querySelector('[data-focus-uid="alpha"]')).not.toBeNull();
-      expect(updateTask).toHaveBeenCalledWith('alpha', expect.objectContaining({ dueTime: null }));
+      expect(updateTask).toHaveBeenCalledWith(
+        'alpha',
+        expect.objectContaining({ dueTime: null, priority: 1 }),
+      );
+      await vi.waitFor(() =>
+        expect(target.querySelector('[data-action-status]')?.textContent).toContain(
+          'Task saved: Alpha.',
+        ),
+      );
     } finally {
       await unmount(component);
     }
@@ -232,15 +266,27 @@ describe('TaskBoard focus and filtering', () => {
     });
 
     try {
+      const more = await vi.waitFor(() => {
+        const button = target.querySelector<HTMLButtonElement>(
+          '[aria-label="More actions for Alpha"]',
+        );
+        expect(button).not.toBeNull();
+        return button!;
+      });
+      more.click();
       const deleteButton = await vi.waitFor(() => {
-        const button = target.querySelector<HTMLButtonElement>('[aria-label="Delete Alpha"]');
+        const button = document.body.querySelector<HTMLButtonElement>(
+          '[aria-label="Delete Alpha"]',
+        );
         expect(button).not.toBeNull();
         return button!;
       });
       deleteButton.focus();
       deleteButton.click();
-      await vi.waitFor(() => expect(target.querySelector('dialog')?.open).toBe(true));
-      target.querySelector<HTMLButtonElement>('.confirm-dialog .button.danger')?.click();
+      await vi.waitFor(() =>
+        expect(document.body.querySelector('[data-slot="alert-dialog-content"]')).not.toBeNull(),
+      );
+      document.body.querySelector<HTMLButtonElement>('[data-slot="alert-dialog-action"]')?.click();
 
       await vi.waitFor(() =>
         expect(
@@ -278,7 +324,7 @@ describe('TaskBoard focus and filtering', () => {
       completedFilter.click();
       await tick();
 
-      expect(completedFilter.getAttribute('aria-pressed')).toBe('true');
+      expect(completedFilter.getAttribute('data-state')).toBe('on');
       expect(target.textContent).not.toContain('Open task');
       expect(target.querySelector('.task-board')?.getAttribute('aria-busy')).toBe('true');
       expect(target.textContent).toContain('Loading tasks…');

@@ -1,39 +1,41 @@
-.loading-state {
-  padding: 34px 0;
-  color: var(--color-text-muted);
-  font-size: 12px;
-  text-align: center;
-}
+@layer components {
+  .loading-state {
+    padding: 34px 0;
+    color: var(--muted-foreground);
+    font-size: 12px;
+    text-align: center;
+  }
 
-.loading-state.large {
-  padding: 74px 0;
-}
+  .loading-state.large {
+    padding: 74px 0;
+  }
 
-.empty-state {
-  max-width: 430px;
-  padding: 65px 0;
-}
+  .empty-state {
+    max-width: 430px;
+    padding: 65px 0;
+  }
 
-.empty-state.compact {
-  padding: 30px 0;
-}
+  .empty-state.compact {
+    padding: 30px 0;
+  }
 
-.empty-state h2 {
-  margin-bottom: 7px;
-  font-size: 16px;
-}
+  .empty-state h2 {
+    margin-bottom: 7px;
+    font-size: 16px;
+  }
 
-.empty-state p {
-  margin-bottom: 13px;
-  color: var(--color-text-muted);
-  font-size: 13px;
-}
+  .empty-state p {
+    margin-bottom: 13px;
+    color: var(--muted-foreground);
+    font-size: 13px;
+  }
 
-.empty-state.compact p {
-  margin-bottom: 3px;
-}
+  .empty-state.compact p {
+    margin-bottom: 3px;
+  }
 
-.empty-state span {
-  color: var(--color-text-muted);
-  font-size: 11px;
+  .empty-state span {
+    color: var(--muted-foreground);
+    font-size: 11px;
+  }
 }

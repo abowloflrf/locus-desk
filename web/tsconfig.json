@@ -7,6 +7,10 @@
     "forceConsistentCasingInFileNames": true,
     "moduleResolution": "Bundler",
     "noEmit": true,
+    "paths": {
+      "$lib": ["./src/lib"],
+      "$lib/*": ["./src/lib/*"]
+    },
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "sourceMap": true,

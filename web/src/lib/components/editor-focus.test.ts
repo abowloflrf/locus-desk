@@ -1,4 +1,5 @@
-import { mount, unmount } from 'svelte';
+import { EditorView } from 'codemirror';
+import { mount, tick, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Note, Task } from '../api/types';
@@ -49,10 +50,12 @@ describe('inline editor focus', () => {
     });
 
     try {
-      const editButton = target.querySelector<HTMLButtonElement>('[aria-label="Edit memo"]');
-      editButton?.click();
-      await vi.waitFor(() => expect(document.activeElement?.tagName).toBe('TEXTAREA'));
-      expect((document.activeElement as HTMLTextAreaElement).style.height).toBe('48px');
+      (await openAction(target, 'More memo actions', 'Edit memo')).click();
+      await vi.waitFor(() =>
+        expect(document.activeElement?.classList.contains('cm-content')).toBe(true),
+      );
+      expect(target.querySelector('.cm-editor')).not.toBeNull();
+      expect(document.activeElement?.getAttribute('aria-label')).toBe('Edit memo');
       expect(target.querySelector('.note-item')?.classList.contains('editing')).toBe(true);
       expect(target.querySelector('.note-actions')).toBeNull();
 
@@ -60,7 +63,7 @@ describe('inline editor focus', () => {
         new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' }),
       );
       await vi.waitFor(() =>
-        expect(document.activeElement?.getAttribute('aria-label')).toBe('Edit memo'),
+        expect(document.activeElement?.getAttribute('aria-label')).toBe('More memo actions'),
       );
       expect(target.querySelector('.note-item')?.classList.contains('editing')).toBe(false);
     } finally {
@@ -84,16 +87,25 @@ describe('inline editor focus', () => {
     });
 
     try {
-      target.querySelector<HTMLButtonElement>('[aria-label="Edit memo"]')?.click();
-      const editor = await vi.waitFor(() => {
-        const textarea = target.querySelector<HTMLTextAreaElement>('textarea');
-        expect(textarea).not.toBeNull();
-        return textarea!;
+      (await openAction(target, 'More memo actions', 'Edit memo')).click();
+      const view = await vi.waitFor(() => {
+        const editor = target.querySelector<HTMLElement>('.cm-editor');
+        expect(editor).not.toBeNull();
+        const nextView = EditorView.findFromDOM(editor!);
+        expect(nextView).not.toBeNull();
+        return nextView!;
       });
       const markdown = '    indented code\nline with spaces  \n';
-      editor.value = markdown;
-      editor.dispatchEvent(new Event('input', { bubbles: true }));
-      target.querySelector<HTMLButtonElement>('.note-edit-form .button.primary')?.click();
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: markdown } });
+      await tick();
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          bubbles: true,
+          cancelable: true,
+          ctrlKey: true,
+          key: 'Enter',
+        }),
+      );
 
       await vi.waitFor(() => expect(onSave).toHaveBeenCalledOnce());
       expect(onSave).toHaveBeenCalledWith(note, markdown);
@@ -118,10 +130,7 @@ describe('inline editor focus', () => {
     });
 
     try {
-      const editButton = target.querySelector<HTMLButtonElement>(
-        '[aria-label="Edit A task to edit"]',
-      );
-      editButton?.click();
+      target.querySelector<HTMLButtonElement>('[aria-label="Edit A task to edit"]')?.click();
       await vi.waitFor(() => expect(document.activeElement?.tagName).toBe('INPUT'));
 
       document.activeElement?.dispatchEvent(
@@ -175,4 +184,57 @@ describe('inline editor focus', () => {
       await unmount(component);
     }
   });
+
+  it('auto-saves a task when focus leaves the expanded editor', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const target = document.createElement('div');
+    const outside = document.createElement('button');
+    document.body.append(target, outside);
+    const component = mount(TaskRow, {
+      props: {
+        busy: false,
+        onDelete: vi.fn(),
+        onSave,
+        onToggle: vi.fn().mockResolvedValue(undefined),
+        task: { ...task, description: 'Existing details' },
+        today: '2026-08-23',
+      },
+      target,
+    });
+
+    try {
+      target.querySelector<HTMLButtonElement>('[aria-label="Edit A task to edit"]')?.click();
+      const title = await vi.waitFor(() => {
+        const input = target.querySelector<HTMLInputElement>('#task-title-task-1');
+        expect(input).not.toBeNull();
+        return input!;
+      });
+      title.value = 'Updated task';
+      title.dispatchEvent(new Event('input', { bubbles: true }));
+      outside.focus();
+
+      await vi.waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+      expect(onSave).toHaveBeenCalledWith(
+        expect.objectContaining({ uid: 'task-1' }),
+        expect.objectContaining({ description: 'Existing details', title: 'Updated task' }),
+      );
+      expect(document.activeElement).toBe(outside);
+    } finally {
+      await unmount(component);
+    }
+  });
 });
+
+async function openAction(
+  target: HTMLElement,
+  triggerLabel: string,
+  actionLabel: string,
+): Promise<HTMLElement> {
+  const trigger = target.querySelector<HTMLButtonElement>(`[aria-label="${triggerLabel}"]`)!;
+  trigger.click();
+  return vi.waitFor(() => {
+    const action = document.body.querySelector<HTMLElement>(`[aria-label="${actionLabel}"]`);
+    expect(action).not.toBeNull();
+    return action!;
+  });
+}

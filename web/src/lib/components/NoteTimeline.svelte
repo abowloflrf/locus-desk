@@ -90,7 +90,7 @@
   .note-day > h2 {
     padding: 18px 2px 10px;
     margin: 0;
-    color: var(--color-text-muted);
+    color: var(--muted-foreground);
     font-size: 12px;
     font-weight: 650;
     letter-spacing: 0.015em;

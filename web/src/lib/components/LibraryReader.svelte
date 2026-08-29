@@ -1,4 +1,9 @@
 <script lang="ts">
+  import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+  import BookOpenCheck from '@lucide/svelte/icons/book-open-check';
+  import ExternalLink from '@lucide/svelte/icons/external-link';
+  import Maximize2 from '@lucide/svelte/icons/maximize-2';
+  import X from '@lucide/svelte/icons/x';
   import { onMount, tick } from 'svelte';
 
   import { errorMessage } from '../api/client';
@@ -6,34 +11,43 @@
   import type { LibraryContentResponse, LibraryItem } from '../api/types';
   import { safeLibrarySourceUrl, sanitizeLibraryHtml } from '../library-content';
   import { formatNoteTimestamp } from '../utils/date';
-  import Icon from './Icon.svelte';
   import StatusMessage from './StatusMessage.svelte';
+  import { Button } from './ui/button';
+  import * as Empty from './ui/empty';
+  import { Spinner } from './ui/spinner';
 
   let {
     actionStatus = null,
     busy = false,
     item,
     onBack,
+    onExpand,
+    onRetry,
     onToggleRead,
     operationError = null,
+    mode = 'full',
     timeZone,
   }: {
     actionStatus?: string | null;
     busy?: boolean;
     item: LibraryItem;
     onBack: () => void | Promise<void>;
+    onExpand?: () => void | Promise<void>;
+    onRetry?: (item: LibraryItem) => void | Promise<void>;
     onToggleRead: (item: LibraryItem) => void | Promise<void>;
     operationError?: string | null;
+    mode?: 'preview' | 'full';
     timeZone: string;
   } = $props();
 
   let content = $state<LibraryContentResponse | null>(null);
-  let loading = $state(true);
+  let loading = $state(false);
   let loadError = $state<string | null>(null);
   let loadStatus = $state('');
   let readerHeading = $state<HTMLHeadingElement>();
   let contentController: AbortController | null = null;
   let contentRequestId = 0;
+  let requestedContentKey = '';
 
   const sourceUrl = $derived(
     safeLibrarySourceUrl(item.canonicalUrl ?? item.normalizedUrl ?? item.originalUrl),
@@ -44,14 +58,25 @@
   const plainText = $derived(content?.plainText.trim() ?? '');
 
   onMount(() => {
-    void loadContent();
-    void tick().then(() => readerHeading?.focus());
+    if (mode === 'full') void tick().then(() => readerHeading?.focus());
 
     return () => {
       contentRequestId += 1;
       contentController?.abort();
       contentController = null;
     };
+  });
+
+  $effect(() => {
+    const ready = item.processingStatus === 'READY' && item.contentAvailable;
+    const contentKey = `${item.uid}:${item.contentVersion}`;
+    if (!ready) {
+      loading = false;
+      return;
+    }
+    if (requestedContentKey === contentKey) return;
+    requestedContentKey = contentKey;
+    void loadContent();
   });
 
   async function loadContent(): Promise<void> {
@@ -80,6 +105,7 @@
 
   function handleWindowKeydown(event: KeyboardEvent): void {
     if (
+      mode === 'preview' ||
       event.defaultPrevented ||
       event.key !== 'Escape' ||
       document.querySelector('dialog[open]')
@@ -121,32 +147,69 @@
 
 <svelte:window onkeydown={handleWindowKeydown} />
 
-<section aria-busy={loading} aria-labelledby="library-reader-title" class="library-reader">
+<section
+  aria-busy={loading || item.processingStatus === 'PENDING' || busy}
+  aria-labelledby="library-reader-title"
+  class:preview={mode === 'preview'}
+  class="library-reader"
+>
   <header class="reader-toolbar">
-    <button class="reader-back" onclick={() => void onBack()} type="button">
-      <span aria-hidden="true">←</span>
-      Back to Library
-    </button>
+    {#if mode === 'full'}
+      <Button onclick={() => void onBack()} variant="ghost">
+        <ArrowLeft data-icon="inline-start" />
+        Back to Library
+      </Button>
+    {:else}
+      <span class="reader-toolbar-label">Article preview</span>
+    {/if}
 
     <div class="reader-actions">
       {#if sourceUrl}
-        <a href={sourceUrl} rel="noopener noreferrer" target="_blank">
-          {sourceHostname() || 'Open source'}
-          <span aria-hidden="true">↗</span>
-        </a>
+        <Button
+          aria-label={`Open source: ${sourceHostname() || 'saved page'}`}
+          href={sourceUrl}
+          rel="noopener noreferrer"
+          target="_blank"
+          title="Open source"
+          variant="ghost"
+        >
+          <span class="reader-action-label">{sourceHostname() || 'Open source'}</span>
+          <ExternalLink data-icon="inline-end" />
+        </Button>
       {/if}
-      <button
+      <Button
         aria-label={item.readAt ? 'Mark as unread' : 'Mark as read'}
         aria-pressed={Boolean(item.readAt)}
-        class:active={Boolean(item.readAt)}
-        class="reader-read-state"
         disabled={busy}
         onclick={() => void onToggleRead(item)}
-        type="button"
+        variant={item.readAt ? 'secondary' : 'ghost'}
       >
-        <Icon name="reader" size={16} />
-        {item.readAt ? 'Read' : 'Mark read'}
-      </button>
+        <BookOpenCheck data-icon="inline-start" />
+        <span class="reader-action-label">{item.readAt ? 'Read' : 'Mark read'}</span>
+      </Button>
+      {#if mode === 'preview' && onExpand}
+        <Button
+          aria-label="Open full screen"
+          data-library-expand={item.uid}
+          onclick={() => void onExpand()}
+          size="icon"
+          title="Open full screen"
+          variant="ghost"
+        >
+          <Maximize2 />
+        </Button>
+      {/if}
+      {#if mode === 'preview'}
+        <Button
+          aria-label="Collapse preview"
+          onclick={() => void onBack()}
+          size="icon"
+          title="Collapse preview"
+          variant="ghost"
+        >
+          <X />
+        </Button>
+      {/if}
     </div>
   </header>
 
@@ -174,31 +237,50 @@
 
     {#if loading}
       <div aria-live="polite" class="reader-state">
-        <span class="reader-state-mark" aria-hidden="true"></span>
+        <Spinner />
         <p>Opening saved article…</p>
+      </div>
+    {:else if item.processingStatus === 'PENDING'}
+      <div aria-live="polite" class="reader-state">
+        <Spinner />
+        <p>Preparing article…</p>
+      </div>
+    {:else if item.processingStatus === 'FAILED'}
+      <div class="reader-state reader-error">
+        <StatusMessage tone="error">
+          {item.lastError || 'Article capture failed.'}
+        </StatusMessage>
+        {#if onRetry}
+          <Button disabled={busy} onclick={() => void onRetry(item)} variant="secondary">
+            Retry
+          </Button>
+        {/if}
       </div>
     {:else if loadError}
       <div class="reader-state reader-error">
         <StatusMessage tone="error">{loadError}</StatusMessage>
-        <button class="button secondary" onclick={() => void loadContent()} type="button"
-          >Try again</button
-        >
+        <Button onclick={() => void loadContent()} variant="secondary">Try again</Button>
       </div>
     {:else if sanitizedHtml}
       <article class="reader-content">{@html sanitizedHtml}</article>
     {:else if plainText}
       <article class="reader-content reader-plain-text">{plainText}</article>
     {:else}
-      <div class="reader-state reader-empty">
-        <Icon name="reader" size={22} />
-        <h2>No readable text</h2>
-        <p>This saved page did not include article text.</p>
+      <Empty.Root class="reader-state">
+        <Empty.Header>
+          <Empty.Media variant="icon"><BookOpenCheck /></Empty.Media>
+          <Empty.Title>No readable text</Empty.Title>
+          <Empty.Description>This saved page did not include article text.</Empty.Description>
+        </Empty.Header>
         {#if sourceUrl}
-          <a class="button secondary" href={sourceUrl} rel="noopener noreferrer" target="_blank"
-            >Open source</a
-          >
+          <Empty.Content>
+            <Button href={sourceUrl} rel="noopener noreferrer" target="_blank" variant="secondary">
+              Open source
+              <ExternalLink data-icon="inline-end" />
+            </Button>
+          </Empty.Content>
         {/if}
-      </div>
+      </Empty.Root>
     {/if}
   </div>
 </section>
@@ -221,26 +303,12 @@
     margin: 0 auto 52px;
   }
 
-  .reader-back,
-  .reader-read-state {
-    display: inline-flex;
-    min-height: 44px;
-    gap: 8px;
-    align-items: center;
-    padding: 6px 8px;
-    color: var(--color-text-muted);
-    background: transparent;
-    border: 0;
-    border-radius: var(--radius-control);
-    font-size: 12px;
-    font-weight: 620;
-  }
-
-  .reader-back:hover:not(:disabled),
-  .reader-read-state:hover:not(:disabled),
-  .reader-read-state.active {
-    color: var(--color-accent-hover);
-    background: var(--color-accent-soft);
+  .reader-toolbar-label {
+    color: var(--muted-foreground);
+    font-size: 11px;
+    font-weight: 650;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
   }
 
   .reader-actions {
@@ -249,27 +317,41 @@
     align-items: center;
   }
 
-  .reader-actions > a {
-    display: inline-flex;
-    min-height: 44px;
-    gap: 5px;
-    align-items: center;
-    padding: 6px 8px;
-    color: var(--color-text-muted);
-    border-radius: var(--radius-control);
-    font-family: var(--font-mono);
-    font-size: 10px;
-  }
-
-  .reader-actions > a:hover {
-    color: var(--color-accent-hover);
-    text-decoration: underline;
-    text-underline-offset: 3px;
-  }
-
   .reader-column {
     width: min(100%, 720px);
     margin-inline: auto;
+  }
+
+  .library-reader.preview {
+    min-height: 0;
+    padding: 20px 28px 64px;
+  }
+
+  .library-reader.preview .reader-toolbar {
+    position: sticky;
+    top: -3px;
+    z-index: 2;
+    width: 100%;
+    padding: 3px 0 14px;
+    margin-bottom: 30px;
+    background: var(--background);
+  }
+
+  .library-reader.preview .reader-column {
+    width: min(100%, 680px);
+  }
+
+  .library-reader.preview .reader-heading h1 {
+    font-size: clamp(26px, 3vw, 38px);
+  }
+
+  .library-reader.preview .reader-excerpt {
+    font-size: 16px;
+  }
+
+  .library-reader.preview .reader-content {
+    font-size: 16px;
+    line-height: 1.76;
   }
 
   .reader-heading {
@@ -278,7 +360,7 @@
 
   .reader-source {
     margin-bottom: 12px;
-    color: var(--color-accent-hover);
+    color: var(--primary);
     font-size: 11px;
     font-weight: 660;
     letter-spacing: 0.045em;
@@ -287,7 +369,7 @@
 
   .reader-heading h1 {
     margin: 0;
-    font-family: var(--font-ui);
+    font-family: var(--font-sans);
     font-size: clamp(32px, 4vw, 46px);
     font-weight: 650;
     line-height: 1.14;
@@ -295,11 +377,15 @@
     overflow-wrap: anywhere;
   }
 
+  .reader-heading h1:focus-visible {
+    outline: none;
+  }
+
   .reader-excerpt {
     max-width: 660px;
     margin: 20px 0 0;
-    color: var(--color-text-muted);
-    font-family: var(--font-ui);
+    color: var(--muted-foreground);
+    font-family: var(--font-sans);
     font-size: 18px;
     line-height: 1.65;
   }
@@ -309,7 +395,7 @@
     flex-wrap: wrap;
     gap: 5px 16px;
     margin: 18px 0 0;
-    color: var(--color-text-muted);
+    color: var(--muted-foreground);
     font-family: var(--font-mono);
     font-size: 10px;
   }
@@ -319,7 +405,7 @@
     min-height: 300px;
     align-content: center;
     justify-items: center;
-    color: var(--color-text-muted);
+    color: var(--muted-foreground);
     text-align: center;
   }
 
@@ -328,33 +414,15 @@
     font-size: 13px;
   }
 
-  .reader-state-mark {
-    width: 18px;
-    height: 2px;
-    background: var(--color-accent);
-    border-radius: 2px;
-  }
-
   .reader-error :global(.status-message) {
     max-width: 440px;
     margin-bottom: 16px;
     text-align: left;
   }
 
-  .reader-empty h2 {
-    margin: 14px 0 0;
-    color: var(--color-text);
-    font-family: var(--font-ui);
-    font-size: 21px;
-  }
-
-  .reader-empty .button {
-    margin-top: 18px;
-  }
-
   .reader-content {
-    color: var(--color-text);
-    font-family: var(--font-ui);
+    color: var(--foreground);
+    font-family: var(--font-sans);
     font-size: 18px;
     line-height: 1.82;
     overflow-wrap: anywhere;
@@ -381,7 +449,7 @@
   .reader-content :global(h5),
   .reader-content :global(h6) {
     margin: 1.8em 0 0.65em;
-    font-family: var(--font-ui);
+    font-family: var(--font-sans);
     font-weight: 680;
     line-height: 1.3;
     letter-spacing: -0.018em;
@@ -400,7 +468,7 @@
   }
 
   .reader-content :global(a) {
-    color: var(--color-accent-hover);
+    color: var(--primary);
     text-decoration: underline;
     text-decoration-thickness: 1px;
     text-underline-offset: 3px;
@@ -408,8 +476,8 @@
 
   .reader-content :global(blockquote) {
     padding-left: 20px;
-    color: var(--color-text-muted);
-    border-left: 2px solid var(--color-accent);
+    color: var(--muted-foreground);
+    border-left: 2px solid var(--primary);
     font-size: 1.02em;
   }
 
@@ -417,8 +485,8 @@
     max-width: 100%;
     padding: 16px;
     overflow: auto;
-    background: var(--color-surface-muted);
-    border-radius: var(--radius-control);
+    background: var(--muted);
+    border-radius: var(--radius-md);
     font-family: var(--font-mono);
     font-size: 13px;
     line-height: 1.65;
@@ -426,7 +494,7 @@
 
   .reader-content :global(:not(pre) > code) {
     padding: 2px 4px;
-    background: var(--color-surface-muted);
+    background: var(--muted);
     border-radius: 4px;
     font-family: var(--font-mono);
     font-size: 0.82em;
@@ -438,7 +506,7 @@
     max-width: 100%;
     overflow-x: auto;
     border-collapse: collapse;
-    font-family: var(--font-ui);
+    font-family: var(--font-sans);
     font-size: 13px;
     line-height: 1.55;
   }
@@ -446,7 +514,7 @@
   .reader-content :global(th),
   .reader-content :global(td) {
     padding: 8px 10px;
-    border-bottom: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--border);
     text-align: left;
     vertical-align: top;
   }
@@ -455,12 +523,12 @@
     width: 64px;
     margin: 44px auto;
     border: 0;
-    border-top: 1px solid var(--color-border);
+    border-top: 1px solid var(--border);
   }
 
   .reader-content :global(figcaption) {
-    color: var(--color-text-muted);
-    font-family: var(--font-ui);
+    color: var(--muted-foreground);
+    font-family: var(--font-sans);
     font-size: 12px;
   }
 
@@ -473,7 +541,8 @@
 
   @media (max-width: 767px) {
     .library-reader {
-      padding: 12px 16px 72px;
+      padding: calc(12px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right))
+        calc(48px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
     }
 
     .reader-toolbar {
@@ -481,22 +550,17 @@
       margin-bottom: 34px;
     }
 
-    .reader-back,
-    .reader-read-state,
-    .reader-actions > a {
+    .reader-actions {
+      gap: 4px;
+    }
+
+    .reader-action-label {
+      display: none;
+    }
+
+    .reader-actions :global([data-slot='button']) {
       min-width: 44px;
-      min-height: 44px;
-    }
-
-    .reader-actions > a {
-      width: 44px;
-      padding: 0;
-      justify-content: center;
-      font-size: 0;
-    }
-
-    .reader-actions > a span {
-      font-size: 16px;
+      padding-inline: 10px;
     }
 
     .reader-heading {

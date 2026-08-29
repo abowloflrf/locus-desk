@@ -97,7 +97,7 @@ describe('NotesPage request ordering', () => {
       const textarea = target.querySelector<HTMLTextAreaElement>('#note-composer-input')!;
       textarea.value = 'Created #new';
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
-      const submit = target.querySelector<HTMLButtonElement>('.composer-submit button')!;
+      const submit = target.querySelector<HTMLButtonElement>('.composer-submit')!;
       await vi.waitFor(() => expect(submit.disabled).toBe(false));
       submit.click();
 
@@ -125,25 +125,24 @@ describe('NotesPage request ordering', () => {
     const component = mount(NotesPage, { props: { session }, target });
 
     try {
-      await vi.waitFor(() =>
-        expect(
-          target.querySelector<HTMLButtonElement>('[aria-label="Delete memo"]'),
-        ).not.toBeNull(),
-      );
-      target.querySelector<HTMLButtonElement>('[aria-label="Delete memo"]')?.click();
-      await vi.waitFor(() => expect(target.querySelector('dialog')?.open).toBe(true));
-      target.querySelector<HTMLButtonElement>('.confirm-dialog .button.danger')?.click();
+      (await openNoteAction(target, 'keep-me', 'Delete memo')).click();
+      await waitForDialog(true);
+      document.body.querySelector<HTMLButtonElement>('[data-slot="alert-dialog-action"]')?.click();
 
       await vi.waitFor(() =>
-        expect(target.querySelector('[role="alert"]')?.textContent).toContain('Delete failed.'),
+        expect(document.body.querySelector('[role="alert"]')?.textContent).toContain(
+          'Delete failed.',
+        ),
       );
-      expect(target.querySelector('[role="alert"]')?.getAttribute('aria-live')).toBe('assertive');
+      expect(document.body.querySelector('[role="alert"]')?.getAttribute('aria-live')).toBe(
+        'assertive',
+      );
 
-      target.querySelector<HTMLButtonElement>('.confirm-dialog .button.secondary')?.click();
-      await vi.waitFor(() => expect(target.querySelector('dialog')?.open).toBe(false));
-      target.querySelector<HTMLButtonElement>('[aria-label="Delete memo"]')?.click();
-      await vi.waitFor(() => expect(target.querySelector('dialog')?.open).toBe(true));
-      expect(target.querySelector('[role="alert"]')).toBeNull();
+      document.body.querySelector<HTMLButtonElement>('[data-slot="alert-dialog-cancel"]')?.click();
+      await waitForDialog(false);
+      (await openNoteAction(target, 'keep-me', 'Delete memo')).click();
+      await waitForDialog(true);
+      expect(document.body.querySelector('[role="alert"]')).toBeNull();
     } finally {
       await unmount(component);
       uninstallDialogPolyfill();
@@ -168,17 +167,11 @@ describe('NotesPage request ordering', () => {
     const component = mount(NotesPage, { props: { session }, target });
 
     try {
-      const deleteButton = await vi.waitFor(() => {
-        const button = target.querySelector<HTMLButtonElement>(
-          '[data-focus-uid="delete-me"] [aria-label="Delete memo"]',
-        );
-        expect(button).not.toBeNull();
-        return button!;
-      });
+      const deleteButton = await openNoteAction(target, 'delete-me', 'Delete memo');
       deleteButton.focus();
       deleteButton.click();
-      await vi.waitFor(() => expect(target.querySelector('dialog')?.open).toBe(true));
-      target.querySelector<HTMLButtonElement>('.confirm-dialog .button.danger')?.click();
+      await waitForDialog(true);
+      document.body.querySelector<HTMLButtonElement>('[data-slot="alert-dialog-action"]')?.click();
 
       await vi.waitFor(() =>
         expect(
@@ -217,9 +210,7 @@ describe('NotesPage request ordering', () => {
       });
       tagFilter.click();
       await vi.waitFor(() => expect(listNotes).toHaveBeenCalledTimes(2));
-      target
-        .querySelector<HTMLButtonElement>('[data-focus-uid="first-work"] [aria-label="Edit memo"]')
-        ?.click();
+      (await openNoteAction(target, 'first-work', 'Edit memo')).click();
       const editor = await vi.waitFor(() => {
         const textarea = target.querySelector<HTMLTextAreaElement>('#edit-note-first-work');
         expect(textarea).not.toBeNull();
@@ -228,7 +219,9 @@ describe('NotesPage request ordering', () => {
       editor.value = 'No longer tagged';
       editor.dispatchEvent(new Event('input', { bubbles: true }));
       target
-        .querySelector<HTMLButtonElement>('[data-focus-uid="first-work"] .button.primary')
+        .querySelector<HTMLButtonElement>(
+          '[data-focus-uid="first-work"] .note-edit-form button:last-child',
+        )
         ?.click();
 
       await vi.waitFor(() =>
@@ -255,13 +248,7 @@ describe('NotesPage request ordering', () => {
     const component = mount(NotesPage, { props: { session }, target });
 
     try {
-      const archive = await vi.waitFor(() => {
-        const button = target.querySelector<HTMLButtonElement>(
-          '[data-focus-uid="first-note"] [aria-label="Archive memo"]',
-        );
-        expect(button).not.toBeNull();
-        return button!;
-      });
+      const archive = await openNoteAction(target, 'first-note', 'Archive memo');
       archive.focus();
       archive.click();
 
@@ -280,6 +267,32 @@ describe('NotesPage request ordering', () => {
     }
   });
 });
+
+async function openNoteAction(
+  target: HTMLElement,
+  uid: string,
+  actionLabel: string,
+): Promise<HTMLElement> {
+  const trigger = await vi.waitFor(() => {
+    const button = target.querySelector<HTMLButtonElement>(
+      `[data-focus-uid="${uid}"] [aria-label="More memo actions"]`,
+    );
+    expect(button).not.toBeNull();
+    return button!;
+  });
+  trigger.click();
+  return vi.waitFor(() => {
+    const action = document.body.querySelector<HTMLElement>(`[aria-label="${actionLabel}"]`);
+    expect(action).not.toBeNull();
+    return action!;
+  });
+}
+
+async function waitForDialog(open: boolean): Promise<void> {
+  await vi.waitFor(() =>
+    expect(Boolean(document.body.querySelector('[data-slot="alert-dialog-content"]'))).toBe(open),
+  );
+}
 
 function installDialogPolyfill(): void {
   Object.defineProperties(HTMLDialogElement.prototype, {

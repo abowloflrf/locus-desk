@@ -1,11 +1,20 @@
 <script lang="ts">
+  import Archive from '@lucide/svelte/icons/archive';
+  import Ellipsis from '@lucide/svelte/icons/ellipsis';
+  import Pencil from '@lucide/svelte/icons/pencil';
+  import Pin from '@lucide/svelte/icons/pin';
+  import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
+  import Trash2 from '@lucide/svelte/icons/trash-2';
   import { tick } from 'svelte';
 
   import { errorMessage } from '../api/client';
   import type { Note } from '../api/types';
   import { formatNoteTimestamp } from '../utils/date';
-  import Icon from './Icon.svelte';
+  import MarkdownEditor from './MarkdownEditor.svelte';
   import MarkdownContent from './MarkdownContent.svelte';
+  import { Button } from './ui/button';
+  import * as DropdownMenu from './ui/dropdown-menu';
+  import { Spinner } from './ui/spinner';
 
   let {
     note,
@@ -32,29 +41,22 @@
   } = $props();
 
   let editing = $state(false);
+  let actionsOpen = $state(false);
   let draft = $state('');
   let editError = $state<string | null>(null);
-  let actionsOpen = $state(false);
-  let actionsElement = $state<HTMLDivElement>();
-  let editor = $state<HTMLTextAreaElement>();
-  let editButton = $state<HTMLButtonElement>();
-  let moreButton = $state<HTMLButtonElement>();
+  let moreButton = $state<HTMLButtonElement | null>(null);
 
-  async function beginEdit(): Promise<void> {
+  function beginEdit(): void {
     draft = note.content;
     editError = null;
     editing = true;
-    await tick();
-    resizeEditor();
-    editor?.focus();
-    editor?.setSelectionRange(draft.length, draft.length);
   }
 
   async function closeEditor(): Promise<void> {
     editing = false;
     editError = null;
     await tick();
-    editButton?.focus();
+    moreButton?.focus();
   }
 
   async function save(): Promise<void> {
@@ -73,62 +75,19 @@
     }
   }
 
-  function handleEditorKeydown(event: KeyboardEvent): void {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      void closeEditor();
-      return;
-    }
-    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-      event.preventDefault();
-      void save();
-    }
-  }
-
-  function resizeEditor(): void {
-    if (!editor) return;
-    editor.style.height = 'auto';
-    editor.style.height = `${Math.min(Math.max(editor.scrollHeight, 48), 280)}px`;
-    editor.style.overflowY = editor.scrollHeight > 280 ? 'auto' : 'hidden';
-  }
-
-  function closeActions(restoreFocus = false): void {
-    actionsOpen = false;
-    if (restoreFocus) requestAnimationFrame(() => moreButton?.focus());
-  }
-
-  function handleActionBlur(event: FocusEvent): void {
-    if (event.relatedTarget instanceof Node && actionsElement?.contains(event.relatedTarget)) {
-      return;
-    }
-    closeActions();
-  }
-
-  function handleActionsKeydown(event: KeyboardEvent): void {
-    if (actionsOpen && event.key === 'Escape') {
-      event.preventDefault();
-      closeActions(true);
-    }
-  }
-
   async function handlePin(): Promise<void> {
-    const restoreMenuFocus = actionsOpen;
     await onPin?.(note);
-    closeActions(restoreMenuFocus);
   }
 
   async function handleArchive(): Promise<void> {
-    closeActions();
     await onArchive?.(note);
   }
 
   async function handleRestore(): Promise<void> {
-    closeActions();
     await onRestore?.(note);
   }
 
   function handleDelete(): void {
-    closeActions();
     onDelete(note);
   }
 </script>
@@ -144,31 +103,27 @@
   <div class="note-body">
     {#if editing}
       <div class="note-edit-form">
-        <label class="sr-only" for={`edit-note-${note.uid}`}>Edit memo</label>
-        <textarea
-          bind:this={editor}
+        <MarkdownEditor
           disabled={busy}
           id={`edit-note-${note.uid}`}
-          oninput={resizeEditor}
-          onkeydown={handleEditorKeydown}
-          rows="1"
-          bind:value={draft}></textarea>
-        {#if editError}<p aria-live="assertive" class="form-error">{editError}</p>{/if}
+          label="Edit memo"
+          onCancel={() => void closeEditor()}
+          onSave={() => void save()}
+          bind:value={draft}
+        />
+        {#if editError}
+          <p aria-live="assertive" class="form-error" id={`edit-note-error-${note.uid}`}>
+            {editError}
+          </p>
+        {/if}
         <div class="inline-form-actions">
-          <button
-            class="button secondary"
-            disabled={busy}
-            onclick={() => void closeEditor()}
-            type="button">Cancel</button
+          <Button disabled={busy} onclick={() => void closeEditor()} variant="secondary"
+            >Cancel</Button
           >
-          <button
-            class="button primary"
-            disabled={busy || !draft.trim()}
-            onclick={() => void save()}
-            type="button"
-          >
+          <Button disabled={busy || !draft.trim()} onclick={() => void save()}>
+            {#if busy}<Spinner data-icon="inline-start" />{/if}
             {busy ? 'Saving…' : 'Save'}
-          </button>
+          </Button>
         </div>
       </div>
     {:else}
@@ -176,8 +131,12 @@
       {#if note.tags.length > 0}
         <div aria-label="Tags" class="note-tags">
           {#each note.tags as tag}
-            <button class="tag-chip" disabled={!onTag} onclick={() => onTag?.(tag)} type="button"
-              >#{tag}</button
+            <Button
+              class="tag-chip"
+              disabled={!onTag}
+              onclick={() => onTag?.(tag)}
+              size="xs"
+              variant="secondary">#{tag}</Button
             >
           {/each}
         </div>
@@ -185,94 +144,75 @@
     {/if}
   </div>
   {#if !editing}
-    <div
-      aria-label="Memo actions"
-      bind:this={actionsElement}
-      class:menu-open={actionsOpen}
-      class="note-actions"
-      role="group"
-    >
-      <button
-        aria-expanded={actionsOpen}
-        aria-label="More memo actions"
-        bind:this={moreButton}
-        class="icon-button note-more"
-        disabled={busy}
-        onblur={handleActionBlur}
-        onclick={() => (actionsOpen = !actionsOpen)}
-        onkeydown={handleActionsKeydown}
-        type="button"><Icon name="more" size={18} /></button
-      >
-      <div class="note-action-buttons">
-        {#if mode === 'active'}
-          <button
-            aria-label={note.pinned ? 'Unpin memo' : 'Pin memo'}
-            aria-pressed={note.pinned}
-            class:active={note.pinned}
-            class="icon-button"
-            disabled={busy}
-            onblur={handleActionBlur}
-            onclick={() => void handlePin()}
-            onkeydown={handleActionsKeydown}
-            type="button"
-          >
-            <Icon name="pin" size={16} />
-            <span class="action-label">{note.pinned ? 'Unpin' : 'Pin'}</span>
-          </button>
+    <div aria-label="Memo actions" class="note-actions">
+      <DropdownMenu.Root onOpenChange={(open) => (actionsOpen = open)} open={actionsOpen}>
+        <DropdownMenu.Trigger disabled={busy}>
+          {#snippet child({ props })}
+            <Button
+              {...props}
+              aria-label="More memo actions"
+              bind:ref={moreButton}
+              size="icon-sm"
+              variant="ghost"
+            >
+              <Ellipsis />
+            </Button>
+          {/snippet}
+        </DropdownMenu.Trigger>
+        {#if actionsOpen}
+          <DropdownMenu.Content align="end" class="w-40" forceMount>
+            <DropdownMenu.Group>
+              {#if mode === 'active'}
+                <DropdownMenu.Item
+                  aria-label={note.pinned ? 'Unpin memo' : 'Pin memo'}
+                  disabled={busy}
+                  onclick={() => void handlePin()}
+                >
+                  <Pin />
+                  {note.pinned ? 'Unpin' : 'Pin'}
+                </DropdownMenu.Item>
+              {/if}
+              <DropdownMenu.Item
+                aria-label="Edit memo"
+                disabled={busy}
+                onclick={() => void beginEdit()}
+              >
+                <Pencil />
+                Edit
+              </DropdownMenu.Item>
+              {#if mode === 'active'}
+                <DropdownMenu.Item
+                  aria-label="Archive memo"
+                  disabled={busy}
+                  onclick={() => void handleArchive()}
+                >
+                  <Archive />
+                  Archive
+                </DropdownMenu.Item>
+              {:else}
+                <DropdownMenu.Item
+                  aria-label="Restore memo"
+                  disabled={busy}
+                  onclick={() => void handleRestore()}
+                >
+                  <RotateCcw />
+                  Restore
+                </DropdownMenu.Item>
+              {/if}
+            </DropdownMenu.Group>
+            <DropdownMenu.Separator />
+            <DropdownMenu.Item
+              aria-label="Delete memo"
+              disabled={busy}
+              onclick={handleDelete}
+              variant="destructive"
+            >
+              <Trash2 />
+              Delete
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
         {/if}
-        <button
-          aria-label="Edit memo"
-          bind:this={editButton}
-          class="icon-button"
-          disabled={busy}
-          onblur={handleActionBlur}
-          onclick={() => void beginEdit()}
-          onkeydown={handleActionsKeydown}
-          type="button"
-        >
-          <Icon name="edit" size={16} />
-          <span class="action-label">Edit</span>
-        </button>
-        {#if mode === 'active'}
-          <button
-            aria-label="Archive memo"
-            class="icon-button"
-            disabled={busy}
-            onblur={handleActionBlur}
-            onclick={() => void handleArchive()}
-            onkeydown={handleActionsKeydown}
-            type="button"
-          >
-            <Icon name="archive" size={16} />
-            <span class="action-label">Archive</span>
-          </button>
-        {:else}
-          <button
-            aria-label="Restore memo"
-            class="icon-button"
-            disabled={busy}
-            onblur={handleActionBlur}
-            onclick={() => void handleRestore()}
-            onkeydown={handleActionsKeydown}
-            type="button"
-          >
-            <Icon name="restore" size={16} />
-            <span class="action-label">Restore</span>
-          </button>
-        {/if}
-        <button
-          aria-label="Delete memo"
-          class="icon-button danger-quiet"
-          disabled={busy}
-          onblur={handleActionBlur}
-          onclick={handleDelete}
-          onkeydown={handleActionsKeydown}
-          type="button"
-        >
-          <Icon name="delete" size={16} />
-          <span class="action-label">Delete</span>
-        </button>
-      </div>
+      </DropdownMenu.Root>
     </div>
   {/if}
 </article>
@@ -286,9 +226,9 @@
     align-items: start;
     padding: 14px 14px 15px;
     overflow: visible;
-    background: color-mix(in oklch, var(--color-surface), var(--color-canvas) 16%);
-    border: 1px solid var(--color-border-soft);
-    border-radius: var(--radius-surface);
+    background: color-mix(in oklch, var(--card), var(--background) 16%);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
     transition:
       opacity 150ms ease,
       border-color 150ms ease,
@@ -298,16 +238,16 @@
   .note-item:hover,
   .note-item:focus-visible,
   .note-item:has(:focus-visible) {
-    border-color: color-mix(in oklch, var(--color-accent), var(--color-border) 64%);
-    box-shadow: var(--shadow-soft);
+    border-color: color-mix(in oklch, var(--primary), var(--border) 64%);
+    box-shadow: var(--shadow-sm);
   }
 
   .note-item.editing,
   .note-item.editing:hover,
   .note-item.editing:focus-visible,
   .note-item.editing:has(:focus-visible) {
-    border-color: color-mix(in oklch, var(--color-accent), var(--color-border) 48%);
-    box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-accent), transparent 88%);
+    border-color: color-mix(in oklch, var(--primary), var(--border) 48%);
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary), transparent 88%);
   }
 
   .note-item.note-pinned::before {
@@ -316,7 +256,7 @@
     left: 0;
     width: 3px;
     height: 24px;
-    background: var(--color-accent);
+    background: var(--primary);
     border-radius: 0 2px 2px 0;
     content: '';
   }
@@ -326,7 +266,7 @@
     width: max-content;
     grid-column: 1;
     grid-row: 1;
-    color: var(--color-text-muted);
+    color: var(--muted-foreground);
     font-family: var(--font-mono);
     font-size: 11px;
     line-height: 20px;
@@ -353,16 +293,6 @@
       transform 140ms ease;
   }
 
-  .note-action-buttons {
-    display: flex;
-    gap: 1px;
-  }
-
-  .note-more,
-  .action-label {
-    display: none;
-  }
-
   .note-item:hover .note-actions,
   .note-item:focus-within .note-actions {
     opacity: 1;
@@ -370,41 +300,11 @@
     transform: translateY(0);
   }
 
-  .note-actions .icon-button {
-    width: 28px;
-    height: 28px;
-    border-radius: 6px;
-  }
-
   .note-tags {
     display: flex;
     flex-wrap: wrap;
     gap: 5px;
     margin-top: 12px;
-  }
-
-  .note-tags .tag-chip {
-    min-height: 25px;
-    padding-block: 2px;
-  }
-
-  .note-edit-form textarea {
-    min-height: 48px;
-    max-height: 280px;
-    padding: 2px 0 6px;
-    background: transparent;
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-    font-family: var(--font-ui);
-    font-size: 15px;
-    line-height: 24px;
-    resize: none;
-  }
-
-  .note-edit-form textarea:focus {
-    border: 0;
-    box-shadow: none;
   }
 
   .note-edit-form .inline-form-actions {
@@ -420,14 +320,6 @@
     .note-item > time {
       line-height: 20px;
     }
-
-    .note-tags .tag-chip {
-      min-height: 44px;
-    }
-
-    .note-edit-form textarea {
-      font-size: 16px;
-    }
   }
 
   @media (max-width: 767px), (hover: none) {
@@ -435,61 +327,6 @@
       opacity: 1;
       pointer-events: auto;
       transform: none;
-    }
-
-    .note-more {
-      display: inline-grid;
-    }
-
-    .note-action-buttons {
-      position: absolute;
-      top: calc(100% + 6px);
-      right: 0;
-      z-index: 30;
-      display: grid;
-      width: 148px;
-      gap: 2px;
-      padding: 6px;
-      background: var(--color-surface);
-      border: 1px solid var(--color-border-soft);
-      border-radius: var(--radius-input);
-      box-shadow: var(--shadow-floating);
-      opacity: 0;
-      pointer-events: none;
-      transform: translateY(-4px);
-      visibility: hidden;
-      transition:
-        opacity 120ms ease,
-        transform 140ms ease,
-        visibility 120ms step-end;
-    }
-
-    .note-actions.menu-open .note-action-buttons {
-      opacity: 1;
-      pointer-events: auto;
-      transform: translateY(0);
-      visibility: visible;
-      transition:
-        opacity 120ms ease,
-        transform 140ms ease,
-        visibility 0ms step-start;
-    }
-
-    .note-action-buttons .icon-button {
-      display: flex;
-      width: 100%;
-      height: 44px;
-      min-width: 0;
-      min-height: 44px;
-      gap: 9px;
-      justify-content: flex-start;
-      padding: 0 9px;
-    }
-
-    .action-label {
-      display: inline;
-      font-size: 12px;
-      font-weight: 560;
     }
   }
 </style>

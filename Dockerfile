@@ -30,7 +30,7 @@ COPY --from=web-builder /app/web/dist/ ./web/dist/
 
 RUN --mount=type=cache,id=locus-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=locus-cargo-git,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,id=locus-cargo-target,target=/app/target,sharing=locked \
+    --mount=type=cache,id=locus-cargo-target-v2,target=/app/target,sharing=locked \
     cargo build --release --locked \
     && cp target/release/locus-desk /app/locus-desk
 

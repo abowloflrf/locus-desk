@@ -99,13 +99,7 @@ describe('ArchivePage', () => {
     const component = mount(ArchivePage, { props: { session }, target });
 
     try {
-      const restore = await vi.waitFor(() => {
-        const button = target.querySelector<HTMLButtonElement>(
-          '[data-focus-uid="note-1"] [aria-label="Restore memo"]',
-        );
-        expect(button).not.toBeNull();
-        return button!;
-      });
+      const restore = await openNoteAction(target, 'note-1', 'Restore memo');
       restore.focus();
       restore.click();
 
@@ -143,9 +137,7 @@ describe('ArchivePage', () => {
       search.value = 'Archived';
       search.dispatchEvent(new Event('input', { bubbles: true }));
       await vi.waitFor(() => expect(listNotes).toHaveBeenCalledTimes(2), { timeout: 1_000 });
-      target
-        .querySelector<HTMLButtonElement>('[data-focus-uid="note-1"] [aria-label="Edit memo"]')
-        ?.click();
+      (await openNoteAction(target, 'note-1', 'Edit memo')).click();
       const editor = await vi.waitFor(() => {
         const textarea = target.querySelector<HTMLTextAreaElement>('#edit-note-note-1');
         expect(textarea).not.toBeNull();
@@ -153,7 +145,11 @@ describe('ArchivePage', () => {
       });
       editor.value = 'Different content';
       editor.dispatchEvent(new Event('input', { bubbles: true }));
-      target.querySelector<HTMLButtonElement>('[data-focus-uid="note-1"] .button.primary')?.click();
+      target
+        .querySelector<HTMLButtonElement>(
+          '[data-focus-uid="note-1"] .note-edit-form button:last-child',
+        )
+        ?.click();
 
       await vi.waitFor(() =>
         expect(
@@ -166,3 +162,23 @@ describe('ArchivePage', () => {
     }
   });
 });
+
+async function openNoteAction(
+  target: HTMLElement,
+  uid: string,
+  actionLabel: string,
+): Promise<HTMLElement> {
+  const trigger = await vi.waitFor(() => {
+    const button = target.querySelector<HTMLButtonElement>(
+      `[data-focus-uid="${uid}"] [aria-label="More memo actions"]`,
+    );
+    expect(button).not.toBeNull();
+    return button!;
+  });
+  trigger.click();
+  return vi.waitFor(() => {
+    const action = document.body.querySelector<HTMLElement>(`[aria-label="${actionLabel}"]`);
+    expect(action).not.toBeNull();
+    return action!;
+  });
+}

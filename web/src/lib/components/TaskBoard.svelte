@@ -9,6 +9,10 @@
   import StatusMessage from './StatusMessage.svelte';
   import TaskCreateForm from './TaskCreateForm.svelte';
   import TaskRow from './TaskRow.svelte';
+  import { Button } from './ui/button';
+  import * as Empty from './ui/empty';
+  import { Spinner } from './ui/spinner';
+  import * as ToggleGroup from './ui/toggle-group';
 
   let {
     mode,
@@ -155,6 +159,8 @@
             ? `Task updated and removed from Todo: ${task.title}.`
             : `Task updated and removed from the current view: ${task.title}.`;
         await restoreListFocus(boardElement, focusSnapshot);
+      } else {
+        actionStatus = `Task saved: ${updated.title}.`;
       }
       window.dispatchEvent(new CustomEvent('locus:tasks-changed'));
     } catch (cause) {
@@ -258,18 +264,20 @@
   class="task-board"
 >
   {#if mode === 'all'}
-    <div aria-label="Task status" class="segmented-control" role="group">
+    <ToggleGroup.Root
+      aria-label="Task status"
+      class="mb-4 w-fit max-[767px]:w-full"
+      onValueChange={(value) => selectStatusFilter(value as 'ALL' | TaskStatus)}
+      type="single"
+      value={statusFilter}
+      variant="outline"
+    >
       {#each ['ALL', 'TODO', 'DONE'] as filter}
-        <button
-          aria-pressed={statusFilter === filter}
-          class:active={statusFilter === filter}
-          onclick={() => selectStatusFilter(filter as 'ALL' | TaskStatus)}
-          type="button"
-        >
+        <ToggleGroup.Item class="max-[767px]:flex-1" value={filter}>
           {filter === 'ALL' ? 'All' : filter === 'TODO' ? 'Open' : 'Completed'}
-        </button>
+        </ToggleGroup.Item>
       {/each}
-    </div>
+    </ToggleGroup.Root>
   {/if}
 
   <TaskCreateForm busy={creating} {mode} onCreate={handleCreate} />
@@ -282,23 +290,31 @@
   </div>
 
   {#if loading && tasks.length === 0}
-    <div aria-live="polite" class="loading-state">Loading tasks…</div>
+    <div aria-live="polite" class="loading-state flex items-center justify-center gap-2">
+      <Spinner />
+      Loading tasks…
+    </div>
   {:else if loadError}
-    <div class="empty-state compact">
-      <p>{loadError}</p>
-      <button class="button secondary" onclick={() => void loadCollection()} type="button"
-        >Try again</button
-      >
-    </div>
+    <Empty.Root class="compact py-10">
+      <Empty.Header>
+        <Empty.Title>Unable to load tasks</Empty.Title>
+        <Empty.Description>{loadError}</Empty.Description>
+      </Empty.Header>
+      <Empty.Content>
+        <Button onclick={() => void loadCollection()} variant="secondary">Try again</Button>
+      </Empty.Content>
+    </Empty.Root>
   {:else if tasks.length === 0}
-    <div class="empty-state compact">
-      <p>{mode === 'todo' ? 'No open tasks.' : 'No tasks in this view.'}</p>
-      <span
-        >{mode === 'todo'
-          ? 'Add one small next step to get started.'
-          : 'Create a task to get started.'}</span
-      >
-    </div>
+    <Empty.Root class="compact py-10">
+      <Empty.Header>
+        <Empty.Title>{mode === 'todo' ? 'No open tasks' : 'No tasks in this view'}</Empty.Title>
+        <Empty.Description
+          >{mode === 'todo'
+            ? 'Add one small next step to get started.'
+            : 'Create a task to get started.'}</Empty.Description
+        >
+      </Empty.Header>
+    </Empty.Root>
   {:else}
     {#if priorityTasks.length > 0}
       <section class="task-section" aria-labelledby={`priority-${mode}`}>
@@ -380,53 +396,6 @@
     min-height: 0;
   }
 
-  .segmented-control {
-    display: flex;
-    gap: 20px;
-    padding: 0;
-    margin-bottom: 16px;
-    border-bottom: 1px solid var(--color-border-soft);
-  }
-
-  .segmented-control button {
-    position: relative;
-    min-height: 40px;
-    padding: 4px 2px;
-    color: var(--color-text-muted);
-    background: transparent;
-    border: 0;
-    font-size: 12px;
-    font-weight: 580;
-  }
-
-  .segmented-control button.active {
-    color: var(--color-accent-hover);
-  }
-
-  .segmented-control button.active::after {
-    position: absolute;
-    right: 0;
-    bottom: -1px;
-    left: 0;
-    height: 2px;
-    background: var(--color-accent);
-    border-radius: 2px 2px 0 0;
-    content: '';
-  }
-
-  @media (max-width: 767px) {
-    .segmented-control {
-      display: grid;
-      width: 100%;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 0;
-    }
-
-    .segmented-control button {
-      min-height: 44px;
-    }
-  }
-
   .task-section {
     margin-bottom: 20px;
     animation: content-enter 180ms ease both;
@@ -438,7 +407,7 @@
     align-items: center;
     padding: 0 0 9px;
     margin-bottom: 0;
-    color: var(--color-text);
+    color: var(--foreground);
     font-size: 12px;
     font-weight: 650;
   }
@@ -446,18 +415,18 @@
   .task-section > h2::before {
     width: 3px;
     height: 16px;
-    background: var(--color-accent);
+    background: var(--primary);
     border-radius: 2px;
     content: '';
   }
 
   .task-section > h2 span {
-    color: var(--color-text-muted);
+    color: var(--muted-foreground);
     font-weight: 500;
   }
 
   .completed-section > h2::before {
-    background: var(--color-border);
+    background: var(--border);
   }
 
   .task-list {

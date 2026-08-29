@@ -1,14 +1,23 @@
 <script lang="ts">
+  import Columns2 from '@lucide/svelte/icons/columns-2';
+  import ListChecks from '@lucide/svelte/icons/list-checks';
+  import ListTodo from '@lucide/svelte/icons/list-todo';
+  import LogOut from '@lucide/svelte/icons/log-out';
+  import PanelLeft from '@lucide/svelte/icons/panel-left';
   import { onMount, tick, type Snippet } from 'svelte';
 
   import type { SessionInfo } from '../api/types';
   import type { ProtectedRoute } from '../routes';
-  import Icon from './Icon.svelte';
   import Sidebar from './Sidebar.svelte';
   import TaskBoard from './TaskBoard.svelte';
+  import * as Alert from './ui/alert';
+  import { Button } from './ui/button';
+  import * as Sheet from './ui/sheet';
+  import * as ToggleGroup from './ui/toggle-group';
 
   let {
     current,
+    immersive = false,
     session,
     refreshToken = 0,
     children,
@@ -18,6 +27,7 @@
     onDismissNotice,
   }: {
     current: ProtectedRoute;
+    immersive?: boolean;
     session: SessionInfo;
     refreshToken?: number;
     children: Snippet;
@@ -30,13 +40,13 @@
   type WorkspaceLayout = 'notes' | 'split' | 'todo';
 
   let compact = $state(false);
+  let sidebarCollapsed = $state(false);
   let todoOpen = $state(false);
   let workspaceLayout = $state<WorkspaceLayout>('split');
-  let todoButton = $state<HTMLButtonElement>();
-  let drawerClose = $state<HTMLButtonElement>();
-  let drawer = $state<HTMLElement>();
+  let todoButton = $state<HTMLButtonElement | null>(null);
 
   onMount(() => {
+    sidebarCollapsed = window.localStorage.getItem('locus:sidebar-collapsed') === 'true';
     const media = window.matchMedia('(max-width: 1199px)');
     const update = () => {
       compact = media.matches;
@@ -52,10 +62,6 @@
     todoOpen = false;
   });
 
-  $effect(() => {
-    if (todoOpen) requestAnimationFrame(() => drawerClose?.focus());
-  });
-
   async function openTodo(): Promise<void> {
     if (current !== 'home') {
       onNavigate('home');
@@ -64,43 +70,18 @@
     todoOpen = true;
   }
 
-  function closeTodo(restoreFocus = true): void {
-    todoOpen = false;
-    if (restoreFocus) requestAnimationFrame(() => todoButton?.focus());
+  function handleTodoOpenChange(open: boolean): void {
+    todoOpen = open;
+    if (!open) requestAnimationFrame(() => todoButton?.focus());
   }
 
-  function handleWindowKeydown(event: KeyboardEvent): void {
-    if (!todoOpen) return;
-    if (event.defaultPrevented || document.querySelector('dialog[open]')) return;
-    if (event.key === 'Escape') {
-      closeTodo();
-      return;
-    }
-    if (event.key !== 'Tab' || !drawer) return;
-
-    const focusable = [
-      ...drawer.querySelectorAll<HTMLElement>('button, input, textarea, [href]'),
-    ].filter((element) => !element.hasAttribute('disabled') && element.tabIndex !== -1);
-    const first = focusable.at(0);
-    const last = focusable.at(-1);
-    if (!first || !last) return;
-
-    if (!drawer.contains(document.activeElement)) {
-      event.preventDefault();
-      (event.shiftKey ? last : first).focus();
-    } else if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
+  function toggleSidebar(): void {
+    sidebarCollapsed = !sidebarCollapsed;
+    window.localStorage.setItem('locus:sidebar-collapsed', String(sidebarCollapsed));
   }
 </script>
 
-<svelte:window onkeydown={handleWindowKeydown} />
-
-<div class:todo-open={todoOpen} class="app-shell">
+<div class:immersive class:sidebar-collapsed={sidebarCollapsed} class="app-shell">
   <a
     class="skip-link"
     href={!compact && current === 'home' && workspaceLayout === 'todo'
@@ -109,17 +90,28 @@
     inert={compact && todoOpen}>Skip to content</a
   >
   {#if notice}
-    <div
-      class="global-notice"
-      hidden={compact && todoOpen}
-      inert={compact && todoOpen}
-      role="alert"
+    <Alert.Root
+      class="global-notice fixed top-[calc(1rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-90 flex w-auto max-w-[min(27.5rem,calc(100vw-2rem))] items-center gap-4 shadow-md"
+      hidden={(compact && todoOpen) || immersive}
+      inert={(compact && todoOpen) || immersive ? true : undefined}
+      variant="destructive"
     >
-      <span>{notice}</span>
-      <button class="button secondary" onclick={onDismissNotice} type="button">Dismiss</button>
-    </div>
+      <Alert.Description>{notice}</Alert.Description>
+      <Button class="ml-auto shrink-0" onclick={onDismissNotice} size="sm" variant="ghost">
+        Dismiss
+      </Button>
+    </Alert.Root>
   {/if}
-  <Sidebar blocked={compact && todoOpen} {current} {onLogout} {onNavigate} {session} {todoOpen} />
+  <Sidebar
+    blocked={(compact && todoOpen) || immersive}
+    collapsed={sidebarCollapsed}
+    {current}
+    {onLogout}
+    {onNavigate}
+    onToggleCollapsed={toggleSidebar}
+    {session}
+    {todoOpen}
+  />
 
   <div
     class:has-workspace-layout={current === 'home'}
@@ -154,121 +146,119 @@
         >
         <div class="compact-topbar-actions">
           {#if current === 'home'}
-            <button
-              bind:this={todoButton}
+            <Button
+              bind:ref={todoButton}
               aria-controls="todo-panel"
               aria-expanded={todoOpen}
-              class="button secondary"
+              class="todo-trigger"
               onclick={() => void openTodo()}
-              type="button">Todo</button
+              type="button"
             >
+              <ListTodo data-icon="inline-start" />
+              Todo
+            </Button>
           {/if}
-          <button
+          <Button
             aria-label="Sign out"
-            class="icon-button compact-logout"
+            class="hidden max-[767px]:inline-flex"
             onclick={() => void onLogout()}
+            size="icon"
             title="Sign out"
             type="button"
+            variant="ghost"
           >
-            <Icon name="logout" />
-          </button>
+            <LogOut />
+          </Button>
         </div>
       </header>
       <main class="workspace-main" id="main-content" tabindex="-1">{@render children()}</main>
     </div>
 
-    {#if current === 'home'}
-      <button
-        aria-label="Close Todo panel"
-        class:visible={todoOpen}
-        class="drawer-backdrop"
-        onclick={() => closeTodo()}
-        tabindex="-1"
-        type="button"
-      ></button>
+    {#if current === 'home' && !compact}
       <aside
-        aria-hidden={compact ? !todoOpen : workspaceLayout === 'notes'}
+        aria-hidden={workspaceLayout === 'notes'}
         aria-label="Todo tasks"
-        aria-modal={compact ? 'true' : undefined}
-        class:open={todoOpen}
         class="todo-rail"
-        bind:this={drawer}
         id="todo-panel"
-        inert={compact ? !todoOpen : workspaceLayout === 'notes'}
-        role={compact ? 'dialog' : 'complementary'}
+        inert={workspaceLayout === 'notes'}
         tabindex="-1"
       >
         <div class="todo-content">
-          <header class="todo-header">
-            <h2 class="sr-only">Todo</h2>
-            <button
-              aria-label="Close Todo panel"
-              bind:this={drawerClose}
-              class="icon-button drawer-close"
-              onclick={() => closeTodo()}
-              type="button"><Icon name="close" /></button
-            >
-          </header>
+          <h2 class="sr-only">Todo</h2>
           <TaskBoard mode="todo" {refreshToken} today={session.workspace.today} />
         </div>
       </aside>
 
-      <div
+      <ToggleGroup.Root
         aria-label="Workspace layout"
-        class:show-notes={workspaceLayout === 'notes'}
-        class:show-split={workspaceLayout === 'split'}
-        class:show-todo={workspaceLayout === 'todo'}
-        class="workspace-layout-switcher"
-        role="group"
+        bind:value={workspaceLayout}
+        class="absolute bottom-[18px] left-1/2 z-30 col-span-full hidden -translate-x-1/2 min-[1200px]:flex"
+        size="lg"
+        type="single"
+        variant="workspace"
       >
-        <button
-          aria-label="Show Memos only"
-          aria-pressed={workspaceLayout === 'notes'}
-          onclick={() => (workspaceLayout = 'notes')}
-          title="Memos only"
-          type="button"
-        >
-          <svg aria-hidden="true" viewBox="0 0 24 18">
-            <rect height="15" rx="2.5" width="21" x="1.5" y="1.5"></rect>
-            <path d="M5.5 6.5h13M5.5 10h9"></path>
-          </svg>
-        </button>
-        <button
-          aria-label="Show Memos and Todo"
-          aria-pressed={workspaceLayout === 'split'}
-          onclick={() => (workspaceLayout = 'split')}
-          title="Memos and Todo"
-          type="button"
-        >
-          <svg aria-hidden="true" viewBox="0 0 24 18">
-            <rect height="15" rx="2.5" width="21" x="1.5" y="1.5"></rect>
-            <path d="M15.5 2v14M5.5 6.5h6M5.5 10h4M18.5 6.5h1M18.5 10h1"></path>
-          </svg>
-        </button>
-        <button
-          aria-label="Show Todo only"
-          aria-pressed={workspaceLayout === 'todo'}
-          onclick={() => (workspaceLayout = 'todo')}
-          title="Todo only"
-          type="button"
-        >
-          <svg aria-hidden="true" viewBox="0 0 24 18">
-            <rect height="15" rx="2.5" width="21" x="1.5" y="1.5"></rect>
-            <path d="m5 6.5 1 1 1.8-2M10.5 6.5h8M5 11l1 1 1.8-2M10.5 11h8"></path>
-          </svg>
-        </button>
-      </div>
+        <ToggleGroup.Item aria-label="Show Memos only" title="Memos only" value="notes">
+          <PanelLeft />
+        </ToggleGroup.Item>
+        <ToggleGroup.Item aria-label="Show Memos and Todo" title="Memos and Todo" value="split">
+          <Columns2 />
+        </ToggleGroup.Item>
+        <ToggleGroup.Item aria-label="Show Todo only" title="Todo only" value="todo">
+          <ListChecks />
+        </ToggleGroup.Item>
+      </ToggleGroup.Root>
     {/if}
   </div>
 </div>
 
+{#if compact && current === 'home'}
+  <Sheet.Root bind:open={todoOpen} onOpenChange={handleTodoOpenChange}>
+    <Sheet.Content
+      class="w-full max-w-[24.375rem] overflow-y-auto p-6 pb-[calc(5rem+env(safe-area-inset-bottom))] sm:max-w-sm"
+    >
+      <Sheet.Header class="sr-only">
+        <Sheet.Title>Todo</Sheet.Title>
+        <Sheet.Description>Review and manage your current tasks.</Sheet.Description>
+      </Sheet.Header>
+      <TaskBoard mode="todo" {refreshToken} today={session.workspace.today} />
+    </Sheet.Content>
+  </Sheet.Root>
+{/if}
+
 <style>
   .app-shell {
+    --mobile-navigation-content-height: 58px;
+    --mobile-navigation-safe-space: max(4px, calc(env(safe-area-inset-bottom) - 4px));
+
     display: grid;
     height: 100%;
     min-height: 0;
     grid-template-columns: 224px minmax(0, 1fr);
     overflow: hidden;
+    transition: grid-template-columns 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .app-shell.sidebar-collapsed {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .skip-link {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 110;
+    padding: 9px 13px;
+    color: var(--background);
+    background: var(--foreground);
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    font-weight: 650;
+    transform: translateY(calc(-100% - 20px));
+    transition: transform 120ms ease;
+  }
+
+  .skip-link:focus-visible {
+    transform: translateY(0);
   }
 
   .workspace-stage {
@@ -280,30 +270,6 @@
     overflow: hidden;
   }
 
-  .todo-content {
-    width: 100%;
-    min-width: 0;
-  }
-
-  .skip-link {
-    position: fixed;
-    top: 12px;
-    left: 12px;
-    z-index: 110;
-    padding: 9px 13px;
-    color: var(--color-surface);
-    background: var(--color-text);
-    border-radius: 7px;
-    font-size: 13px;
-    font-weight: 650;
-    transform: translateY(calc(-100% - 20px));
-    transition: transform 120ms ease;
-  }
-
-  .skip-link:focus-visible {
-    transform: translateY(0);
-  }
-
   .workspace-column {
     min-width: 0;
     min-height: 0;
@@ -312,8 +278,17 @@
     scrollbar-width: none;
   }
 
-  .workspace-column::-webkit-scrollbar {
+  .workspace-column::-webkit-scrollbar,
+  .todo-rail::-webkit-scrollbar {
     display: none;
+  }
+
+  .workspace-main {
+    min-width: 0;
+  }
+
+  .workspace-main:focus-visible {
+    outline: none;
   }
 
   .compact-topbar {
@@ -322,16 +297,8 @@
 
   .compact-topbar-actions {
     display: flex;
-    gap: 6px;
     align-items: center;
-  }
-
-  .compact-logout {
-    display: none;
-  }
-
-  .workspace-main {
-    min-width: 0;
+    gap: 6px;
   }
 
   .todo-rail {
@@ -342,61 +309,22 @@
     min-width: 0;
     height: 100%;
     flex-direction: column;
-    padding: 32px 24px 76px;
+    padding: 28px 16px 76px;
     overflow-x: hidden;
     overflow-y: auto;
-    background: var(--color-surface);
-    border-left: 1px solid var(--color-border);
+    background: var(--card);
+    border-left: 1px solid var(--border);
     scrollbar-width: none;
   }
 
-  .todo-rail::-webkit-scrollbar {
-    display: none;
-  }
-
-  .todo-header {
-    display: flex;
-    justify-content: flex-end;
-  }
-
-  .drawer-close,
-  .drawer-backdrop {
-    display: none;
-  }
-
-  .workspace-layout-switcher {
-    display: none;
-  }
-
-  .global-notice {
-    position: fixed;
-    top: calc(16px + env(safe-area-inset-top));
-    right: calc(16px + env(safe-area-inset-right));
-    z-index: 90;
-    display: flex;
-    max-width: min(440px, calc(100vw - 32px));
-    align-items: center;
-    gap: 16px;
-    padding: 12px 14px;
-    color: var(--color-danger);
-    background: var(--color-surface);
-    border: 1px solid var(--color-danger);
-    border-radius: var(--radius-input);
-    box-shadow: var(--shadow-floating);
-    font-size: 13px;
-  }
-
-  .global-notice[hidden] {
-    display: none;
-  }
-
-  .global-notice .button {
-    flex: none;
+  .todo-content {
+    width: 100%;
+    min-width: 0;
   }
 
   @media (min-width: 1200px) {
     .workspace-stage.has-workspace-layout {
-      grid-template-columns: calc(100% - 336px) 336px;
+      grid-template-columns: calc(100% - 320px) 320px;
       transition: grid-template-columns 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
     }
 
@@ -456,89 +384,20 @@
       width: min(100%, 720px);
       margin-inline: auto;
     }
-
-    .workspace-layout-switcher {
-      position: absolute;
-      bottom: 18px;
-      left: 50%;
-      z-index: 30;
-      display: flex;
-      gap: 2px;
-      padding: 3px;
-      background: color-mix(in oklch, var(--color-surface), transparent 4%);
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-surface);
-      box-shadow: var(--shadow-soft);
-      transform: translateX(-50%);
-    }
-
-    .workspace-layout-switcher::before {
-      position: absolute;
-      top: 3px;
-      left: 3px;
-      width: 40px;
-      height: 40px;
-      background: var(--color-accent-soft);
-      border-radius: var(--radius-control);
-      content: '';
-      transition: transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
-    }
-
-    .workspace-layout-switcher.show-split::before {
-      transform: translateX(42px);
-    }
-
-    .workspace-layout-switcher.show-todo::before {
-      transform: translateX(84px);
-    }
-
-    .workspace-layout-switcher button {
-      position: relative;
-      z-index: 1;
-      display: grid;
-      width: 40px;
-      height: 40px;
-      padding: 0;
-      color: var(--color-text-muted);
-      background: transparent;
-      border: 0;
-      border-radius: var(--radius-control);
-      place-items: center;
-      transition:
-        color 150ms ease,
-        transform 150ms ease;
-    }
-
-    .workspace-layout-switcher button:hover {
-      color: var(--color-text);
-    }
-
-    .workspace-layout-switcher button:active {
-      transform: scale(0.94);
-    }
-
-    .workspace-layout-switcher button[aria-pressed='true'] {
-      color: var(--color-accent-hover);
-    }
-
-    .workspace-layout-switcher svg {
-      width: 24px;
-      height: 18px;
-      fill: none;
-      stroke: currentColor;
-      stroke-linecap: round;
-      stroke-linejoin: round;
-      stroke-width: 1.35;
-    }
   }
 
   @media (max-width: 1199px) {
-    .app-shell {
+    .app-shell,
+    .app-shell.sidebar-collapsed {
       grid-template-columns: 64px minmax(0, 1fr);
     }
 
     .workspace-stage {
       display: block;
+      height: 100%;
+    }
+
+    .workspace-column {
       height: 100%;
     }
 
@@ -551,9 +410,8 @@
       grid-template-columns: 1fr auto 1fr;
       align-items: center;
       padding: calc(8px + env(safe-area-inset-top)) 20px 8px;
-      background: color-mix(in oklch, var(--color-canvas), transparent 6%);
-      border-bottom: 1px solid var(--color-border);
-      backdrop-filter: blur(12px);
+      background: var(--background);
+      border-bottom: 1px solid var(--border);
     }
 
     .compact-topbar > a {
@@ -571,53 +429,7 @@
     }
 
     .todo-rail {
-      position: fixed;
-      top: 0;
-      right: 0;
-      z-index: 50;
-      width: min(368px, calc(100vw - 64px));
-      max-width: 100%;
-      height: 100dvh;
-      transform: translateX(102%);
-      box-shadow: -14px 0 44px color-mix(in oklch, var(--color-text), transparent 86%);
-      visibility: hidden;
-      transition:
-        transform 190ms ease,
-        visibility 190ms step-end;
-    }
-
-    .todo-rail.open {
-      transform: translateX(0);
-      visibility: visible;
-      transition:
-        transform 190ms ease,
-        visibility 0ms step-start;
-    }
-
-    .drawer-close {
-      display: inline-grid;
-    }
-
-    .todo-header {
-      padding-bottom: 14px;
-    }
-
-    .drawer-backdrop {
-      position: fixed;
-      inset: 0;
-      z-index: 45;
-      display: block;
-      padding: 0;
-      background: color-mix(in oklch, var(--color-text), transparent 78%);
-      border: 0;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 190ms ease;
-    }
-
-    .drawer-backdrop.visible {
-      opacity: 1;
-      pointer-events: auto;
+      display: none;
     }
   }
 
@@ -632,18 +444,27 @@
     }
 
     .workspace-column {
-      height: 100%;
-      padding-bottom: calc(64px + env(safe-area-inset-bottom));
+      padding-bottom: calc(
+        var(--mobile-navigation-content-height) + var(--mobile-navigation-safe-space)
+      );
     }
 
-    .compact-logout {
-      display: inline-grid;
+    .app-shell.immersive :global(.sidebar),
+    .app-shell.immersive .compact-topbar {
+      display: none;
     }
 
-    .todo-rail {
-      width: min(100%, 390px);
-      padding: calc(24px + env(safe-area-inset-top)) calc(18px + env(safe-area-inset-right))
-        calc(82px + env(safe-area-inset-bottom)) calc(18px + env(safe-area-inset-left));
+    .app-shell.immersive .workspace-column {
+      padding-bottom: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .skip-link,
+    .app-shell,
+    .workspace-stage.has-workspace-layout .workspace-column,
+    .workspace-stage.has-workspace-layout .todo-rail {
+      transition-duration: 0.01ms;
     }
   }
 </style>

@@ -10,7 +10,7 @@
 <style>
   .markdown-content {
     min-width: 0;
-    color: var(--color-text);
+    color: var(--foreground);
     overflow-wrap: anywhere;
     font-size: 15px;
     line-height: 24px;
@@ -72,19 +72,19 @@
     height: 15px;
     min-height: 0;
     margin: 0 7px 0 0;
-    accent-color: var(--color-accent);
+    accent-color: var(--primary);
     vertical-align: -2px;
   }
 
   .markdown-content :global(blockquote) {
     padding-left: 14px;
-    color: var(--color-text-muted);
-    border-left: 2px solid var(--color-accent);
+    color: var(--muted-foreground);
+    border-left: 2px solid var(--primary);
   }
 
   .markdown-content :global(code) {
     padding: 0.12em 0.34em;
-    background: var(--color-surface-muted);
+    background: var(--muted);
     border-radius: 4px;
     font-family: var(--font-mono);
     font-size: 0.86em;
@@ -94,11 +94,16 @@
     max-width: 100%;
     padding: 13px 15px;
     overflow-x: auto;
-    color: var(--color-text);
-    background: var(--color-surface-muted);
-    border: 1px solid var(--color-border);
+    scrollbar-width: none;
+    color: var(--foreground);
+    background: var(--muted);
+    border: 1px solid var(--border);
     border-radius: 8px;
     line-height: 1.55;
+  }
+
+  .markdown-content :global(pre::-webkit-scrollbar) {
+    display: none;
   }
 
   .markdown-content :global(pre code) {
@@ -107,15 +112,15 @@
   }
 
   .markdown-content :global(a) {
-    color: var(--color-accent-hover);
+    color: var(--primary);
     text-decoration: underline;
-    text-decoration-color: color-mix(in oklch, var(--color-accent), transparent 55%);
+    text-decoration-color: color-mix(in oklch, var(--primary), transparent 55%);
     text-underline-offset: 2px;
   }
 
   .markdown-content :global(hr) {
     margin: 1.4em 0;
     border: 0;
-    border-top: 1px solid var(--color-border);
+    border-top: 1px solid var(--border);
   }
 </style>

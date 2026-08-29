@@ -42,6 +42,10 @@ export function formatNoteTimestamp(value: string, timeZone: string): string {
   return `${dateTime.month}/${dateTime.day} · ${dateTime.hour}:${dateTime.minute}`;
 }
 
+export function formatCompactDate(value: string, timeZone: string): string {
+  return getFormatter(timeZone, 'compact').format(new Date(value));
+}
+
 export function formatTodayLabel(today: string): string {
   return new Intl.DateTimeFormat('en', {
     day: 'numeric',
@@ -72,26 +76,29 @@ export function isTaskOverdue(task: Task, today: string): boolean {
   return task.status === 'TODO' && Boolean(task.dueDate && task.dueDate < today);
 }
 
-function getFormatter(timeZone: string, type: 'month' | 'timestamp'): Intl.DateTimeFormat {
+function getFormatter(
+  timeZone: string,
+  type: 'compact' | 'month' | 'timestamp',
+): Intl.DateTimeFormat {
   const key = `${timeZone}:${type}`;
   const cached = dateFormatterCache.get(key);
   if (cached) return cached;
 
-  const formatter =
+  const formatter = new Intl.DateTimeFormat(
+    'en',
     type === 'month'
-      ? new Intl.DateTimeFormat('en', {
-          month: 'long',
-          timeZone,
-          year: 'numeric',
-        })
-      : new Intl.DateTimeFormat('en', {
-          day: '2-digit',
-          hour: '2-digit',
-          hourCycle: 'h23',
-          minute: '2-digit',
-          month: '2-digit',
-          timeZone,
-        });
+      ? { month: 'long', timeZone, year: 'numeric' }
+      : type === 'compact'
+        ? { day: 'numeric', month: 'short', timeZone }
+        : {
+            day: '2-digit',
+            hour: '2-digit',
+            hourCycle: 'h23',
+            minute: '2-digit',
+            month: '2-digit',
+            timeZone,
+          },
+  );
 
   dateFormatterCache.set(key, formatter);
   return formatter;

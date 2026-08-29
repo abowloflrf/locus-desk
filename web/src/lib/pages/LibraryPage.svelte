@@ -1,4 +1,15 @@
 <script lang="ts">
+  import Archive from '@lucide/svelte/icons/archive';
+  import BookOpen from '@lucide/svelte/icons/book-open';
+  import BookOpenCheck from '@lucide/svelte/icons/book-open-check';
+  import ChevronDown from '@lucide/svelte/icons/chevron-down';
+  import Ellipsis from '@lucide/svelte/icons/ellipsis';
+  import ListFilter from '@lucide/svelte/icons/list-filter';
+  import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
+  import Search from '@lucide/svelte/icons/search';
+  import Star from '@lucide/svelte/icons/star';
+  import Trash2 from '@lucide/svelte/icons/trash-2';
+  import X from '@lucide/svelte/icons/x';
   import { onMount, tick } from 'svelte';
 
   import { errorMessage } from '../api/client';
@@ -17,16 +28,26 @@
     SessionInfo,
     UpdateLibraryItemRequest,
   } from '../api/types';
-  import Icon from '../components/Icon.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import LibraryCaptureForm from '../components/LibraryCaptureForm.svelte';
   import LibraryReader from '../components/LibraryReader.svelte';
   import StatusMessage from '../components/StatusMessage.svelte';
-  import { safeLibrarySourceUrl } from '../library-content';
+  import { Button } from '../components/ui/button';
+  import * as DropdownMenu from '../components/ui/dropdown-menu';
+  import * as Empty from '../components/ui/empty';
+  import { Input } from '../components/ui/input';
+  import * as Sheet from '../components/ui/sheet';
+  import { Spinner } from '../components/ui/spinner';
   import { captureListFocus, restoreListFocus } from '../utils/focus';
-  import { formatNoteTimestamp } from '../utils/date';
+  import { formatCompactDate, formatNoteTimestamp } from '../utils/date';
 
-  let { session }: { session: SessionInfo } = $props();
+  let {
+    onImmersiveChange = () => {},
+    session,
+  }: {
+    onImmersiveChange?: (open: boolean) => void;
+    session: SessionInfo;
+  } = $props();
 
   let items = $state<LibraryItem[]>([]);
   let query = $state('');
@@ -50,12 +71,14 @@
   let pendingDelete = $state<LibraryItem | null>(null);
   let deleteBusy = $state(false);
   let deleteError = $state<string | null>(null);
+  let actionMenuUid = $state<string | null>(null);
   let deleteFocusSnapshot = $state<ReturnType<typeof captureListFocus> | null>(null);
   let compactDetail = $state(false);
+  let mobileViewport = $state(false);
+  let immersiveReader = $state(false);
   let pageElement = $state<HTMLElement>();
-  let detailPanel = $state<HTMLElement>();
   let detailHeading = $state<HTMLElement>();
-  let searchInput = $state<HTMLInputElement>();
+  let searchInput = $state<HTMLInputElement | null>(null);
   let listController: AbortController | null = null;
   let detailController: AbortController | null = null;
   let pollController: AbortController | null = null;
@@ -70,16 +93,21 @@
   const LIBRARY_POLL_INTERVAL_MS = 2_000;
 
   onMount(() => {
-    const media = window.matchMedia('(max-width: 1199px)');
+    const compactMedia = window.matchMedia('(max-width: 1199px)');
+    const mobileMedia = window.matchMedia('(max-width: 767px)');
     const updateMedia = () => {
-      compactDetail = media.matches;
+      compactDetail = compactMedia.matches;
+      mobileViewport = mobileMedia.matches;
     };
     updateMedia();
-    media.addEventListener('change', updateMedia);
+    compactMedia.addEventListener('change', updateMedia);
+    mobileMedia.addEventListener('change', updateMedia);
     void loadItems(true);
 
     return () => {
-      media.removeEventListener('change', updateMedia);
+      compactMedia.removeEventListener('change', updateMedia);
+      mobileMedia.removeEventListener('change', updateMedia);
+      if (immersiveReader) onImmersiveChange(false);
       listController?.abort();
       detailController?.abort();
       cancelRetry();
@@ -193,6 +221,11 @@
     detailPollingError = null;
     detailProcessingError = null;
     stopPolling();
+
+    if (mobileViewport) {
+      openReader(item, true);
+      return;
+    }
 
     if (compactDetail) {
       await tick();
@@ -328,24 +361,50 @@
     pollController = null;
   }
 
-  function openReader(item: LibraryItem): void {
-    if (item.processingStatus !== 'READY' || !item.contentAvailable) return;
+  function openReader(item: LibraryItem, immersive = false): void {
+    if (!immersive && (item.processingStatus !== 'READY' || !item.contentAvailable)) return;
     detailRequestId += 1;
     detailController?.abort();
     detailController = null;
     detailLoading = false;
-    stopPolling();
+    if (item.processingStatus === 'PENDING') startPolling(item);
+    else stopPolling();
     operationError = null;
     actionStatus = null;
+    immersiveReader = immersive;
+    if (immersive) onImmersiveChange(true);
     readerItem = item;
   }
 
   async function closeReader(): Promise<void> {
     const uid = readerItem?.uid;
+    const wasImmersive = immersiveReader;
     readerItem = null;
+    immersiveReader = false;
+    if (wasImmersive) onImmersiveChange(false);
+
+    if (wasImmersive) {
+      stopPolling();
+      selectedUid = null;
+      selectedItem = null;
+      await tick();
+      if (!uid) return;
+      [...(pageElement?.querySelectorAll<HTMLButtonElement>('[data-library-select]') ?? [])]
+        .find((button) => button.dataset.librarySelect === uid)
+        ?.focus();
+      return;
+    }
+
     if (selectedItem) startPolling(selectedItem);
     await tick();
     if (!uid) return;
+    const expandButton = [
+      ...(pageElement?.querySelectorAll<HTMLButtonElement>('[data-library-expand]') ?? []),
+    ].find((button) => button.dataset.libraryExpand === uid);
+    if (expandButton) {
+      expandButton.focus();
+      return;
+    }
     const readButton = [
       ...(pageElement?.querySelectorAll<HTMLButtonElement>('[data-library-read]') ?? []),
     ].find((button) => button.dataset.libraryRead === uid);
@@ -496,30 +555,14 @@
     if (readerItem) return;
     if (!selectedUid || event.defaultPrevented) return;
     if (document.querySelector('dialog[open]')) return;
-    if (event.key === 'Escape') {
+    if (!compactDetail && event.key === 'Escape') {
       event.preventDefault();
       void closeDetail();
-      return;
     }
-    if (!compactDetail || event.key !== 'Tab' || !detailPanel) return;
+  }
 
-    const focusable = [
-      ...detailPanel.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], [tabindex]'),
-    ].filter((element) => element.tabIndex !== -1);
-    const first = focusable.at(0);
-    const last = focusable.at(-1);
-    if (!first || !last) return;
-
-    if (!detailPanel.contains(document.activeElement)) {
-      event.preventDefault();
-      (event.shiftKey ? last : first).focus();
-    } else if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
+  function handleDetailOpenChange(open: boolean): void {
+    if (!open && selectedUid) void closeDetail();
   }
 
   function displayTitle(item: LibraryItem): string {
@@ -537,8 +580,27 @@
     }
   }
 
-  function safeLink(item: LibraryItem): string | null {
-    return safeLibrarySourceUrl(item.canonicalUrl ?? item.normalizedUrl ?? item.originalUrl);
+  function faviconUrl(item: LibraryItem): string {
+    const itemUrl = item.canonicalUrl ?? item.normalizedUrl ?? item.originalUrl;
+    let domainUrl = itemUrl;
+    try {
+      domainUrl = new URL(itemUrl).origin;
+    } catch {}
+    return `https://www.google.com/s2/favicons?domain_url=${encodeURIComponent(domainUrl)}&sz=64`;
+  }
+
+  function faviconFallback(item: LibraryItem): string {
+    return (hostname(item) || item.siteName || '?').charAt(0).toLocaleUpperCase();
+  }
+
+  function hideBrokenFavicon(event: Event): void {
+    if (event.currentTarget instanceof HTMLImageElement) event.currentTarget.hidden = true;
+  }
+
+  function visibleProcessingLabel(item: LibraryItem): string | null {
+    if (item.processingStatus === 'PENDING') return 'Processing';
+    if (item.processingStatus === 'FAILED') return 'Fetch failed';
+    return null;
   }
 
   function processingLabel(item: LibraryItem): string {
@@ -564,6 +626,7 @@
     busy={busyUids.has(readerItem.uid)}
     item={readerItem}
     onBack={closeReader}
+    onRetry={retryCapture}
     onToggleRead={toggleRead}
     {operationError}
     timeZone={session.workspace.timezone}
@@ -571,43 +634,62 @@
 {:else}
   <div bind:this={pageElement} class:detail-open={Boolean(selectedUid)} class="library-page">
     <div class="library-primary" inert={compactDetail && Boolean(selectedUid)}>
-      <LibraryCaptureForm onCreate={handleCreate} />
+      <header class="library-page-header">
+        <h1 id="library-title">Library</h1>
+        <LibraryCaptureForm onCreate={handleCreate} />
+      </header>
 
-      <section aria-labelledby="library-items-title" class="library-index">
-        <header class="library-toolbar">
-          <div>
-            <h2 id="library-items-title">Saved items</h2>
-            <p>{total} {total === 1 ? 'item' : 'items'} in this view</p>
-          </div>
+      <section aria-labelledby="library-title" class="library-index">
+        <div class="library-toolbar">
           <label class="search-field library-search">
-            <Icon name="search" size={17} />
-            <span class="sr-only">Search Library</span>
-            <input
+            <Search class="pointer-events-none absolute left-3 size-4 text-muted-foreground" />
+            <span class="sr-only">Search links</span>
+            <Input
+              class="pl-9"
               autocomplete="off"
-              bind:this={searchInput}
+              bind:ref={searchInput}
               oninput={handleSearch}
-              placeholder="Search Library"
+              placeholder="Search links"
               type="search"
               value={query}
             />
           </label>
-        </header>
-
-        <div aria-label="Filter Library by status" class="library-filters" role="group">
-          <button
-            aria-pressed={status === 'ACTIVE'}
-            class:active={status === 'ACTIVE'}
-            onclick={() => selectStatus('ACTIVE')}
-            type="button">Active</button
-          >
-          <button
-            aria-pressed={status === 'ARCHIVED'}
-            class:active={status === 'ARCHIVED'}
-            onclick={() => selectStatus('ARCHIVED')}
-            type="button">Archived</button
-          >
-          {#if loading && items.length > 0}<span aria-live="polite">Updating…</span>{/if}
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger>
+              {#snippet child({ props })}
+                <Button
+                  {...props}
+                  aria-label={`Status: ${status === 'ACTIVE' ? 'Active' : 'Archived'}`}
+                  class="status-filter"
+                  variant="outline"
+                >
+                  <ListFilter data-icon="inline-start" />
+                  {status === 'ACTIVE' ? 'Active' : 'Archived'}
+                  <ChevronDown data-icon="inline-end" />
+                </Button>
+              {/snippet}
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content align="end" class="w-40">
+              <DropdownMenu.Group>
+                <DropdownMenu.Label>Status</DropdownMenu.Label>
+                <DropdownMenu.RadioGroup value={status}>
+                  <DropdownMenu.RadioItem onclick={() => selectStatus('ACTIVE')} value="ACTIVE">
+                    Active
+                  </DropdownMenu.RadioItem>
+                  <DropdownMenu.RadioItem onclick={() => selectStatus('ARCHIVED')} value="ARCHIVED">
+                    Archived
+                  </DropdownMenu.RadioItem>
+                </DropdownMenu.RadioGroup>
+              </DropdownMenu.Group>
+            </DropdownMenu.Content>
+          </DropdownMenu.Root>
         </div>
+
+        <span aria-live="polite" class="sr-only" data-library-count
+          >{`${total} ${
+            total === 1 ? 'item' : 'items'
+          } in this view.${loading && items.length > 0 ? ' Updating.' : ''}`}</span
+        >
 
         {#if operationError}<StatusMessage tone="error">{operationError}</StatusMessage>{/if}
         <div aria-atomic="true" aria-live="polite" class="sr-only" data-action-status role="status">
@@ -616,43 +698,54 @@
 
         <div aria-busy={loading || loadingMore} class="library-results">
           {#if loading && items.length === 0}
-            <div aria-live="polite" class="loading-state large">Loading Library…</div>
+            <div
+              aria-live="polite"
+              class="loading-state large flex items-center justify-center gap-2"
+            >
+              <Spinner />
+              Loading Library…
+            </div>
           {:else if loadError}
-            <div class="empty-state">
-              <h3>Library unavailable</h3>
-              <p>{loadError}</p>
-              <button class="button secondary" onclick={() => void loadItems(true)} type="button"
-                >Try again</button
-              >
-            </div>
+            <Empty.Root>
+              <Empty.Header>
+                <Empty.Title>Library unavailable</Empty.Title>
+                <Empty.Description>{loadError}</Empty.Description>
+              </Empty.Header>
+              <Empty.Content>
+                <Button onclick={() => void loadItems(true)} variant="secondary">Try again</Button>
+              </Empty.Content>
+            </Empty.Root>
           {:else if items.length === 0}
-            <div class="empty-state">
-              <h3>
-                {query
-                  ? 'No saved items found'
-                  : status === 'ARCHIVED'
-                    ? 'No archived items'
-                    : 'Save your first link'}
-              </h3>
-              <p>
-                {query
-                  ? 'Try another keyword.'
-                  : status === 'ARCHIVED'
-                    ? 'Archived links will remain available here.'
-                    : 'Add a URL above and keep the context that matters.'}
-              </p>
+            <Empty.Root>
+              <Empty.Header>
+                <Empty.Title>
+                  {query
+                    ? 'No saved items found'
+                    : status === 'ARCHIVED'
+                      ? 'No archived items'
+                      : 'Save your first link'}
+                </Empty.Title>
+                <Empty.Description>
+                  {query
+                    ? 'Try another keyword.'
+                    : status === 'ARCHIVED'
+                      ? 'Archived links will remain available here.'
+                      : 'Use Add link to save an article URL.'}
+                </Empty.Description>
+              </Empty.Header>
               {#if query}
-                <button
-                  class="button secondary"
-                  onclick={() => {
-                    query = '';
-                    if (searchInput) searchInput.value = '';
-                    void loadItems(true);
-                  }}
-                  type="button">Clear search</button
-                >
+                <Empty.Content>
+                  <Button
+                    onclick={() => {
+                      query = '';
+                      if (searchInput) searchInput.value = '';
+                      void loadItems(true);
+                    }}
+                    variant="secondary">Clear search</Button
+                  >
+                </Empty.Content>
               {/if}
-            </div>
+            </Empty.Root>
           {:else}
             <ol aria-label="Library items" class="library-list">
               {#each items as item (item.uid)}
@@ -668,305 +761,346 @@
                     onclick={() => void openDetail(item)}
                     type="button"
                   >
-                    <span class="item-title">{displayTitle(item)}</span>
-                    <span class="item-source"
-                      >{item.siteName || hostname(item) || item.originalUrl}</span
-                    >
-                    {#if item.excerpt}<span class="item-excerpt">{item.excerpt}</span>{/if}
-                    <span class="item-meta">
-                      <span class={`processing-state ${processingClass(item)}`}
-                        >{processingLabel(item)}</span
-                      >
-                      <span>{item.readAt ? 'Read' : 'Unread'}</span>
-                      <span>{formatNoteTimestamp(item.createdAt, session.workspace.timezone)}</span>
+                    <span aria-hidden="true" class="item-favicon">
+                      <span>{faviconFallback(item)}</span>
+                      <img
+                        alt=""
+                        decoding="async"
+                        loading="lazy"
+                        onerror={hideBrokenFavicon}
+                        referrerpolicy="no-referrer"
+                        src={faviconUrl(item)}
+                      />
                     </span>
-                    {#if item.tags.length > 0}
-                      <span class="item-tags">
-                        {#each item.tags.slice(0, 3) as tag}<span>#{tag}</span>{/each}
+                    <span class="item-copy">
+                      <span class="item-heading">
+                        <span class="item-title">{displayTitle(item)}</span>
+                        {#if !item.readAt}
+                          <span aria-hidden="true" class="unread-mark"></span>
+                          <span class="sr-only">Unread</span>
+                        {/if}
                       </span>
-                    {/if}
+                      <span class="item-meta">
+                        <span class="item-source"
+                          >{item.siteName || hostname(item) || item.originalUrl}</span
+                        >
+                        <span aria-hidden="true">·</span>
+                        <span>{formatCompactDate(item.createdAt, session.workspace.timezone)}</span>
+                        {#if visibleProcessingLabel(item)}
+                          <span aria-hidden="true">·</span>
+                          <span
+                            class:failed={item.processingStatus === 'FAILED'}
+                            class="processing-state"
+                          >
+                            {visibleProcessingLabel(item)}
+                          </span>
+                        {/if}
+                      </span>
+                    </span>
                   </button>
                   <div class="item-actions">
-                    <button
-                      aria-label={`${item.starred ? 'Unstar' : 'Star'} ${displayTitle(item)}`}
-                      aria-pressed={item.starred}
-                      class:active={item.starred}
-                      class="icon-button"
-                      disabled={busyUids.has(item.uid)}
-                      onclick={() => void toggleStar(item)}
-                      title={item.starred ? 'Unstar' : 'Star'}
-                      type="button"><Icon name="star" size={17} /></button
+                    <DropdownMenu.Root
+                      onOpenChange={(open) => (actionMenuUid = open ? item.uid : null)}
+                      open={actionMenuUid === item.uid}
                     >
-                    <button
-                      aria-label={`${item.readAt ? 'Mark as unread' : 'Mark as read'}: ${displayTitle(item)}`}
-                      class="text-action"
-                      disabled={busyUids.has(item.uid)}
-                      onclick={() => void toggleRead(item)}
-                      type="button">{item.readAt ? 'Unread' : 'Read'}</button
-                    >
-                    <button
-                      aria-label={`${item.status === 'ACTIVE' ? 'Archive' : 'Restore'} ${displayTitle(item)}`}
-                      class="icon-button"
-                      disabled={busyUids.has(item.uid)}
-                      onclick={() => void toggleArchive(item)}
-                      title={item.status === 'ACTIVE' ? 'Archive' : 'Restore'}
-                      type="button"
-                    >
-                      <Icon name={item.status === 'ACTIVE' ? 'archive' : 'restore'} size={17} />
-                    </button>
-                    <button
-                      aria-label={`Delete ${displayTitle(item)}`}
-                      class="icon-button danger-quiet"
-                      disabled={busyUids.has(item.uid)}
-                      onclick={() => requestDelete(item)}
-                      title="Delete"
-                      type="button"><Icon name="delete" size={17} /></button
-                    >
+                      <DropdownMenu.Trigger disabled={busyUids.has(item.uid)}>
+                        {#snippet child({ props })}
+                          <Button
+                            {...props}
+                            aria-label={`Actions for ${displayTitle(item)}`}
+                            size="icon-sm"
+                            variant="ghost"
+                          >
+                            <Ellipsis />
+                          </Button>
+                        {/snippet}
+                      </DropdownMenu.Trigger>
+                      {#if actionMenuUid === item.uid}
+                        <DropdownMenu.Content align="end" class="w-44" forceMount>
+                          <DropdownMenu.Group>
+                            <DropdownMenu.Item
+                              aria-label={`${item.starred ? 'Unstar' : 'Star'} ${displayTitle(item)}`}
+                              onclick={() => void toggleStar(item)}
+                            >
+                              <Star />
+                              {item.starred ? 'Unstar' : 'Star'}
+                            </DropdownMenu.Item>
+                            <DropdownMenu.Item onclick={() => void toggleRead(item)}>
+                              <BookOpenCheck />
+                              {item.readAt ? 'Mark unread' : 'Mark read'}
+                            </DropdownMenu.Item>
+                            <DropdownMenu.Item
+                              aria-label={`${item.status === 'ACTIVE' ? 'Archive' : 'Restore'} ${displayTitle(item)}`}
+                              onclick={() => void toggleArchive(item)}
+                            >
+                              {#if item.status === 'ACTIVE'}<Archive />{:else}<RotateCcw />{/if}
+                              {item.status === 'ACTIVE' ? 'Archive' : 'Restore'}
+                            </DropdownMenu.Item>
+                          </DropdownMenu.Group>
+                          <DropdownMenu.Separator />
+                          <DropdownMenu.Item
+                            aria-label={`Delete ${displayTitle(item)}`}
+                            onclick={() => requestDelete(item)}
+                            variant="destructive"
+                          >
+                            <Trash2 />
+                            Delete
+                          </DropdownMenu.Item>
+                        </DropdownMenu.Content>
+                      {/if}
+                    </DropdownMenu.Root>
                   </div>
                 </li>
               {/each}
             </ol>
 
             {#if items.length < total}
-              <button
-                class="button secondary load-more"
+              <Button
+                class="load-more"
                 disabled={loadingMore}
                 onclick={() => void loadItems(false)}
-                type="button">{loadingMore ? 'Loading…' : 'Load more'}</button
+                variant="secondary"
               >
+                {#if loadingMore}<Spinner data-icon="inline-start" />{/if}
+                {loadingMore ? 'Loading…' : 'Load more'}
+              </Button>
             {/if}
           {/if}
         </div>
       </section>
     </div>
 
-    {#if compactDetail && selectedUid}
-      <button
-        aria-label="Close Library item details"
-        class="detail-backdrop"
-        onclick={() => void closeDetail()}
-        tabindex="-1"
-        type="button"
-      ></button>
-    {/if}
-
-    <aside
-      aria-hidden={compactDetail ? !selectedUid : undefined}
-      aria-label="Library item details"
-      aria-modal={compactDetail && selectedUid ? 'true' : undefined}
-      bind:this={detailPanel}
-      class:open={Boolean(selectedUid)}
-      class="library-detail"
-      inert={compactDetail && !selectedUid}
-      role={compactDetail ? 'dialog' : 'complementary'}
-    >
+    {#snippet detailContent()}
       {#if selectedItem}
-        <header class="detail-header">
-          <div>
-            <p class="eyebrow">
-              {selectedItem.itemKind === 'ARTICLE' ? 'Saved article' : 'Saved link'}
-            </p>
-            <h2 bind:this={detailHeading} tabindex="-1">{displayTitle(selectedItem)}</h2>
-          </div>
-          <button
-            aria-label="Close Library item details"
-            class="icon-button"
-            onclick={() => void closeDetail()}
-            type="button"><Icon name="close" /></button
-          >
-        </header>
-
-        {#if detailLoading}<p aria-live="polite" class="detail-loading">Updating details…</p>{/if}
-        {#if detailError}<StatusMessage tone="error">{detailError}</StatusMessage>{/if}
-
-        <div class="detail-actions" role="group" aria-label="Library item actions">
-          {#if selectedItem.processingStatus === 'READY' && selectedItem.contentAvailable}
-            <button
-              class="button primary"
-              data-library-read={selectedItem.uid}
-              onclick={() => openReader(selectedItem!)}
-              type="button"
-            >
-              <Icon name="reader" size={16} />
-              Read
-            </button>
-          {/if}
-          <button
-            aria-pressed={selectedItem.starred}
-            class:active={selectedItem.starred}
-            class="button secondary"
-            disabled={busyUids.has(selectedItem.uid)}
-            onclick={() => void toggleStar(selectedItem!)}
-            type="button"
-          >
-            <Icon name="star" size={16} />
-            {selectedItem.starred ? 'Starred' : 'Star'}
-          </button>
-          <button
-            class="button secondary"
-            disabled={busyUids.has(selectedItem.uid)}
-            onclick={() => void toggleRead(selectedItem!)}
-            type="button"
-          >
-            <Icon name="reader" size={16} />
-            {selectedItem.readAt ? 'Mark unread' : 'Mark read'}
-          </button>
-          <button
-            class="button secondary"
-            disabled={busyUids.has(selectedItem.uid)}
-            onclick={() => void toggleArchive(selectedItem!)}
-            type="button"
-          >
-            <Icon name={selectedItem.status === 'ACTIVE' ? 'archive' : 'restore'} size={16} />
-            {selectedItem.status === 'ACTIVE' ? 'Archive' : 'Restore'}
-          </button>
-          <button
-            class="button delete-action"
-            disabled={busyUids.has(selectedItem.uid)}
-            onclick={() => requestDelete(selectedItem!)}
-            type="button"
-          >
-            <Icon name="delete" size={16} />
-            Delete
-          </button>
-        </div>
-
-        {#if selectedItem.processingStatus === 'PENDING'}
-          <section aria-live="polite" class="content-state pending">
-            <span aria-hidden="true" class="content-state-mark"></span>
+        {#if selectedItem.processingStatus === 'READY' && selectedItem.contentAvailable}
+          {#key selectedItem.uid}
+            <LibraryReader
+              {actionStatus}
+              busy={busyUids.has(selectedItem.uid)}
+              item={selectedItem}
+              mode="preview"
+              onBack={closeDetail}
+              onExpand={() => openReader(selectedItem!)}
+              onToggleRead={toggleRead}
+              {operationError}
+              timeZone={session.workspace.timezone}
+            />
+          {/key}
+        {:else}
+          <header class="detail-header">
             <div>
-              <h3>Preparing article</h3>
-              <p>The saved page is being made ready for local reading.</p>
-            </div>
-          </section>
-        {:else if selectedItem.processingStatus === 'FAILED' || selectedItem.processingStatus === 'NOT_FETCHED'}
-          <section class="content-state unavailable">
-            <div>
-              <h3>
-                {selectedItem.processingStatus === 'FAILED'
-                  ? 'Article capture failed'
-                  : 'Article not prepared'}
-              </h3>
-              <p>
-                {selectedItem.lastError ||
-                  (selectedItem.processingStatus === 'FAILED'
-                    ? 'The latest capture could not be completed.'
-                    : 'Readable content has not been fetched yet.')}
+              <p class="eyebrow">
+                {selectedItem.itemKind === 'ARTICLE' ? 'Saved article' : 'Saved link'}
               </p>
+              <h2 bind:this={detailHeading} tabindex="-1">{displayTitle(selectedItem)}</h2>
             </div>
-            <button
-              class="button secondary"
-              disabled={retryingUid === selectedItem.uid}
-              onclick={() => void retryCapture(selectedItem!)}
-              type="button"
+            <Button
+              aria-label="Close Library item details"
+              onclick={() => void closeDetail()}
+              size="icon"
+              variant="ghost"><X /></Button
             >
-              {retryingUid === selectedItem.uid ? 'Retrying…' : 'Retry'}
-            </button>
-          </section>
-        {:else if !selectedItem.contentAvailable}
-          <section class="content-state unavailable">
-            <div>
-              <h3>No readable text</h3>
-              <p>The page was saved, but no article text was extracted.</p>
-            </div>
-          </section>
-        {/if}
+          </header>
 
-        {#if detailPollingError}<StatusMessage tone="error">{detailPollingError}</StatusMessage
-          >{/if}
-        {#if detailProcessingError}
-          <StatusMessage tone="error">{detailProcessingError}</StatusMessage>
-        {/if}
+          {#if detailLoading}<p aria-live="polite" class="detail-loading">Updating details…</p>{/if}
+          {#if detailError}<StatusMessage tone="error">{detailError}</StatusMessage>{/if}
 
-        <dl class="detail-metadata">
-          <div>
-            <dt>Source</dt>
-            <dd>{selectedItem.siteName || hostname(selectedItem) || 'Unknown site'}</dd>
+          <div class="detail-actions" role="group" aria-label="Library item actions">
+            {#if selectedItem.processingStatus === 'READY' && selectedItem.contentAvailable}
+              <Button
+                data-library-read={selectedItem.uid}
+                onclick={() => openReader(selectedItem!)}
+              >
+                <BookOpen data-icon="inline-start" />
+                Read
+              </Button>
+            {/if}
+            <Button
+              aria-pressed={selectedItem.starred}
+              disabled={busyUids.has(selectedItem.uid)}
+              onclick={() => void toggleStar(selectedItem!)}
+              variant={selectedItem.starred ? 'default' : 'secondary'}
+            >
+              <Star data-icon="inline-start" />
+              {selectedItem.starred ? 'Starred' : 'Star'}
+            </Button>
+            <Button
+              disabled={busyUids.has(selectedItem.uid)}
+              onclick={() => void toggleRead(selectedItem!)}
+              variant="secondary"
+            >
+              <BookOpenCheck data-icon="inline-start" />
+              {selectedItem.readAt ? 'Mark unread' : 'Mark read'}
+            </Button>
+            <Button
+              disabled={busyUids.has(selectedItem.uid)}
+              onclick={() => void toggleArchive(selectedItem!)}
+              variant="secondary"
+            >
+              {#if selectedItem.status === 'ACTIVE'}
+                <Archive data-icon="inline-start" />
+              {:else}
+                <RotateCcw data-icon="inline-start" />
+              {/if}
+              {selectedItem.status === 'ACTIVE' ? 'Archive' : 'Restore'}
+            </Button>
+            <Button
+              disabled={busyUids.has(selectedItem.uid)}
+              onclick={() => requestDelete(selectedItem!)}
+              variant="destructive"
+            >
+              <Trash2 data-icon="inline-start" />
+              Delete
+            </Button>
           </div>
-          <div>
-            <dt>Capture</dt>
-            <dd class={`processing-state ${processingClass(selectedItem)}`}>
-              {processingLabel(selectedItem)}
-            </dd>
-          </div>
-          <div>
-            <dt>Added</dt>
-            <dd>{formatNoteTimestamp(selectedItem.createdAt, session.workspace.timezone)}</dd>
-          </div>
-          <div>
-            <dt>Reading</dt>
-            <dd>{selectedItem.readAt ? 'Read' : 'Unread'}</dd>
-          </div>
-          {#if selectedItem.author}
-            <div>
-              <dt>Author</dt>
-              <dd>{selectedItem.author}</dd>
-            </div>
+
+          {#if selectedItem.processingStatus === 'PENDING'}
+            <section aria-live="polite" class="content-state pending">
+              <span aria-hidden="true" class="content-state-mark"></span>
+              <div>
+                <h3>Preparing article</h3>
+                <p>The saved page is being made ready for local reading.</p>
+              </div>
+            </section>
+          {:else if selectedItem.processingStatus === 'FAILED' || selectedItem.processingStatus === 'NOT_FETCHED'}
+            <section class="content-state unavailable">
+              <div>
+                <h3>
+                  {selectedItem.processingStatus === 'FAILED'
+                    ? 'Article capture failed'
+                    : 'Article not prepared'}
+                </h3>
+                <p>
+                  {selectedItem.lastError ||
+                    (selectedItem.processingStatus === 'FAILED'
+                      ? 'The latest capture could not be completed.'
+                      : 'Readable content has not been fetched yet.')}
+                </p>
+              </div>
+              <Button
+                disabled={retryingUid === selectedItem.uid}
+                onclick={() => void retryCapture(selectedItem!)}
+                variant="secondary"
+              >
+                {#if retryingUid === selectedItem.uid}<Spinner data-icon="inline-start" />{/if}
+                {retryingUid === selectedItem.uid ? 'Retrying…' : 'Retry'}
+              </Button>
+            </section>
+          {:else if !selectedItem.contentAvailable}
+            <section class="content-state unavailable">
+              <div>
+                <h3>No readable text</h3>
+                <p>The page was saved, but no article text was extracted.</p>
+              </div>
+            </section>
           {/if}
-          {#if selectedItem.publishedAt}
-            <div>
-              <dt>Published</dt>
-              <dd>{formatNoteTimestamp(selectedItem.publishedAt, session.workspace.timezone)}</dd>
-            </div>
+
+          {#if detailPollingError}<StatusMessage tone="error">{detailPollingError}</StatusMessage
+            >{/if}
+          {#if detailProcessingError}
+            <StatusMessage tone="error">{detailProcessingError}</StatusMessage>
           {/if}
-        </dl>
 
-        {#if selectedItem.excerpt}
-          <section class="excerpt-section">
-            <h3>Excerpt</h3>
-            <p>{selectedItem.excerpt}</p>
-          </section>
-        {/if}
+          <dl class="detail-metadata">
+            <div>
+              <dt>Source</dt>
+              <dd>{selectedItem.siteName || hostname(selectedItem) || 'Unknown site'}</dd>
+            </div>
+            <div>
+              <dt>Capture</dt>
+              <dd class={`processing-state ${processingClass(selectedItem)}`}>
+                {processingLabel(selectedItem)}
+              </dd>
+            </div>
+            <div>
+              <dt>Added</dt>
+              <dd>{formatNoteTimestamp(selectedItem.createdAt, session.workspace.timezone)}</dd>
+            </div>
+            <div>
+              <dt>Reading</dt>
+              <dd>{selectedItem.readAt ? 'Read' : 'Unread'}</dd>
+            </div>
+            {#if selectedItem.author}
+              <div>
+                <dt>Author</dt>
+                <dd>{selectedItem.author}</dd>
+              </div>
+            {/if}
+            {#if selectedItem.publishedAt}
+              <div>
+                <dt>Published</dt>
+                <dd>{formatNoteTimestamp(selectedItem.publishedAt, session.workspace.timezone)}</dd>
+              </div>
+            {/if}
+          </dl>
 
-        <section class="source-section">
-          <h3>Source</h3>
-          {#if safeLink(selectedItem)}
-            <a href={safeLink(selectedItem) ?? undefined} rel="noreferrer noopener" target="_blank">
-              <span>{selectedItem.originalUrl}</span>
-              <span aria-hidden="true">↗</span>
-            </a>
-          {:else}
+          {#if selectedItem.excerpt}
+            <section class="excerpt-section">
+              <h3>Excerpt</h3>
+              <p>{selectedItem.excerpt}</p>
+            </section>
+          {/if}
+
+          <section class="source-section">
+            <h3>Source</h3>
             <p>{selectedItem.originalUrl}</p>
-          {/if}
-          {#if selectedItem.tags.length > 0}
-            <div aria-label="Tags" class="detail-tags">
-              {#each selectedItem.tags as tag}<span>#{tag}</span>{/each}
-            </div>
-          {/if}
-        </section>
+            {#if selectedItem.tags.length > 0}
+              <div aria-label="Tags" class="detail-tags">
+                {#each selectedItem.tags as tag}<span>#{tag}</span>{/each}
+              </div>
+            {/if}
+          </section>
 
-        <section class="captures-section">
-          <div class="section-heading">
-            <h3>Capture history</h3>
-            <span>{selectedItem.captures.length}</span>
-          </div>
-          {#if selectedItem.captures.length === 0}
-            <p class="detail-empty">No selections or notes were added when this link was saved.</p>
-          {:else}
-            <div class="capture-history">
-              {#each selectedItem.captures as capture (capture.uid)}
-                <article class="capture-record">
-                  <header>
-                    <span>{capture.capturedTitle || 'Manual capture'}</span>
-                    <time datetime={capture.createdAt}
-                      >{formatNoteTimestamp(capture.createdAt, session.workspace.timezone)}</time
-                    >
-                  </header>
-                  {#if capture.selectedText}<blockquote>{capture.selectedText}</blockquote>{/if}
-                  {#if capture.note}<p>{capture.note}</p>{/if}
-                </article>
-              {/each}
+          <section class="captures-section">
+            <div class="section-heading">
+              <h3>Capture history</h3>
+              <span>{selectedItem.captures.length}</span>
             </div>
-          {/if}
-        </section>
+            {#if selectedItem.captures.length === 0}
+              <p class="detail-empty">
+                No selections or notes were added when this link was saved.
+              </p>
+            {:else}
+              <div class="capture-history">
+                {#each selectedItem.captures as capture (capture.uid)}
+                  <article class="capture-record">
+                    <header>
+                      <span>{capture.capturedTitle || 'Manual capture'}</span>
+                      <time datetime={capture.createdAt}
+                        >{formatNoteTimestamp(capture.createdAt, session.workspace.timezone)}</time
+                      >
+                    </header>
+                    {#if capture.selectedText}<blockquote>{capture.selectedText}</blockquote>{/if}
+                    {#if capture.note}<p>{capture.note}</p>{/if}
+                  </article>
+                {/each}
+              </div>
+            {/if}
+          </section>
+        {/if}
       {:else}
-        <div class="detail-placeholder">
-          <Icon name="library" size={22} />
-          <h2>Item details</h2>
-          <p>Select a saved link to review its source, state, and capture history.</p>
-        </div>
+        <div aria-hidden="true" class="empty-preview"></div>
       {/if}
-    </aside>
+    {/snippet}
+
+    {#if compactDetail}
+      <Sheet.Root onOpenChange={handleDetailOpenChange} open={Boolean(selectedUid)}>
+        <Sheet.Content
+          class="w-full max-w-[26rem] overflow-y-auto p-6 pb-[calc(5rem+env(safe-area-inset-bottom))] sm:max-w-md"
+          showCloseButton={false}
+        >
+          <Sheet.Header class="sr-only">
+            <Sheet.Title>Library item details</Sheet.Title>
+            <Sheet.Description>Review and manage the selected saved item.</Sheet.Description>
+          </Sheet.Header>
+          {@render detailContent()}
+        </Sheet.Content>
+      </Sheet.Root>
+    {:else}
+      <aside aria-label="Library item details" class="library-detail">
+        {@render detailContent()}
+      </aside>
+    {/if}
   </div>
 {/if}
 
@@ -985,82 +1119,52 @@
 <style>
   .library-page {
     display: grid;
-    width: min(100%, 1240px);
+    width: 100%;
     min-height: 100%;
-    grid-template-columns: minmax(0, 1fr) 356px;
-    gap: 36px;
-    padding: 38px 44px 72px;
-    margin: 0 auto;
+    grid-template-columns: minmax(360px, 440px) minmax(0, 1fr);
   }
 
   .library-primary {
     min-width: 0;
+    padding: 28px 20px 72px 28px;
+    border-right: 1px solid var(--border);
+  }
+
+  .library-page-header {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .library-page-header h1 {
+    margin: 0;
+    font-size: 23px;
+    font-weight: 680;
+    line-height: 1.2;
+    letter-spacing: -0.03em;
   }
 
   .library-index {
-    padding-top: 30px;
+    padding-top: 20px;
   }
 
   .library-toolbar {
     display: flex;
-    gap: 20px;
-    align-items: end;
-    justify-content: space-between;
-  }
-
-  .library-toolbar h2 {
-    margin-bottom: 1px;
-    font-size: 17px;
-    font-weight: 660;
-    letter-spacing: -0.015em;
-  }
-
-  .library-toolbar p {
-    margin: 0;
-    color: var(--color-text-muted);
-    font-size: 11px;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 12px;
   }
 
   .library-search {
-    width: min(280px, 48%);
-  }
-
-  .library-filters {
-    display: flex;
-    min-height: 42px;
-    gap: 18px;
-    align-items: end;
-    border-bottom: 1px solid var(--color-border);
-  }
-
-  .library-filters button {
-    min-height: 40px;
-    padding: 0 1px;
-    color: var(--color-text-muted);
-    background: transparent;
-    border: 0;
-    border-bottom: 2px solid transparent;
-    font-size: 12px;
-    font-weight: 600;
-  }
-
-  .library-filters button:hover,
-  .library-filters button.active {
-    color: var(--color-text);
-  }
-
-  .library-filters button.active {
-    color: var(--color-accent-hover);
-    border-bottom-color: var(--color-accent);
-  }
-
-  .library-filters > span {
-    margin: 0 0 11px auto;
-    color: var(--color-text-muted);
-    font-size: 11px;
+    min-width: 0;
+    flex: 1;
   }
 
   .library-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
     padding: 0;
     margin: 0;
     list-style: none;
@@ -1071,9 +1175,9 @@
     display: grid;
     min-width: 0;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 12px;
+    gap: 4px;
     align-items: center;
-    border-bottom: 1px solid var(--color-border-soft);
+    border-radius: 8px;
     transition:
       background-color 150ms ease,
       opacity 150ms ease;
@@ -1081,8 +1185,8 @@
 
   .library-list li::before {
     position: absolute;
-    top: 16px;
-    bottom: 16px;
+    top: 12px;
+    bottom: 12px;
     left: 0;
     width: 2px;
     background: transparent;
@@ -1092,11 +1196,11 @@
 
   .library-list li:hover,
   .library-list li.selected {
-    background: var(--color-surface-muted);
+    background: var(--muted);
   }
 
   .library-list li.selected::before {
-    background: var(--color-accent);
+    background: var(--primary);
   }
 
   .library-list li.busy {
@@ -1106,17 +1210,54 @@
   .item-select {
     display: grid;
     min-width: 0;
-    gap: 4px;
-    padding: 17px 8px 17px 12px;
+    grid-template-columns: 18px minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+    padding: 12px 4px 12px 12px;
     color: inherit;
     background: transparent;
     border: 0;
     text-align: left;
   }
 
+  .item-favicon {
+    position: relative;
+    display: grid;
+    width: 18px;
+    height: 18px;
+    place-items: center;
+    overflow: hidden;
+    color: var(--muted-foreground);
+    background: var(--muted);
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 650;
+  }
+
+  .item-favicon img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+
+  .item-copy {
+    display: grid;
+    min-width: 0;
+    gap: 4px;
+  }
+
+  .item-heading {
+    display: flex;
+    min-width: 0;
+    gap: 7px;
+    align-items: center;
+  }
+
   .item-title,
-  .item-source,
-  .item-excerpt {
+  .item-source {
     overflow: hidden;
     text-overflow: ellipsis;
   }
@@ -1127,42 +1268,31 @@
   }
 
   .item-title {
+    min-width: 0;
+    flex: 1;
     font-size: 14px;
     font-weight: 640;
+    line-height: 1.35;
     letter-spacing: -0.01em;
   }
 
   .item-source {
-    color: var(--color-text-muted);
-    font-family: var(--font-mono);
-    font-size: 10px;
+    min-width: 0;
   }
 
-  .item-excerpt {
-    display: -webkit-box;
-    color: var(--color-text-muted);
-    font-family: var(--font-ui);
-    font-size: 12px;
-    line-height: 1.5;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-  }
-
-  .item-meta,
-  .item-tags {
+  .item-meta {
     display: flex;
     min-width: 0;
-    flex-wrap: wrap;
-    gap: 5px 12px;
+    gap: 5px;
     align-items: center;
-    color: var(--color-text-muted);
+    color: var(--muted-foreground);
+    font-family: var(--font-mono);
     font-size: 10px;
+    white-space: nowrap;
   }
 
-  .item-tags span,
   .detail-tags span {
-    color: var(--color-accent-hover);
+    color: var(--primary);
     font-family: var(--font-mono);
     font-size: 10px;
   }
@@ -1172,45 +1302,48 @@
   }
 
   .processing-state.ready {
-    color: var(--color-accent-hover);
+    color: var(--primary);
   }
 
   .processing-state.failed {
-    color: var(--color-danger);
+    color: var(--destructive);
+  }
+
+  .unread-mark {
+    width: 5px;
+    height: 5px;
+    flex: none;
+    background: var(--primary);
+    border-radius: 50%;
   }
 
   .item-actions {
     display: flex;
     gap: 2px;
     align-items: center;
-    padding-right: 7px;
+    padding-right: 4px;
+    opacity: 0;
+    transition: opacity 150ms ease;
   }
 
-  .text-action {
-    min-height: 34px;
-    padding: 0 7px;
-    color: var(--color-text-muted);
-    background: transparent;
-    border: 0;
-    border-radius: var(--radius-control);
-    font-size: 11px;
-  }
-
-  .text-action:hover:not(:disabled) {
-    color: var(--color-accent-hover);
-    background: var(--color-accent-soft);
+  .library-list li:hover .item-actions,
+  .library-list li:focus-within .item-actions,
+  .library-list li.selected .item-actions {
+    opacity: 1;
   }
 
   .library-detail {
     position: sticky;
-    top: 24px;
+    top: 0;
     min-width: 0;
-    height: fit-content;
-    max-height: calc(100dvh - 48px);
-    padding: 3px 0 32px 28px;
+    height: 100dvh;
+    max-height: 100dvh;
     overflow: auto;
-    border-left: 1px solid var(--color-border);
     scrollbar-width: thin;
+  }
+
+  .empty-preview {
+    min-height: 100%;
   }
 
   .detail-header {
@@ -1223,7 +1356,7 @@
 
   .detail-header h2 {
     margin: 0;
-    font-family: var(--font-ui);
+    font-family: var(--font-sans);
     font-size: 21px;
     font-weight: 650;
     line-height: 1.35;
@@ -1233,7 +1366,7 @@
 
   .detail-loading {
     margin: -12px 0 14px;
-    color: var(--color-text-muted);
+    color: var(--muted-foreground);
     font-size: 11px;
   }
 
@@ -1242,29 +1375,7 @@
     flex-wrap: wrap;
     gap: 7px;
     padding-bottom: 20px;
-    border-bottom: 1px solid var(--color-border);
-  }
-
-  .detail-actions .button {
-    gap: 6px;
-    padding-inline: 10px;
-  }
-
-  .detail-actions .button.active {
-    color: var(--color-accent-hover);
-    background: var(--color-accent-soft);
-    border-color: var(--color-accent-soft);
-  }
-
-  .detail-actions .delete-action {
-    color: var(--color-danger);
-    background: transparent;
-    border-color: transparent;
-  }
-
-  .detail-actions .delete-action:hover:not(:disabled) {
-    background: var(--color-danger-soft);
-    border-color: var(--color-danger-soft);
+    border-bottom: 1px solid var(--border);
   }
 
   .content-state {
@@ -1273,7 +1384,7 @@
     align-items: start;
     justify-content: space-between;
     padding: 18px 0;
-    border-bottom: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--border);
   }
 
   .content-state.pending {
@@ -1285,7 +1396,7 @@
     width: 16px;
     height: 2px;
     margin-top: 9px;
-    background: var(--color-accent);
+    background: var(--primary);
     border-radius: 2px;
   }
 
@@ -1297,13 +1408,9 @@
 
   .content-state p {
     margin: 0;
-    color: var(--color-text-muted);
+    color: var(--muted-foreground);
     font-size: 11px;
     line-height: 1.55;
-  }
-
-  .content-state .button {
-    flex: none;
   }
 
   .detail-metadata {
@@ -1312,7 +1419,7 @@
     gap: 16px 20px;
     padding: 20px 0;
     margin: 0;
-    border-bottom: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--border);
   }
 
   .detail-metadata div {
@@ -1321,7 +1428,7 @@
 
   .detail-metadata dt {
     margin-bottom: 2px;
-    color: var(--color-text-muted);
+    color: var(--muted-foreground);
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -1353,13 +1460,12 @@
 
   .excerpt-section p {
     margin: 0;
-    color: var(--color-text-muted);
-    font-family: var(--font-ui);
+    color: var(--muted-foreground);
+    font-family: var(--font-sans);
     font-size: 13px;
     line-height: 1.68;
   }
 
-  .source-section > a,
   .source-section > p {
     display: flex;
     min-width: 0;
@@ -1367,16 +1473,11 @@
     align-items: start;
     justify-content: space-between;
     margin: 0;
-    color: var(--color-accent-hover);
+    color: var(--primary);
     font-family: var(--font-mono);
     font-size: 10px;
     line-height: 1.6;
     overflow-wrap: anywhere;
-  }
-
-  .source-section > a:hover {
-    text-decoration: underline;
-    text-underline-offset: 3px;
   }
 
   .detail-tags {
@@ -1390,24 +1491,24 @@
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    border-bottom: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--border);
   }
 
   .section-heading > span {
-    color: var(--color-text-muted);
+    color: var(--muted-foreground);
     font-family: var(--font-mono);
     font-size: 10px;
   }
 
   .detail-empty {
     padding: 18px 0;
-    color: var(--color-text-muted);
+    color: var(--muted-foreground);
     font-size: 12px;
   }
 
   .capture-record {
     padding: 18px 0;
-    border-bottom: 1px solid var(--color-border-soft);
+    border-bottom: 1px solid var(--border);
   }
 
   .capture-record header {
@@ -1415,7 +1516,7 @@
     gap: 12px;
     justify-content: space-between;
     margin-bottom: 9px;
-    color: var(--color-text-muted);
+    color: var(--muted-foreground);
     font-size: 10px;
   }
 
@@ -1427,40 +1528,17 @@
   .capture-record blockquote {
     padding-left: 13px;
     margin: 0 0 10px;
-    border-left: 2px solid var(--color-accent);
-    font-family: var(--font-ui);
+    border-left: 2px solid var(--primary);
+    font-family: var(--font-sans);
     font-size: 13px;
     line-height: 1.65;
   }
 
   .capture-record p {
     margin: 0;
-    color: var(--color-text-muted);
+    color: var(--muted-foreground);
     font-size: 12px;
     white-space: pre-wrap;
-  }
-
-  .detail-placeholder {
-    display: grid;
-    min-height: 300px;
-    align-content: center;
-    justify-items: start;
-    color: var(--color-text-muted);
-  }
-
-  .detail-placeholder h2 {
-    margin: 13px 0 4px;
-    color: var(--color-text);
-    font-size: 15px;
-  }
-
-  .detail-placeholder p {
-    max-width: 250px;
-    font-size: 12px;
-  }
-
-  .detail-backdrop {
-    display: none;
   }
 
   @keyframes content-state-enter {
@@ -1475,47 +1553,12 @@
       display: block;
       width: min(100%, 940px);
       padding: 32px 36px 72px;
+      margin-inline: auto;
     }
 
-    .library-detail {
-      position: fixed;
-      top: calc(56px + env(safe-area-inset-top));
-      right: 0;
-      bottom: 0;
-      z-index: 70;
-      width: min(420px, calc(100vw - 64px));
-      height: auto;
-      max-height: none;
-      padding: 28px 28px 56px;
-      background: var(--color-surface);
-      border-left: 1px solid var(--color-border);
-      box-shadow: var(--shadow-floating);
-      transform: translateX(102%);
-      visibility: hidden;
-      transition:
-        transform 190ms ease,
-        visibility 190ms step-end;
-    }
-
-    .library-detail.open {
-      transform: translateX(0);
-      visibility: visible;
-      transition:
-        transform 190ms ease,
-        visibility 0ms step-start;
-    }
-
-    .detail-backdrop {
-      position: fixed;
-      top: calc(56px + env(safe-area-inset-top));
-      right: 0;
-      bottom: 0;
-      left: 64px;
-      z-index: 68;
-      display: block;
+    .library-primary {
       padding: 0;
-      background: color-mix(in oklch, var(--color-text), transparent 78%);
-      border: 0;
+      border-right: 0;
     }
   }
 
@@ -1525,64 +1568,20 @@
       padding: 24px 16px 54px;
     }
 
-    .library-toolbar {
-      display: grid;
-      gap: 14px;
-      align-items: start;
-    }
-
-    .library-search {
-      width: 100%;
-    }
-
-    .library-filters button {
-      min-width: 68px;
-      min-height: 44px;
-    }
-
-    .library-list li {
-      grid-template-columns: minmax(0, 1fr);
-      gap: 0;
-      padding-bottom: 8px;
-    }
-
     .item-select {
       min-height: 44px;
-      padding: 16px 8px 9px 12px;
+      padding-block: 12px;
     }
 
     .item-actions {
-      justify-content: flex-end;
-      padding: 0 7px;
+      padding-right: 0;
+      opacity: 1;
     }
+  }
 
-    .item-actions .icon-button,
-    .text-action {
-      min-width: 44px;
-      min-height: 44px;
-    }
-
-    .library-detail {
-      top: calc(56px + env(safe-area-inset-top));
-      bottom: 0;
-      width: 100%;
-      padding: 24px 18px 36px;
-      border-left: 0;
-      box-shadow: none;
-    }
-
-    .detail-backdrop {
-      top: calc(56px + env(safe-area-inset-top));
-      bottom: 0;
-      left: 0;
-    }
-
-    .detail-actions .button {
-      min-height: 44px;
-    }
-
-    .content-state .button {
-      min-height: 44px;
+  @media (hover: none) {
+    .item-actions {
+      opacity: 1;
     }
   }
 </style>

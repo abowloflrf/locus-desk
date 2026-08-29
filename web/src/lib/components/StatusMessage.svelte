@@ -1,4 +1,7 @@
 <script lang="ts">
+  import * as Alert from '$lib/components/ui/alert';
+  import { cn } from '$lib/utils';
+
   let {
     tone = 'neutral',
     children,
@@ -8,35 +11,11 @@
   } = $props();
 </script>
 
-<div
+<Alert.Root
   aria-live={tone === 'error' ? 'assertive' : 'polite'}
-  class:status-error={tone === 'error'}
-  class:status-success={tone === 'success'}
-  class="status-message"
+  class={cn('status-message my-3', `status-${tone}`)}
+  role={tone === 'error' ? 'alert' : 'status'}
+  variant={tone === 'error' ? 'destructive' : 'default'}
 >
-  {@render children()}
-</div>
-
-<style>
-  .status-message {
-    padding: 10px 12px;
-    margin: 12px 0;
-    color: var(--color-text-muted);
-    background: var(--color-surface-muted);
-    border-left: 3px solid var(--color-border);
-    border-radius: 4px;
-    font-size: 12px;
-  }
-
-  .status-message.status-error {
-    color: var(--color-danger);
-    background: var(--color-danger-soft);
-    border-left-color: var(--color-danger);
-  }
-
-  .status-message.status-success {
-    color: var(--color-accent-hover);
-    background: var(--color-accent-soft);
-    border-left-color: var(--color-accent);
-  }
-</style>
+  <Alert.Description>{@render children()}</Alert.Description>
+</Alert.Root>

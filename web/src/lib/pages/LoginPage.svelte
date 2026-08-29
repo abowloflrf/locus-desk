@@ -1,6 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
 
+  import { Button } from '$lib/components/ui/button';
+  import * as Field from '$lib/components/ui/field';
+  import { Input } from '$lib/components/ui/input';
+  import { Spinner } from '$lib/components/ui/spinner';
+
   import { errorMessage } from '../api/client';
   import type { SessionInfo } from '../api/types';
 
@@ -14,7 +19,7 @@
   let password = $state('');
   let busy = $state(false);
   let error = $state<string | null>(null);
-  let usernameInput = $state<HTMLInputElement>();
+  let usernameInput = $state<HTMLInputElement | null>(null);
 
   onMount(() => usernameInput?.focus());
 
@@ -37,161 +42,78 @@
   }
 </script>
 
-<main class="login-page">
-  <section class="login-intro" aria-labelledby="login-brand">
-    <div class="login-brand">
-      <span aria-hidden="true">L</span>
+<main
+  class="login-page grid min-h-dvh overflow-y-auto md:grid-cols-[minmax(360px,0.92fr)_minmax(430px,1.08fr)]"
+>
+  <section
+    class="flex min-h-[250px] flex-col justify-between border-b bg-muted px-6 pb-8 pt-[calc(1.5rem+env(safe-area-inset-top))] md:min-h-full md:border-r md:border-b-0 md:px-[clamp(2.25rem,6vw,5.5rem)] md:pt-10 md:pb-16"
+    aria-labelledby="login-brand"
+  >
+    <div class="flex items-center gap-3 text-base">
+      <span
+        aria-hidden="true"
+        class="grid size-8 place-items-center rounded-md bg-primary font-bold text-primary-foreground"
+        >L</span
+      >
       <strong id="login-brand">Locus Desk</strong>
     </div>
     <div>
-      <p class="eyebrow">Personal workspace</p>
-      <h1>Keep thoughts close.<br />Keep today clear.</h1>
-      <p>Memos and next actions, in one quiet place.</p>
+      <p class="text-xs font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+        Personal workspace
+      </p>
+      <h1
+        class="mt-9 mb-3 max-w-xl text-4xl leading-[1.08] font-semibold tracking-[-0.04em] md:mt-0 md:mb-4 md:text-[clamp(2.5rem,5vw,4.25rem)]"
+      >
+        Keep thoughts close.<br />Keep today clear.
+      </h1>
+      <p class="text-sm text-muted-foreground md:text-base">
+        Memos and next actions, in one quiet place.
+      </p>
     </div>
   </section>
 
-  <section class="login-form-region" aria-labelledby="login-title">
-    <form class="login-form" onsubmit={submit}>
+  <section
+    class="grid place-items-center bg-background px-6 py-9 pb-[calc(3rem+env(safe-area-inset-bottom))] md:p-10"
+    aria-labelledby="login-title"
+  >
+    <form class="login-form flex w-full max-w-[360px] flex-col gap-5" onsubmit={submit}>
       <div>
-        <p class="eyebrow">Welcome back</p>
-        <h2 id="login-title">Sign in</h2>
+        <p class="text-xs font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+          Welcome back
+        </p>
+        <h2 class="mt-1 text-2xl font-semibold tracking-tight" id="login-title">Sign in</h2>
       </div>
-      <label class="field">
-        <span>Username</span>
-        <input
-          autocomplete="username"
-          bind:this={usernameInput}
-          disabled={busy}
-          bind:value={username}
-        />
-      </label>
-      <label class="field">
-        <span>Password</span>
-        <input
-          autocomplete="current-password"
-          disabled={busy}
-          type="password"
-          bind:value={password}
-        />
-      </label>
-      {#if error}<p aria-live="assertive" class="form-error login-error">{error}</p>{/if}
-      <button class="button primary login-button" disabled={busy} type="submit">
+
+      <Field.Group>
+        <Field.Field data-invalid={Boolean(error && !username.trim())}>
+          <Field.Label for="login-username">Username</Field.Label>
+          <Input
+            aria-invalid={error && !username.trim() ? 'true' : undefined}
+            autocomplete="username"
+            bind:ref={usernameInput}
+            disabled={busy}
+            id="login-username"
+            bind:value={username}
+          />
+        </Field.Field>
+        <Field.Field data-invalid={Boolean(error && !password)}>
+          <Field.Label for="login-password">Password</Field.Label>
+          <Input
+            aria-invalid={error && !password ? 'true' : undefined}
+            autocomplete="current-password"
+            disabled={busy}
+            id="login-password"
+            type="password"
+            bind:value={password}
+          />
+        </Field.Field>
+      </Field.Group>
+
+      {#if error}<Field.Error class="login-error">{error}</Field.Error>{/if}
+      <Button class="login-button h-11 w-full" disabled={busy} type="submit">
+        {#if busy}<Spinner data-icon="inline-start" />{/if}
         {busy ? 'Signing in…' : 'Sign in'}
-      </button>
+      </Button>
     </form>
   </section>
 </main>
-
-<style>
-  .login-page {
-    display: grid;
-    height: 100%;
-    min-height: 100vh;
-    min-height: 100dvh;
-    grid-template-columns: minmax(360px, 0.92fr) minmax(430px, 1.08fr);
-    overflow-y: auto;
-    scrollbar-width: none;
-  }
-
-  .login-page::-webkit-scrollbar {
-    display: none;
-  }
-
-  .login-intro {
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    padding: 42px clamp(36px, 6vw, 88px) 68px;
-    background: var(--color-surface-muted);
-    border-right: 1px solid var(--color-border);
-  }
-
-  .login-brand {
-    display: flex;
-    gap: 11px;
-    align-items: center;
-    font-size: 16px;
-  }
-
-  .login-brand > span {
-    display: grid;
-    width: 32px;
-    height: 32px;
-    color: white;
-    background: var(--color-accent);
-    border-radius: 8px;
-    font-weight: 700;
-    place-items: center;
-  }
-
-  .login-intro h1 {
-    max-width: 540px;
-    margin-bottom: 18px;
-    font-family: var(--font-reading);
-    font-size: clamp(38px, 5vw, 68px);
-    font-weight: 520;
-    line-height: 1.08;
-    letter-spacing: -0.045em;
-  }
-
-  .login-intro > div:last-child > p:last-child {
-    margin-bottom: 0;
-    color: var(--color-text-muted);
-    font-size: 15px;
-  }
-
-  .login-form-region {
-    display: grid;
-    padding: 40px;
-    background: var(--color-canvas);
-    place-items: center;
-  }
-
-  .login-form {
-    display: grid;
-    width: min(100%, 360px);
-    gap: 18px;
-  }
-
-  .login-form h2 {
-    margin-bottom: 0;
-    font-size: 26px;
-  }
-
-  .login-form input {
-    min-height: 44px;
-  }
-
-  .login-error {
-    margin: -5px 0 0;
-  }
-
-  .login-button {
-    min-height: 44px;
-    margin-top: 3px;
-  }
-
-  @media (max-width: 767px) {
-    .login-page {
-      display: block;
-    }
-
-    .login-intro {
-      min-height: 250px;
-      padding: calc(26px + env(safe-area-inset-top)) calc(24px + env(safe-area-inset-right)) 34px
-        calc(24px + env(safe-area-inset-left));
-      border-right: 0;
-      border-bottom: 1px solid var(--color-border);
-    }
-
-    .login-intro h1 {
-      margin: 36px 0 10px;
-      font-size: 38px;
-    }
-
-    .login-form-region {
-      padding: 36px calc(24px + env(safe-area-inset-right)) calc(48px + env(safe-area-inset-bottom))
-        calc(24px + env(safe-area-inset-left));
-    }
-  }
-</style>

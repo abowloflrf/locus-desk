@@ -10,6 +10,8 @@
   } from './lib/api/client';
   import type { SessionInfo } from './lib/api/types';
   import AppShell from './lib/components/AppShell.svelte';
+  import { Button } from './lib/components/ui/button';
+  import { Spinner } from './lib/components/ui/spinner';
   import ArchivePage from './lib/pages/ArchivePage.svelte';
   import LibraryPage from './lib/pages/LibraryPage.svelte';
   import LoginPage from './lib/pages/LoginPage.svelte';
@@ -31,6 +33,7 @@
   let authError = $state<string | null>(null);
   let returnPath = $state(safeReturnPath(window.location.pathname));
   let taskRefreshToken = $state(0);
+  let immersive = $state(false);
   let sessionGeneration = 0;
   let sessionRefresh: { controller: AbortController; generation: number } | null = null;
 
@@ -183,6 +186,7 @@
   }
 
   function navigate(next: AppRoute, replace = false): void {
+    immersive = false;
     const focusMain = authStatus === 'authenticated' && route !== next;
     const path = pathForRoute(next);
     if (replace) window.history.replaceState({}, '', path);
@@ -210,24 +214,39 @@
 <svelte:window onkeydown={handleGlobalKeydown} />
 
 {#if authStatus === 'checking'}
-  <main class="boot-screen" aria-live="polite">
-    <span class="brand-mark" aria-hidden="true">L</span>
-    <p>Opening your workspace…</p>
+  <main
+    class="boot-screen grid min-h-dvh place-content-center justify-items-center gap-4 px-8 py-[calc(2rem+env(safe-area-inset-top))] text-center"
+    aria-live="polite"
+  >
+    <span
+      class="grid size-8 place-items-center rounded-lg bg-primary text-sm font-bold text-primary-foreground"
+      aria-hidden="true">L</span
+    >
+    <p class="flex items-center gap-2 text-sm text-muted-foreground">
+      <Spinner />
+      Opening your workspace…
+    </p>
   </main>
 {:else if authStatus === 'error'}
-  <main class="boot-screen">
-    <span class="brand-mark" aria-hidden="true">L</span>
-    <h1>Workspace unavailable</h1>
-    <p>{authError}</p>
-    <button class="button primary" onclick={() => void checkSession()} type="button"
-      >Try again</button
+  <main
+    class="boot-screen grid min-h-dvh place-content-center justify-items-center gap-4 px-8 py-[calc(2rem+env(safe-area-inset-top))] text-center"
+  >
+    <span
+      class="grid size-8 place-items-center rounded-lg bg-primary text-sm font-bold text-primary-foreground"
+      aria-hidden="true">L</span
     >
+    <div class="grid max-w-md gap-1.5">
+      <h1 class="text-xl font-semibold tracking-tight">Workspace unavailable</h1>
+      <p class="text-sm leading-6 text-muted-foreground">{authError}</p>
+    </div>
+    <Button onclick={() => void checkSession()}>Try again</Button>
   </main>
 {:else if authStatus === 'anonymous' || !session}
   <LoginPage onLogin={handleLogin} />
 {:else}
   <AppShell
     current={route as ProtectedRoute}
+    {immersive}
     notice={authError}
     onDismissNotice={() => (authError = null)}
     onLogout={handleLogout}
@@ -238,7 +257,7 @@
     {#if route === 'tasks'}
       <TasksPage refreshToken={taskRefreshToken} {session} />
     {:else if route === 'library'}
-      <LibraryPage {session} />
+      <LibraryPage onImmersiveChange={(open) => (immersive = open)} {session} />
     {:else if route === 'archive'}
       <ArchivePage {session} />
     {:else}
@@ -246,41 +265,3 @@
     {/if}
   </AppShell>
 {/if}
-
-<style>
-  .boot-screen {
-    display: grid;
-    min-height: 100vh;
-    min-height: 100dvh;
-    align-content: center;
-    justify-items: center;
-    padding: calc(32px + env(safe-area-inset-top)) 32px calc(32px + env(safe-area-inset-bottom));
-    text-align: center;
-  }
-
-  .brand-mark {
-    display: grid;
-    width: 32px;
-    height: 32px;
-    color: var(--color-surface);
-    background: var(--color-accent);
-    border-radius: 8px;
-    font-weight: 700;
-    place-items: center;
-  }
-
-  .boot-screen .brand-mark {
-    margin-bottom: 18px;
-  }
-
-  .boot-screen h1 {
-    margin-bottom: 7px;
-    font-size: 22px;
-  }
-
-  .boot-screen p {
-    max-width: 420px;
-    margin-bottom: 20px;
-    color: var(--color-text-muted);
-  }
-</style>

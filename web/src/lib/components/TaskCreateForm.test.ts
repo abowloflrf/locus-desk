@@ -61,8 +61,8 @@ describe('Todo task creation', () => {
       dateInput.dispatchEvent(new Event('input', { bubbles: true }));
 
       target.querySelector<HTMLButtonElement>('[aria-label="Set priority"]')!.click();
-      await vi.waitFor(() => expect(target.querySelector('[role="menu"]')).not.toBeNull());
-      target.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')[1].click();
+      await vi.waitFor(() => expect(document.body.querySelector('[role="menu"]')).not.toBeNull());
+      document.body.querySelectorAll<HTMLElement>('[role="menuitemradio"]')[1].click();
 
       titleInput.value = 'Send the report';
       titleInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -150,8 +150,8 @@ describe('Full task creation', () => {
       time.value = '16:30';
       time.dispatchEvent(new Event('input', { bubbles: true }));
       target.querySelector<HTMLButtonElement>('[aria-label="Set priority"]')!.click();
-      await vi.waitFor(() => expect(target.querySelector('[role="menu"]')).not.toBeNull());
-      target.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')[1].click();
+      await vi.waitFor(() => expect(document.body.querySelector('[role="menu"]')).not.toBeNull());
+      document.body.querySelectorAll<HTMLElement>('[role="menuitemradio"]')[1].click();
       target.querySelector<HTMLFormElement>('form')!.requestSubmit();
 
       await vi.waitFor(() => expect(onCreate).toHaveBeenCalledOnce());

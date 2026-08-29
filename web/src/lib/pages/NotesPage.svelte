@@ -1,14 +1,20 @@
 <script lang="ts">
+  import Search from '@lucide/svelte/icons/search';
   import { onMount } from 'svelte';
 
   import { errorMessage } from '../api/client';
   import { createNote, deleteNote, listNotes, listTags, updateNote } from '../api/notes';
   import type { Note, SessionInfo, UpdateNoteRequest } from '../api/types';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
-  import Icon from '../components/Icon.svelte';
   import NoteComposer from '../components/NoteComposer.svelte';
   import NoteTimeline from '../components/NoteTimeline.svelte';
   import StatusMessage from '../components/StatusMessage.svelte';
+  import { Button } from '../components/ui/button';
+  import * as Empty from '../components/ui/empty';
+  import { Input } from '../components/ui/input';
+  import * as Kbd from '../components/ui/kbd';
+  import { Spinner } from '../components/ui/spinner';
+  import * as ToggleGroup from '../components/ui/toggle-group';
   import { captureListFocus, restoreListFocus, type ListFocusSnapshot } from '../utils/focus';
 
   let { session }: { session: SessionInfo } = $props();
@@ -28,7 +34,7 @@
   let pendingDelete = $state<Note | null>(null);
   let deleteBusy = $state(false);
   let deleteError = $state<string | null>(null);
-  let searchInput = $state<HTMLInputElement>();
+  let searchInput = $state<HTMLInputElement | null>(null);
   let pageElement = $state<HTMLElement>();
   let activeController: AbortController | null = null;
   let tagController: AbortController | null = null;
@@ -296,41 +302,43 @@
   <header class="page-header notes-header">
     <h1 class="sr-only">Memos</h1>
     <label class="search-field">
-      <Icon name="search" size={17} />
+      <Search class="pointer-events-none absolute left-3 size-4 text-muted-foreground" />
       <span class="sr-only">Search memos</span>
-      <input
+      <Input
+        class="pl-9 pr-12"
         autocomplete="off"
-        bind:this={searchInput}
+        bind:ref={searchInput}
         oninput={handleSearch}
         placeholder="Search memos"
         type="search"
         value={query}
+        variant="flat"
       />
-      <kbd>⌘K</kbd>
+      <Kbd.Root class="pointer-events-none absolute right-3">⌘K</Kbd.Root>
     </label>
   </header>
 
   <NoteComposer onCreate={handleCreate} />
 
   {#if tags.length > 0}
-    <div aria-label="Filter by tag" class="tag-filter" role="group">
-      <button
-        aria-pressed={!selectedTag}
-        class:active={!selectedTag}
-        class="tag-chip"
-        onclick={() => selectTag('')}
-        type="button">All</button
-      >
+    <ToggleGroup.Root
+      aria-label="Filter by tag"
+      class="tag-filter mb-[17px] max-w-full flex-wrap pb-1"
+      size="xs"
+      spacing={1}
+      type="single"
+      value={selectedTag}
+      variant="outline"
+    >
+      <ToggleGroup.Item onclick={() => selectTag('')} value="">
+        <span class="font-mono text-[11px] leading-none">All</span>
+      </ToggleGroup.Item>
       {#each tags as tag}
-        <button
-          aria-pressed={selectedTag === tag}
-          class:active={selectedTag === tag}
-          class="tag-chip"
-          onclick={() => selectTag(tag)}
-          type="button">#{tag}</button
-        >
+        <ToggleGroup.Item onclick={() => selectTag(tag)} value={tag}>
+          <span class="font-mono text-[11px] leading-none">#{tag}</span>
+        </ToggleGroup.Item>
       {/each}
-    </div>
+    </ToggleGroup.Root>
   {/if}
 
   {#if operationError}<StatusMessage tone="error">{operationError}</StatusMessage>{/if}
@@ -341,24 +349,33 @@
     >{/if}
 
   {#if loading && notes.length === 0}
-    <div aria-live="polite" class="loading-state large">Loading memos…</div>
+    <div aria-live="polite" class="loading-state large flex items-center justify-center gap-2">
+      <Spinner />
+      Loading memos…
+    </div>
   {:else if loadError}
-    <div class="empty-state">
-      <h2>Memos are unavailable</h2>
-      <p>{loadError}</p>
-      <button class="button secondary" onclick={() => void loadNotesPage(true)} type="button"
-        >Try again</button
-      >
-    </div>
+    <Empty.Root>
+      <Empty.Header>
+        <Empty.Title>Memos are unavailable</Empty.Title>
+        <Empty.Description>{loadError}</Empty.Description>
+      </Empty.Header>
+      <Empty.Content>
+        <Button onclick={() => void loadNotesPage(true)} variant="secondary">Try again</Button>
+      </Empty.Content>
+    </Empty.Root>
   {:else if notes.length === 0}
-    <div class="empty-state">
-      <h2>{query || selectedTag ? 'No memos found' : 'Your timeline is clear'}</h2>
-      <p>
-        {query || selectedTag
-          ? 'Try another keyword or tag.'
-          : 'Write the first thought you want to keep.'}
-      </p>
-    </div>
+    <Empty.Root>
+      <Empty.Header>
+        <Empty.Title
+          >{query || selectedTag ? 'No memos found' : 'Your timeline is clear'}</Empty.Title
+        >
+        <Empty.Description
+          >{query || selectedTag
+            ? 'Try another keyword or tag.'
+            : 'Write the first thought you want to keep.'}</Empty.Description
+        >
+      </Empty.Header>
+    </Empty.Root>
   {:else}
     <NoteTimeline
       {busyUids}
@@ -371,12 +388,15 @@
       timeZone={session.workspace.timezone}
     />
     {#if notes.length < total}
-      <button
-        class="button secondary load-more"
+      <Button
+        class="load-more"
         disabled={loadingMore}
         onclick={() => void loadNotesPage(false)}
-        type="button">{loadingMore ? 'Loading…' : 'Load older memos'}</button
+        variant="secondary"
       >
+        {#if loadingMore}<Spinner data-icon="inline-start" />{/if}
+        {loadingMore ? 'Loading…' : 'Load older memos'}
+      </Button>
     {/if}
   {/if}
 </div>
@@ -406,26 +426,13 @@
 
   .notes-header :global(.search-field) {
     min-height: 42px;
-    background: color-mix(in oklch, var(--color-surface), transparent 10%);
+    background: color-mix(in oklch, var(--card), transparent 10%);
     border-color: transparent;
-    border-radius: var(--radius-input);
-    box-shadow: 0 1px 2px color-mix(in oklch, var(--color-text), transparent 95%);
+    border-radius: var(--radius-md);
   }
 
   .notes-header :global(.search-field:focus-within) {
     border-color: transparent;
-  }
-
-  .tag-filter {
-    display: flex;
-    gap: 6px;
-    padding-bottom: 4px;
-    margin-bottom: 17px;
-    overflow-x: auto;
-  }
-
-  .tag-filter .tag-chip.active {
-    border-color: color-mix(in oklch, var(--color-accent), transparent 65%);
   }
 
   @media (max-width: 767px) {

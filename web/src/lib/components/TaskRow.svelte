@@ -1,10 +1,24 @@
 <script lang="ts">
+  import { parseDate, type DateValue } from '@internationalized/date';
+  import CalendarIcon from '@lucide/svelte/icons/calendar';
+  import Ellipsis from '@lucide/svelte/icons/ellipsis';
+  import Flag from '@lucide/svelte/icons/flag';
+  import Minus from '@lucide/svelte/icons/minus';
+  import Trash2 from '@lucide/svelte/icons/trash-2';
   import { tick } from 'svelte';
 
   import { errorMessage } from '../api/client';
   import type { Task, TaskPriority, UpdateTaskRequest } from '../api/types';
   import { isTaskOverdue, taskDateLabel } from '../utils/date';
-  import Icon from './Icon.svelte';
+  import { Button } from './ui/button';
+  import { Calendar } from './ui/calendar';
+  import { Checkbox } from './ui/checkbox';
+  import * as DropdownMenu from './ui/dropdown-menu';
+  import * as Field from './ui/field';
+  import * as InputGroup from './ui/input-group';
+  import * as Popover from './ui/popover';
+  import { Spinner } from './ui/spinner';
+  import * as ToggleGroup from './ui/toggle-group';
 
   let {
     task,
@@ -25,24 +39,32 @@
   } = $props();
 
   let editing = $state(false);
+  let actionsOpen = $state(false);
   let title = $state('');
   let description = $state('');
   let priority = $state<TaskPriority>(0);
   let dueDate = $state('');
+  let datePickerOpen = $state(false);
   let error = $state<string | null>(null);
-  let actionsOpen = $state(false);
-  let actionsElement = $state<HTMLDivElement>();
-  let titleInput = $state<HTMLInputElement>();
-  let descriptionInput = $state<HTMLTextAreaElement>();
-  let editButton = $state<HTMLButtonElement>();
-  let moreButton = $state<HTMLButtonElement>();
+  let saving = $state(false);
+  let rowElement = $state<HTMLElement | null>(null);
+  let editForm = $state<HTMLFormElement | null>(null);
+  let titleInput = $state<HTMLInputElement | null>(null);
+  let descriptionInput = $state<HTMLTextAreaElement | null>(null);
+  let titleButton = $state<HTMLButtonElement | null>(null);
   let dateLabel = $derived(taskDateLabel(task, today));
+  let descriptionPreview = $derived(
+    mode === 'todo' ? task.description.split(/\r?\n/, 1)[0] : task.description,
+  );
+  let calendarValue = $derived(dueDate ? parseDate(dueDate) : undefined);
+  let calendarPlaceholder = $derived(parseDate(dueDate || today));
 
   async function beginEdit(): Promise<void> {
     title = task.title;
     description = task.description;
     priority = task.priority;
     dueDate = task.dueDate ?? '';
+    datePickerOpen = false;
     error = null;
     editing = true;
     await tick();
@@ -50,32 +72,48 @@
     titleInput?.select();
   }
 
-  async function closeEditor(): Promise<void> {
+  async function closeEditor(restoreFocus = true): Promise<void> {
+    datePickerOpen = false;
     editing = false;
     error = null;
     await tick();
-    editButton?.focus();
+    if (restoreFocus) titleButton?.focus();
   }
 
-  async function save(event?: SubmitEvent): Promise<void> {
+  async function save(event?: SubmitEvent, restoreFocus = true): Promise<void> {
     event?.preventDefault();
+    if (saving) return;
     if (!title.trim()) {
       error = 'Enter a task title.';
       return;
     }
 
+    const payload: UpdateTaskRequest = {
+      description: description.trim(),
+      dueDate: dueDate || null,
+      dueTime: null,
+      priority,
+      title: title.trim(),
+    };
+    const unchanged =
+      payload.title === task.title &&
+      payload.description === task.description &&
+      payload.dueDate === task.dueDate &&
+      payload.priority === task.priority;
+    if (unchanged) {
+      await closeEditor(restoreFocus);
+      return;
+    }
+
     error = null;
+    saving = true;
     try {
-      await onSave(task, {
-        description: description.trim(),
-        dueDate: dueDate || null,
-        dueTime: null,
-        priority,
-        title: title.trim(),
-      });
-      await closeEditor();
+      await onSave(task, payload);
+      await closeEditor(restoreFocus);
     } catch (cause) {
       error = errorMessage(cause, 'Unable to save the task.');
+    } finally {
+      saving = false;
     }
   }
 
@@ -99,177 +137,221 @@
     descriptionInput?.focus();
   }
 
-  function closeActions(restoreFocus = false): void {
-    actionsOpen = false;
-    if (restoreFocus) requestAnimationFrame(() => moreButton?.focus());
+  function handleDelete(): void {
+    onDelete(task);
   }
 
-  function handleActionBlur(event: FocusEvent): void {
-    if (event.relatedTarget instanceof Node && actionsElement?.contains(event.relatedTarget)) {
+  function selectDueDate(value: DateValue | undefined): void {
+    dueDate = value?.toString() ?? '';
+    datePickerOpen = false;
+  }
+
+  function clearDueDate(): void {
+    dueDate = '';
+    datePickerOpen = false;
+  }
+
+  function handleEditorFocusout(event: FocusEvent & { currentTarget: HTMLFormElement }): void {
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) {
       return;
     }
-    closeActions();
+    queueMicrotask(() => {
+      if (!editing || saving || datePickerOpen || editForm?.contains(document.activeElement))
+        return;
+      void save(undefined, false);
+    });
   }
 
-  function handleActionsKeydown(event: KeyboardEvent): void {
-    if (actionsOpen && event.key === 'Escape') {
-      event.preventDefault();
-      closeActions(true);
+  function handleWindowPointerdown(event: PointerEvent): void {
+    if (!editing || busy || saving || !(event.target instanceof Node)) return;
+    if (rowElement?.contains(event.target)) return;
+    if (event.target instanceof Element && event.target.closest('[data-slot="popover-content"]')) {
+      return;
     }
-  }
-
-  function handleDelete(): void {
-    closeActions();
-    onDelete(task);
+    void save(undefined, false);
   }
 </script>
 
+<svelte:window onpointerdown={handleWindowPointerdown} />
+
 <article
+  bind:this={rowElement}
   class:task-done={task.status === 'DONE'}
   class:task-editing={editing}
-  class:task-row-compact={mode === 'todo' && !editing && !task.description && !dateLabel}
+  class:task-row-compact={mode === 'todo' && !editing && !task.description}
   class:task-row-full={mode === 'all'}
+  class:task-row-todo={mode === 'todo'}
   class="task-row"
   data-focus-uid={task.uid}
   tabindex="-1"
 >
   {#if editing}
-    <form class="task-edit-form" onsubmit={save}>
-      <div class="task-edit-copy">
-        <label class="field task-edit-title">
-          <span class="sr-only">Title</span>
-          <input
-            bind:this={titleInput}
-            disabled={busy}
-            maxlength="500"
+    <form
+      bind:this={editForm}
+      class="task-edit-form"
+      onfocusout={handleEditorFocusout}
+      onsubmit={save}
+    >
+      <Field.Field class="gap-2" data-invalid={Boolean(error)}>
+        <Field.Label class="sr-only" for={`task-title-${task.uid}`}>Title</Field.Label>
+        <InputGroup.Root class="task-edit-copy" layout="stacked" variant="quiet">
+          <InputGroup.Input
+            aria-invalid={error ? 'true' : undefined}
+            bind:ref={titleInput}
+            class="h-8 px-3"
+            disabled={busy || saving}
+            emphasis="title"
+            id={`task-title-${task.uid}`}
+            maxlength={500}
             onkeydown={handleTitleKeydown}
             bind:value={title}
           />
-        </label>
-        <label class="field task-edit-details">
-          <span class="sr-only">Details</span>
-          <textarea
-            bind:this={descriptionInput}
-            disabled={busy}
+          <InputGroup.Textarea
+            aria-label="Details"
+            bind:ref={descriptionInput}
+            class="task-edit-details min-h-11 max-h-[min(320px,45vh)] px-3 py-1"
+            disabled={busy || saving}
+            id={`task-details-${task.uid}`}
             onkeydown={handleEditorKeydown}
-            rows="2"
-            bind:value={description}></textarea>
-        </label>
-      </div>
-      <div class="task-edit-grid">
-        <label class="compact-field">
-          <span>Date</span>
-          <input disabled={busy} onkeydown={handleEditorKeydown} type="date" bind:value={dueDate} />
-        </label>
-        <div class="compact-field task-priority-field">
-          <span>Priority</span>
-          <label class:active={priority === 1} class="priority-toggle task-priority-toggle">
-            <input
-              checked={priority === 1}
-              disabled={busy}
-              onchange={(event) => (priority = event.currentTarget.checked ? 1 : 0)}
-              onkeydown={handleEditorKeydown}
-              type="checkbox"
-            />
-            <Icon name="flag" size={15} />
-            <span>{priority === 1 ? 'Priority' : 'Regular'}</span>
-          </label>
-        </div>
-      </div>
-      {#if error}<p aria-live="assertive" class="form-error">{error}</p>{/if}
-      <div class="task-edit-footer">
-        <div class="inline-form-actions">
-          <button
-            class="button secondary"
-            disabled={busy}
-            onclick={() => void closeEditor()}
-            onkeydown={handleEditorKeydown}
-            type="button">Cancel</button
-          >
-          <button
-            class="button primary"
-            disabled={busy || !title.trim()}
-            onkeydown={handleEditorKeydown}
-            type="submit"
-          >
-            {busy ? 'Saving…' : 'Save'}
-          </button>
-        </div>
-      </div>
+            rows={2}
+            tone="secondary"
+            bind:value={description}
+          />
+          <InputGroup.Addon align="block-end" class="task-edit-toolbar flex-wrap">
+            <Popover.Root bind:open={datePickerOpen}>
+              <Popover.Trigger disabled={busy || saving} id={`task-date-${task.uid}`}>
+                {#snippet child({ props })}
+                  <InputGroup.Button
+                    {...props}
+                    aria-label={dueDate ? `Due date ${dueDate}` : 'Set due date'}
+                    size="xs"
+                    title={dueDate ? `Due ${dueDate}` : 'Set due date'}
+                    variant={dueDate ? 'secondary' : 'ghost'}
+                  >
+                    <CalendarIcon data-icon="inline-start" />
+                    {#if dueDate}<span class="font-mono text-[11px]">{dueDate}</span>{/if}
+                  </InputGroup.Button>
+                {/snippet}
+              </Popover.Trigger>
+              <Popover.Content align="start" class="w-auto gap-0 overflow-hidden p-0">
+                <Calendar
+                  captionLayout="dropdown"
+                  initialFocus
+                  onValueChange={selectDueDate}
+                  placeholder={calendarPlaceholder}
+                  type="single"
+                  value={calendarValue}
+                />
+                {#if dueDate}
+                  <div class="flex justify-end px-2 pb-2">
+                    <Button onclick={clearDueDate} size="xs" variant="ghost">Clear date</Button>
+                  </div>
+                {/if}
+              </Popover.Content>
+            </Popover.Root>
+            <ToggleGroup.Root
+              aria-label="Task priority"
+              disabled={busy || saving}
+              onValueChange={(value) => (priority = value === '1' ? 1 : 0)}
+              size="xs"
+              spacing={0}
+              type="single"
+              value={String(priority)}
+              variant="outline"
+            >
+              <ToggleGroup.Item aria-label="Regular priority" title="Regular priority" value="0">
+                <Minus />
+              </ToggleGroup.Item>
+              <ToggleGroup.Item aria-label="High priority" title="High priority" value="1">
+                <Flag />
+              </ToggleGroup.Item>
+            </ToggleGroup.Root>
+            <div class="ml-auto flex items-center gap-1">
+              <InputGroup.Button
+                disabled={busy || saving}
+                onclick={() => void closeEditor()}
+                onkeydown={handleEditorKeydown}
+                size="xs"
+                variant="ghost">Cancel</InputGroup.Button
+              >
+              <InputGroup.Button
+                disabled={busy || saving || !title.trim()}
+                onkeydown={handleEditorKeydown}
+                size="xs"
+                type="submit"
+                variant="default"
+              >
+                {#if busy || saving}<Spinner data-icon="inline-start" />{/if}
+                {busy || saving ? 'Saving…' : 'Save'}
+              </InputGroup.Button>
+            </div>
+          </InputGroup.Addon>
+        </InputGroup.Root>
+        {#if error}<Field.Error aria-live="assertive">{error}</Field.Error>{/if}
+      </Field.Field>
     </form>
   {:else}
-    <button
+    <Checkbox
       aria-label={task.status === 'DONE' ? `Restore ${task.title}` : `Complete ${task.title}`}
-      aria-pressed={task.status === 'DONE'}
-      class="task-checkbox"
+      checked={task.status === 'DONE'}
+      class="task-checkbox mt-0.5 size-5"
       disabled={busy}
       onclick={() => void onToggle(task)}
-      type="button"
-    >
-      <span aria-hidden="true">{task.status === 'DONE' ? '✓' : ''}</span>
-    </button>
+    />
     <div class="task-copy">
       <div class="task-title-line">
-        <h3>{task.title}</h3>
-        {#if task.priority === 1 && task.status === 'TODO'}
+        <h3>
+          <button
+            aria-label={`Edit ${task.title}`}
+            bind:this={titleButton}
+            class="task-title-button"
+            disabled={busy}
+            onclick={() => void beginEdit()}
+            type="button">{task.title}</button
+          >
+        </h3>
+        {#if mode === 'all' && task.priority === 1 && task.status === 'TODO'}
           <span aria-label="Priority task" class="priority-mark" title="Priority">
-            <Icon name="flag" size={12} />
+            <Flag class="size-3" />
             {#if mode === 'all'}<span>Priority</span>{/if}
           </span>
         {/if}
       </div>
-      {#if task.description}<p>{task.description}</p>{/if}
-      {#if dateLabel}
+      {#if descriptionPreview}<p>{descriptionPreview}</p>{/if}
+      {#if mode === 'all' && dateLabel}
         <span class:overdue={isTaskOverdue(task, today)} class="task-date">{dateLabel}</span>
       {/if}
     </div>
-    <div
-      aria-label={`Actions for ${task.title}`}
-      bind:this={actionsElement}
-      class:menu-open={actionsOpen}
-      class="row-actions"
-      role="group"
-    >
-      <button
-        aria-expanded={actionsOpen}
-        aria-label={`More actions for ${task.title}`}
-        bind:this={moreButton}
-        class="icon-button row-more"
-        disabled={busy}
-        onblur={handleActionBlur}
-        onclick={() => (actionsOpen = !actionsOpen)}
-        onkeydown={handleActionsKeydown}
-        type="button"
-      >
-        <Icon name="more" size={18} />
-      </button>
-      <div class="row-action-buttons">
-        <button
-          aria-label={`Edit ${task.title}`}
-          bind:this={editButton}
-          class="icon-button"
-          disabled={busy}
-          onblur={handleActionBlur}
-          onclick={() => void beginEdit()}
-          onkeydown={handleActionsKeydown}
-          type="button"
-        >
-          <Icon name="edit" size={16} />
-          <span class="action-label">Edit</span>
-        </button>
-        <button
-          aria-label={`Delete ${task.title}`}
-          class="icon-button danger-quiet"
-          disabled={busy}
-          onblur={handleActionBlur}
-          onclick={handleDelete}
-          onkeydown={handleActionsKeydown}
-          type="button"
-        >
-          <Icon name="delete" size={16} />
-          <span class="action-label">Delete</span>
-        </button>
-      </div>
+    <div aria-label={`Actions for ${task.title}`} class="row-actions">
+      <DropdownMenu.Root onOpenChange={(open) => (actionsOpen = open)} open={actionsOpen}>
+        <DropdownMenu.Trigger disabled={busy}>
+          {#snippet child({ props })}
+            <Button
+              {...props}
+              aria-label={`More actions for ${task.title}`}
+              size="icon-sm"
+              variant="ghost"
+            >
+              <Ellipsis />
+            </Button>
+          {/snippet}
+        </DropdownMenu.Trigger>
+        {#if actionsOpen}
+          <DropdownMenu.Content align="end" class="w-36" forceMount>
+            <DropdownMenu.Group>
+              <DropdownMenu.Item
+                aria-label={`Delete ${task.title}`}
+                disabled={busy}
+                onclick={handleDelete}
+                variant="destructive"
+              >
+                <Trash2 />
+                Delete
+              </DropdownMenu.Item>
+            </DropdownMenu.Group>
+          </DropdownMenu.Content>
+        {/if}
+      </DropdownMenu.Root>
     </div>
   {/if}
 </article>
@@ -282,51 +364,12 @@
     gap: 7px;
     align-items: start;
     padding: 11px 0;
-    border-bottom: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--border);
   }
 
   .task-row-compact {
     align-items: center;
     padding-block: 6px;
-  }
-
-  .task-row-compact .task-checkbox {
-    margin-top: 0;
-  }
-
-  .task-checkbox {
-    display: grid;
-    width: 32px;
-    height: 32px;
-    padding: 0;
-    margin-top: -4px;
-    color: var(--color-surface);
-    background: transparent;
-    border: 0;
-    border-radius: var(--radius-control);
-    font-size: 12px;
-    font-weight: 700;
-    place-items: center;
-  }
-
-  .task-checkbox > span {
-    display: grid;
-    width: 19px;
-    height: 19px;
-    background: transparent;
-    border: 1px solid color-mix(in oklch, var(--color-text-muted), transparent 25%);
-    border-radius: 5px;
-    place-items: center;
-  }
-
-  .task-checkbox:hover:not(:disabled),
-  .task-checkbox:focus-visible {
-    background: var(--color-surface-muted);
-  }
-
-  .task-checkbox[aria-pressed='true'] > span {
-    background: var(--color-accent);
-    border-color: var(--color-accent);
   }
 
   .task-copy {
@@ -335,16 +378,42 @@
 
   .task-title-line {
     display: flex;
+    min-width: 0;
     gap: 8px;
     align-items: baseline;
   }
 
   .task-title-line h3 {
+    min-width: 0;
+    flex: 1;
     margin-bottom: 0;
-    overflow-wrap: anywhere;
     font-size: 13px;
     font-weight: 560;
     line-height: 20px;
+  }
+
+  .task-title-button {
+    display: block;
+    width: 100%;
+    padding: 0;
+    color: inherit;
+    background: transparent;
+    border: 0;
+    border-radius: 3px;
+    font: inherit;
+    line-height: inherit;
+    text-align: left;
+    overflow-wrap: anywhere;
+    cursor: text;
+  }
+
+  .task-title-button:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  .task-title-button:disabled {
+    cursor: default;
   }
 
   .priority-mark {
@@ -352,36 +421,65 @@
     flex: none;
     gap: 3px;
     align-items: center;
-    color: var(--color-accent-hover);
+    color: var(--primary);
     font-size: 10px;
     font-weight: 620;
   }
 
   .task-copy p {
     margin: 3px 0 0;
-    color: var(--color-text-muted);
+    color: var(--muted-foreground);
     overflow-wrap: anywhere;
     font-size: 12px;
     line-height: 18px;
     white-space: pre-wrap;
   }
 
+  .task-row-todo {
+    grid-template-columns: 24px minmax(0, 1fr);
+    gap: 4px;
+    padding-block: 8px;
+  }
+
+  .task-row-todo .task-title-button,
+  .task-row-todo .task-copy p {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .task-row-todo .task-copy p {
+    margin-top: 1px;
+  }
+
+  .task-row-todo .row-actions {
+    position: absolute;
+    top: 6px;
+    right: 0;
+    background: var(--card);
+  }
+
+  .task-row-todo:hover .task-copy,
+  .task-row-todo:focus-within .task-copy {
+    padding-right: 32px;
+  }
+
   .task-date {
     display: block;
     margin-top: 4px;
-    color: var(--color-text-muted);
+    color: var(--muted-foreground);
     font-size: 11px;
   }
 
   .task-date.overdue {
-    color: var(--color-danger);
+    color: var(--destructive);
     font-weight: 580;
   }
 
   .task-done .task-title-line h3 {
-    color: var(--color-text-muted);
+    color: var(--muted-foreground);
     text-decoration: line-through;
-    text-decoration-color: var(--color-border);
+    text-decoration-color: var(--border);
   }
 
   .row-actions {
@@ -389,16 +487,6 @@
     gap: 1px;
     opacity: 0;
     transition: opacity 140ms ease;
-  }
-
-  .row-action-buttons {
-    display: flex;
-    gap: 1px;
-  }
-
-  .row-more,
-  .action-label {
-    display: none;
   }
 
   .task-row:hover .row-actions,
@@ -410,192 +498,21 @@
     .row-actions {
       opacity: 1;
     }
-
-    .row-more {
-      display: inline-grid;
-    }
-
-    .row-action-buttons {
-      position: absolute;
-      top: calc(100% + 6px);
-      right: 0;
-      z-index: 30;
-      display: grid;
-      width: 132px;
-      gap: 2px;
-      padding: 6px;
-      background: var(--color-surface);
-      border: 1px solid var(--color-border-soft);
-      border-radius: var(--radius-input);
-      box-shadow: var(--shadow-floating);
-      opacity: 0;
-      pointer-events: none;
-      transform: translateY(-4px);
-      visibility: hidden;
-      transition:
-        opacity 120ms ease,
-        transform 140ms ease,
-        visibility 120ms step-end;
-    }
-
-    .row-actions.menu-open .row-action-buttons {
-      opacity: 1;
-      pointer-events: auto;
-      transform: translateY(0);
-      visibility: visible;
-      transition:
-        opacity 120ms ease,
-        transform 140ms ease,
-        visibility 0ms step-start;
-    }
-
-    .row-action-buttons .icon-button {
-      display: flex;
-      width: 100%;
-      min-width: 0;
-      gap: 9px;
-      justify-content: flex-start;
-      padding: 0 9px;
-    }
-
-    .action-label {
-      display: inline;
-      font-size: 12px;
-      font-weight: 560;
-    }
   }
 
   .task-edit-form {
     grid-column: 1 / -1;
-    display: grid;
-    gap: 13px;
     padding: 7px 0 2px;
     animation: editor-enter 180ms ease both;
+  }
+
+  :global(.task-edit-details) {
+    field-sizing: content;
   }
 
   .task-editing {
     padding-block: 9px 17px;
     border-bottom-color: transparent;
-  }
-
-  .task-edit-copy {
-    display: grid;
-    gap: 11px;
-    padding: 10px 12px 12px;
-    background: color-mix(in oklch, var(--color-surface-muted), var(--color-surface) 35%);
-    border-radius: var(--radius-surface);
-    transition: box-shadow 150ms ease;
-  }
-
-  .task-edit-copy:focus-within {
-    box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-focus), transparent 84%);
-  }
-
-  .task-edit-copy :is(input, textarea),
-  .task-edit-copy :is(input, textarea):focus {
-    padding-inline: 0;
-    background: transparent;
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-  }
-
-  .task-edit-form .compact-field > span {
-    padding-left: 2px;
-    font-size: 11px;
-    font-weight: 650;
-  }
-
-  .task-edit-title input {
-    min-height: 34px;
-    font-size: 14px;
-    font-weight: 620;
-  }
-
-  .task-edit-details textarea {
-    min-height: 68px;
-    padding-block: 2px 0;
-    resize: none;
-  }
-
-  .task-edit-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    align-items: end;
-  }
-
-  .task-edit-grid input[type='date'] {
-    min-height: 34px;
-    padding: 6px 8px;
-    background: color-mix(in oklch, var(--color-surface-muted), var(--color-surface) 35%);
-    border-color: transparent;
-    border-radius: var(--radius-input);
-    font-size: 12px;
-  }
-
-  .task-edit-grid input[type='date']:focus {
-    background: var(--color-surface);
-    border-color: transparent;
-    box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-focus), transparent 84%);
-  }
-
-  .task-priority-field {
-    min-width: 0;
-  }
-
-  .task-priority-toggle {
-    position: relative;
-    width: 100%;
-    min-height: 34px;
-    gap: 8px;
-    padding: 6px 9px;
-    background: color-mix(in oklch, var(--color-surface-muted), var(--color-surface) 35%);
-    border-radius: var(--radius-input);
-    cursor: pointer;
-    transition:
-      color 150ms ease,
-      background-color 150ms ease,
-      box-shadow 150ms ease;
-  }
-
-  .task-priority-toggle input {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    min-height: 0;
-    opacity: 0;
-  }
-
-  .task-priority-toggle.active {
-    color: var(--color-accent-hover);
-    background: var(--color-accent-soft);
-  }
-
-  .task-priority-toggle:focus-within {
-    box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-focus), transparent 84%);
-  }
-
-  .task-edit-footer {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 10px;
-    padding-top: 2px;
-  }
-
-  .task-edit-footer .inline-form-actions {
-    margin-top: 0;
-  }
-
-  .task-edit-footer .button {
-    min-height: 38px;
-    border-radius: var(--radius-input);
-  }
-
-  .task-edit-footer .button.secondary {
-    background: transparent;
-    border-color: transparent;
   }
 
   .task-row-full {
@@ -605,10 +522,6 @@
 
   .task-row-full .task-title-line h3 {
     font-size: 14px;
-  }
-
-  .task-row-full .task-edit-grid {
-    grid-template-columns: repeat(2, minmax(130px, 180px));
   }
 
   @keyframes editor-enter {
@@ -626,6 +539,10 @@
     .row-actions {
       opacity: 1;
     }
+
+    .task-row-todo .task-copy {
+      padding-right: 32px;
+    }
   }
 
   @media (max-width: 767px) {
@@ -635,51 +552,42 @@
       align-items: start;
     }
 
-    .task-checkbox {
-      min-width: 44px;
-      min-height: 44px;
-      margin: 0;
-      place-items: start center;
-    }
-
     .task-row-compact {
       align-items: center;
       padding-block: 2px;
     }
 
+    .task-row-todo {
+      grid-template-columns: 44px minmax(0, 1fr);
+      gap: 0;
+    }
+
+    .task-row-todo .task-copy {
+      padding-right: 44px;
+    }
+
+    .task-row-todo .row-actions {
+      top: 2px;
+    }
+
     .row-actions {
       display: grid;
-    }
-
-    .row-more {
-      padding-top: 1px;
-      place-items: start center;
-    }
-
-    .task-row-full .task-edit-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .task-edit-title input,
-    .task-edit-grid input[type='date'],
-    .task-priority-toggle,
-    .task-edit-footer .button {
-      min-height: 44px;
-    }
-
-    .task-edit-title input,
-    .task-edit-grid input[type='date'] {
-      font-size: 16px;
-    }
-
-    .task-edit-grid > * {
-      min-width: 0;
     }
   }
 
   @media (hover: none) {
     .row-actions {
       opacity: 1;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .task-edit-form {
+      animation-duration: 0.01ms;
+    }
+
+    .row-actions {
+      transition-duration: 0.01ms;
     }
   }
 </style>

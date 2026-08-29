@@ -1,13 +1,17 @@
 <script lang="ts">
+  import Search from '@lucide/svelte/icons/search';
   import { onMount } from 'svelte';
 
   import { errorMessage } from '../api/client';
   import { deleteNote, listNotes, updateNote } from '../api/notes';
   import type { Note, SessionInfo } from '../api/types';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
-  import Icon from '../components/Icon.svelte';
   import NoteTimeline from '../components/NoteTimeline.svelte';
   import StatusMessage from '../components/StatusMessage.svelte';
+  import { Button } from '../components/ui/button';
+  import * as Empty from '../components/ui/empty';
+  import { Input } from '../components/ui/input';
+  import { Spinner } from '../components/ui/spinner';
   import { captureListFocus, restoreListFocus, type ListFocusSnapshot } from '../utils/focus';
 
   let { session }: { session: SessionInfo } = $props();
@@ -210,9 +214,15 @@
       <p class="page-description">Memos kept out of the active timeline.</p>
     </div>
     <label class="search-field compact-search">
-      <Icon name="search" size={17} />
+      <Search class="pointer-events-none absolute left-3 size-4 text-muted-foreground" />
       <span class="sr-only">Search archived memos</span>
-      <input oninput={handleSearch} placeholder="Search archive" type="search" value={query} />
+      <Input
+        class="pl-9"
+        oninput={handleSearch}
+        placeholder="Search archive"
+        type="search"
+        value={query}
+      />
     </label>
   </header>
 
@@ -226,20 +236,31 @@
   </div>
 
   {#if loading && notes.length === 0}
-    <div aria-live="polite" class="loading-state large">Loading archive…</div>
+    <div aria-live="polite" class="loading-state large flex items-center justify-center gap-2">
+      <Spinner />
+      Loading archive…
+    </div>
   {:else if loadError}
-    <div class="empty-state">
-      <h2>Archive unavailable</h2>
-      <p>{loadError}</p>
-      <button class="button secondary" onclick={() => void loadArchive(true)} type="button"
-        >Try again</button
-      >
-    </div>
+    <Empty.Root>
+      <Empty.Header>
+        <Empty.Title>Archive unavailable</Empty.Title>
+        <Empty.Description>{loadError}</Empty.Description>
+      </Empty.Header>
+      <Empty.Content>
+        <Button onclick={() => void loadArchive(true)} variant="secondary">Try again</Button>
+      </Empty.Content>
+    </Empty.Root>
   {:else if notes.length === 0}
-    <div class="empty-state">
-      <h2>{query ? 'No archived memos found' : 'Nothing archived yet'}</h2>
-      <p>{query ? 'Try another keyword.' : 'Archived memos will stay available here.'}</p>
-    </div>
+    <Empty.Root>
+      <Empty.Header>
+        <Empty.Title>{query ? 'No archived memos found' : 'Nothing archived yet'}</Empty.Title>
+        <Empty.Description
+          >{query
+            ? 'Try another keyword.'
+            : 'Archived memos will stay available here.'}</Empty.Description
+        >
+      </Empty.Header>
+    </Empty.Root>
   {:else}
     <NoteTimeline
       {busyUids}
@@ -251,12 +272,15 @@
       timeZone={session.workspace.timezone}
     />
     {#if notes.length < total}
-      <button
-        class="button secondary load-more"
+      <Button
+        class="load-more"
         disabled={loadingMore}
         onclick={() => void loadArchive(false)}
-        type="button">{loadingMore ? 'Loading…' : 'Load older memos'}</button
+        variant="secondary"
       >
+        {#if loadingMore}<Spinner data-icon="inline-start" />{/if}
+        {loadingMore ? 'Loading…' : 'Load older memos'}
+      </Button>
     {/if}
   {/if}
 </div>
