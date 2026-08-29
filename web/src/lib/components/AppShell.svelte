@@ -227,8 +227,8 @@
 
 <style>
   .app-shell {
-    --mobile-navigation-content-height: 58px;
-    --mobile-navigation-safe-space: max(4px, calc(env(safe-area-inset-bottom) - 4px));
+    --mobile-navigation-content-height: 64px;
+    --mobile-navigation-safe-space: max(8px, env(safe-area-inset-bottom));
 
     display: grid;
     height: 100%;

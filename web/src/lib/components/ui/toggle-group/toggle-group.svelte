@@ -77,7 +77,6 @@ get along, so we shut typescript up by casting `value` to `never`.
 
 <style>
   :global([data-slot='toggle-group'][data-variant='workspace']) {
-    position: relative;
     isolation: isolate;
     gap: 2px;
     padding: 3px;

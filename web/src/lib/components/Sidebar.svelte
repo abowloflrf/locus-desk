@@ -1,7 +1,6 @@
 <script lang="ts">
   import Archive from '@lucide/svelte/icons/archive';
   import BookOpen from '@lucide/svelte/icons/book-open';
-  import Ellipsis from '@lucide/svelte/icons/ellipsis';
   import FileText from '@lucide/svelte/icons/file-text';
   import LayoutDashboard from '@lucide/svelte/icons/layout-dashboard';
   import ListTodo from '@lucide/svelte/icons/list-todo';
@@ -14,7 +13,6 @@
   import type { SessionInfo } from '../api/types';
   import type { ProtectedRoute } from '../routes';
   import { Button } from './ui/button';
-  import * as DropdownMenu from './ui/dropdown-menu';
   import * as Kbd from './ui/kbd';
   import { Separator } from './ui/separator';
 
@@ -50,32 +48,14 @@
     { icon: Archive, label: 'Archive', route: 'archive' },
   ];
 
-  let moreOpen = $state(false);
-  let moreButton = $state<HTMLButtonElement | null>(null);
-
-  $effect(() => {
-    current;
-    moreOpen = false;
-  });
-
-  $effect(() => {
-    if (blocked) moreOpen = false;
-  });
-
   function openRoute(event: MouseEvent, route: ProtectedRoute): void {
     event.preventDefault();
-    moreOpen = false;
     onNavigate(route);
   }
 
   function focusSearch(): void {
     onNavigate('notes');
     setTimeout(() => window.dispatchEvent(new Event('locus:focus-search')), 0);
-  }
-
-  function handleMoreOpenChange(open: boolean): void {
-    moreOpen = open;
-    if (!open) requestAnimationFrame(() => moreButton?.focus());
   }
 </script>
 
@@ -125,36 +105,6 @@
         <span>{item.label}</span>
       </a>
     {/each}
-    <DropdownMenu.Root onOpenChange={handleMoreOpenChange} open={moreOpen}>
-      <DropdownMenu.Trigger>
-        {#snippet child({ props })}
-          <Button
-            {...props}
-            aria-label="More navigation"
-            bind:ref={moreButton}
-            aria-current={current === 'archive' ? 'page' : undefined}
-            class="mobile-more-trigger hidden max-[767px]:flex"
-            data-current={current === 'archive'}
-            size="mobile-nav"
-            variant="mobile-nav"
-          >
-            <Ellipsis data-icon="inline-start" />
-            <span>More</span>
-          </Button>
-        {/snippet}
-      </DropdownMenu.Trigger>
-      {#if moreOpen}
-        <DropdownMenu.Content align="end" class="w-56" forceMount side="top" sideOffset={10}>
-          <DropdownMenu.Label>More</DropdownMenu.Label>
-          <DropdownMenu.Group>
-            <DropdownMenu.Item aria-label="Archive" onclick={() => onNavigate('archive')}>
-              <Archive />
-              Archive
-            </DropdownMenu.Item>
-          </DropdownMenu.Group>
-        </DropdownMenu.Content>
-      {/if}
-    </DropdownMenu.Root>
   </nav>
 
   <Separator class="sidebar-divider" />
@@ -435,20 +385,42 @@
       display: block;
       width: 100%;
       height: calc(
-        var(--mobile-navigation-content-height, 58px) +
-          var(--mobile-navigation-safe-space, max(4px, calc(env(safe-area-inset-bottom) - 4px)))
+        var(--mobile-navigation-content-height, 64px) +
+          var(--mobile-navigation-safe-space, max(8px, env(safe-area-inset-bottom)))
       );
-      padding: 0 calc(8px + env(safe-area-inset-right))
-        var(--mobile-navigation-safe-space, max(4px, calc(env(safe-area-inset-bottom) - 4px)))
-        calc(8px + env(safe-area-inset-left));
+      padding: 0 calc(12px + env(safe-area-inset-right))
+        var(--mobile-navigation-safe-space, max(8px, env(safe-area-inset-bottom)))
+        calc(12px + env(safe-area-inset-left));
       overflow: visible;
-      background: var(--background);
-      border-top: 1px solid var(--border);
-      border-right: 0;
+      background: transparent;
+      border: 0;
     }
 
     .sidebar.todo-open {
       z-index: 40;
+    }
+
+    .sidebar::after {
+      position: absolute;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      z-index: 1;
+      height: calc(
+        var(--mobile-navigation-safe-space, max(8px, env(safe-area-inset-bottom))) + 24px
+      );
+      background: linear-gradient(
+        to bottom,
+        transparent,
+        color-mix(in oklab, var(--background) 88%, transparent) 52%,
+        var(--background)
+      );
+      -webkit-backdrop-filter: blur(12px);
+      backdrop-filter: blur(12px);
+      -webkit-mask-image: linear-gradient(to bottom, transparent, black 34%);
+      mask-image: linear-gradient(to bottom, transparent, black 34%);
+      content: '';
+      pointer-events: none;
     }
 
     .sidebar-header,
@@ -460,23 +432,36 @@
     .primary-nav {
       position: relative;
       z-index: 2;
-      height: var(--mobile-navigation-content-height, 58px);
-      grid-template-columns: repeat(5, 1fr);
-      gap: 0;
+      width: min(100%, 440px);
+      height: var(--mobile-navigation-content-height, 64px);
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 2px;
+      padding: 5px;
+      margin-inline: auto;
+      overflow: hidden;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      box-shadow: 0 8px 20px color-mix(in oklab, var(--foreground) 8%, transparent);
     }
 
     .primary-nav .nav-item {
       display: flex;
-      min-height: var(--mobile-navigation-content-height, 58px);
+      min-height: 52px;
       flex-direction: column;
-      gap: 4px;
-      padding: 8px 2px 6px;
+      gap: 3px;
+      padding: 6px 3px 5px;
       color: var(--muted-foreground);
       background: transparent;
-      border-radius: 0;
-      font-size: 11px;
-      font-weight: 450;
+      border: 0;
+      border-radius: 13px;
+      font-size: 10px;
+      font-weight: 520;
       line-height: 1;
+      transition:
+        color 180ms ease,
+        background-color 180ms ease,
+        transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
     }
 
     .primary-nav .nav-item > span {
@@ -486,48 +471,34 @@
     .primary-nav .nav-item :global(svg) {
       width: 20px;
       height: 20px;
-      stroke-width: 1.9;
+      stroke-width: 1.8;
     }
 
-    .primary-nav .nav-item:hover {
-      color: var(--foreground);
-      background: transparent;
+    @media (hover: hover) {
+      .primary-nav .nav-item:hover {
+        color: var(--foreground);
+        background: color-mix(in oklab, var(--muted) 48%, transparent);
+      }
     }
 
     .primary-nav .nav-item.active,
     .primary-nav .nav-item.active:hover {
-      color: var(--primary);
-      background: transparent;
+      color: var(--foreground);
+      background: var(--muted);
       font-weight: 620;
     }
 
-    .primary-nav .nav-item.active::before,
-    .primary-nav :global(.mobile-more-trigger[data-current='true'])::before {
-      position: absolute;
-      top: -1px;
-      right: auto;
-      bottom: auto;
-      left: 50%;
-      width: 24px;
-      height: 2px;
-      background: var(--primary);
-      border-radius: 0 0 2px 2px;
-      content: '';
-      transform: translateX(-50%);
+    .primary-nav .nav-item.active::before {
+      display: none;
     }
 
-    .primary-nav :global(.mobile-more-trigger) {
-      position: relative;
-    }
-
-    .primary-nav .nav-item:active,
-    .primary-nav :global(.mobile-more-trigger:active) {
-      transform: translateY(1px);
+    .primary-nav .nav-item:active {
+      transform: scale(0.97);
     }
 
     .primary-nav .nav-item:focus-visible {
-      outline: 2px solid var(--ring);
-      outline-offset: -4px;
+      outline: 2px solid var(--foreground);
+      outline-offset: -3px;
     }
 
     .primary-nav .mobile-overflow-item {

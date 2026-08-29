@@ -5,6 +5,8 @@ import { listTasks } from '../api/tasks';
 import type { SessionInfo } from '../api/types';
 import AppShell from './AppShell.svelte';
 import shellSource from './AppShell.svelte?raw';
+import sidebarSource from './Sidebar.svelte?raw';
+import toggleGroupSource from './ui/toggle-group/toggle-group.svelte?raw';
 
 vi.mock('../api/tasks', () => ({
   createTask: vi.fn(),
@@ -80,7 +82,7 @@ describe('AppShell modal boundaries', () => {
     }
   });
 
-  it('opens mobile More on Archive and returns focus with Escape', async () => {
+  it('keeps mobile navigation focused on the four primary destinations', async () => {
     const target = document.createElement('div');
     document.body.append(target);
     const children = createRawSnippet(() => ({ render: () => '<h1>Notes</h1>' }));
@@ -98,24 +100,12 @@ describe('AppShell modal boundaries', () => {
 
     try {
       await tick();
-      const more = target.querySelector<HTMLButtonElement>('.mobile-more-trigger')!;
-      more.click();
-      const archive = await vi.waitFor(() => {
-        const item = document.body.querySelector<HTMLElement>(
-          '[role="menuitem"][aria-label="Archive"]',
-        );
-        expect(item).not.toBeNull();
-        return item!;
-      });
-      expect(document.activeElement?.closest('[role="menu"]')).not.toBeNull();
-      expect(more.getAttribute('aria-expanded')).toBe('true');
-
-      document.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' }));
-      await vi.waitFor(() =>
-        expect(document.body.querySelector('[role="menuitem"][aria-label="Archive"]')).toBeNull(),
+      expect(target.querySelector('.mobile-more-trigger')).toBeNull();
+      expect(target.textContent).not.toContain('More');
+      expect(target.querySelector('.nav-item[title="Archive"]')?.classList).toContain(
+        'mobile-overflow-item',
       );
-      expect(document.activeElement).toBe(more);
-      expect(more.getAttribute('aria-expanded')).toBe('false');
+      expect(sidebarSource).toContain('grid-template-columns: repeat(4, minmax(0, 1fr))');
     } finally {
       await unmount(component);
     }
@@ -225,6 +215,10 @@ describe('AppShell modal boundaries', () => {
       )!;
       const todoOnly = switcher.querySelector<HTMLButtonElement>('[aria-label="Show Todo only"]')!;
 
+      expect(switcher.classList).toContain('absolute');
+      expect(toggleGroupSource).not.toMatch(
+        /\[data-variant='workspace'\]\)\s*\{[^}]*position:\s*relative/s,
+      );
       expect(split.getAttribute('data-state')).toBe('on');
       expect(inertState(notes)).toBe(false);
       expect(inertState(todo)).toBe(false);
