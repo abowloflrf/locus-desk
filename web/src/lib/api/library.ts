@@ -51,6 +51,18 @@ export function retryLibraryItem(uid: string, signal?: AbortSignal): Promise<Lib
   });
 }
 
+export function acceptLibraryRefreshCandidate(uid: string): Promise<LibraryItem> {
+  return request<LibraryItem>(`/library/${encodeURIComponent(uid)}/refresh-candidate/accept`, {
+    method: 'POST',
+  });
+}
+
+export function discardLibraryRefreshCandidate(uid: string): Promise<LibraryItem> {
+  return request<LibraryItem>(`/library/${encodeURIComponent(uid)}/refresh-candidate/discard`, {
+    method: 'POST',
+  });
+}
+
 export function updateLibraryItem(
   uid: string,
   payload: UpdateLibraryItemRequest,

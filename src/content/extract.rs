@@ -168,10 +168,16 @@ fn relative_url_growth(
     base_url: &Url,
     max_growth: usize,
 ) -> Option<usize> {
-    let selector = Selector::parse("[href], [cite]").expect("valid URL attribute selector");
+    let selector = Selector::parse("[href], [cite], [src]").expect("valid URL attribute selector");
     let values = element
         .select(&selector)
-        .flat_map(|element| [element.attr("href"), element.attr("cite")])
+        .flat_map(|element| {
+            [
+                element.attr("href"),
+                element.attr("cite"),
+                element.attr("src"),
+            ]
+        })
         .flatten();
     bounded_relative_url_growth(values, base_url, max_growth)
 }
@@ -228,6 +234,7 @@ fn sanitize_html(input: &str, base_url: &Url) -> String {
         "header",
         "hr",
         "i",
+        "img",
         "ins",
         "kbd",
         "li",
@@ -275,6 +282,12 @@ fn sanitize_html(input: &str, base_url: &Url) -> String {
         ("del", ["cite", "datetime"].into_iter().collect()),
         ("details", ["open"].into_iter().collect()),
         ("ins", ["cite", "datetime"].into_iter().collect()),
+        (
+            "img",
+            ["alt", "height", "src", "title", "width"]
+                .into_iter()
+                .collect(),
+        ),
         ("q", ["cite"].into_iter().collect()),
         ("time", ["datetime"].into_iter().collect()),
     ]
@@ -290,13 +303,19 @@ fn sanitize_html(input: &str, base_url: &Url) -> String {
         .tag_attributes(tag_attributes)
         .generic_attributes(HashSet::new())
         .url_schemes(url_schemes)
+        .set_tag_attribute_value("img", "loading", "lazy")
+        .set_tag_attribute_value("img", "decoding", "async")
+        .set_tag_attribute_value("img", "referrerpolicy", "no-referrer")
         .attribute_filter(move |_element, attribute, value| {
-            if matches!(attribute, "href" | "cite")
-                && attribute_base_url
-                    .join(value)
-                    .is_ok_and(|url| has_userinfo(&url))
-            {
-                return None;
+            if matches!(attribute, "href" | "cite" | "src") {
+                let Ok(url) = attribute_base_url.join(value) else {
+                    return None;
+                };
+                if has_userinfo(&url)
+                    || (attribute == "src" && !matches!(url.scheme(), "http" | "https"))
+                {
+                    return None;
+                }
             }
             Some(value.into())
         })
@@ -502,7 +521,8 @@ mod tests {
               <a href="javascript:alert(1)" target="_blank" onclick="steal()">Bad link</a>
               <a href="https://trusted.example@evil.example/read">Deceptive link</a>
               <a href="/next" rel="opener" style="color:red">Good link</a>
-              <img src="https://tracker.example/pixel" onerror="steal()" alt="tracker">
+              <img src="/media/hero.jpg" onerror="steal()" alt="Article illustration" width="1200" height="800">
+              <img src="data:image/png;base64,tracking" alt="Embedded tracker">
               <svg><script>alert(1)</script></svg>
             </main>
         "#
@@ -517,7 +537,6 @@ mod tests {
             "<form",
             "<iframe",
             "<nav",
-            "<img",
             "<svg",
             "onclick",
             "javascript:",
@@ -541,6 +560,21 @@ mod tests {
                 .contains("href=\"https://example.com/next\"")
         );
         assert!(extracted.safe_html.contains("rel=\"noopener noreferrer\""));
+        assert!(
+            extracted
+                .safe_html
+                .contains("src=\"https://example.com/media/hero.jpg\"")
+        );
+        assert!(extracted.safe_html.contains("alt=\"Article illustration\""));
+        assert!(extracted.safe_html.contains("loading=\"lazy\""));
+        assert!(extracted.safe_html.contains("decoding=\"async\""));
+        assert!(
+            extracted
+                .safe_html
+                .contains("referrerpolicy=\"no-referrer\"")
+        );
+        assert!(!extracted.safe_html.contains("data:image"));
+        assert!(!extracted.safe_html.contains("onerror"));
         assert!(extracted.plain_text.contains("Safe copy"));
     }
 

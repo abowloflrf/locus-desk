@@ -1,6 +1,5 @@
 <script lang="ts">
   import Archive from '@lucide/svelte/icons/archive';
-  import BookOpen from '@lucide/svelte/icons/book-open';
   import BookOpenCheck from '@lucide/svelte/icons/book-open-check';
   import ChevronDown from '@lucide/svelte/icons/chevron-down';
   import Ellipsis from '@lucide/svelte/icons/ellipsis';
@@ -9,13 +8,14 @@
   import Search from '@lucide/svelte/icons/search';
   import Star from '@lucide/svelte/icons/star';
   import Trash2 from '@lucide/svelte/icons/trash-2';
-  import X from '@lucide/svelte/icons/x';
   import { onMount, tick } from 'svelte';
 
   import { errorMessage } from '../api/client';
   import {
+    acceptLibraryRefreshCandidate,
     createLibraryItem,
     deleteLibraryItem,
+    discardLibraryRefreshCandidate,
     getLibraryItem,
     listLibraryItems,
     retryLibraryItem,
@@ -36,10 +36,9 @@
   import * as DropdownMenu from '../components/ui/dropdown-menu';
   import * as Empty from '../components/ui/empty';
   import { Input } from '../components/ui/input';
-  import * as Sheet from '../components/ui/sheet';
   import { Spinner } from '../components/ui/spinner';
   import { captureListFocus, restoreListFocus } from '../utils/focus';
-  import { formatCompactDate, formatNoteTimestamp } from '../utils/date';
+  import { formatCompactDate } from '../utils/date';
 
   let {
     onImmersiveChange = () => {},
@@ -73,11 +72,9 @@
   let deleteError = $state<string | null>(null);
   let actionMenuUid = $state<string | null>(null);
   let deleteFocusSnapshot = $state<ReturnType<typeof captureListFocus> | null>(null);
-  let compactDetail = $state(false);
-  let mobileViewport = $state(false);
+  let listOnlyLayout = $state(false);
   let immersiveReader = $state(false);
   let pageElement = $state<HTMLElement>();
-  let detailHeading = $state<HTMLElement>();
   let searchInput = $state<HTMLInputElement | null>(null);
   let listController: AbortController | null = null;
   let detailController: AbortController | null = null;
@@ -91,22 +88,28 @@
   let pollGeneration = 0;
 
   const LIBRARY_POLL_INTERVAL_MS = 2_000;
+  const READER_HISTORY_KEY = 'locusLibraryReader';
 
   onMount(() => {
-    const compactMedia = window.matchMedia('(max-width: 1199px)');
-    const mobileMedia = window.matchMedia('(max-width: 767px)');
+    const listOnlyMedia = window.matchMedia('(max-width: 1199px)');
     const updateMedia = () => {
-      compactDetail = compactMedia.matches;
-      mobileViewport = mobileMedia.matches;
+      const nextListOnlyLayout = listOnlyMedia.matches;
+      if (nextListOnlyLayout && !listOnlyLayout && selectedUid && !readerItem) {
+        void closeDetail();
+      }
+      listOnlyLayout = nextListOnlyLayout;
+    };
+    const handlePopState = () => {
+      if (immersiveReader) void closeReader();
     };
     updateMedia();
-    compactMedia.addEventListener('change', updateMedia);
-    mobileMedia.addEventListener('change', updateMedia);
+    listOnlyMedia.addEventListener('change', updateMedia);
+    window.addEventListener('popstate', handlePopState);
     void loadItems(true);
 
     return () => {
-      compactMedia.removeEventListener('change', updateMedia);
-      mobileMedia.removeEventListener('change', updateMedia);
+      listOnlyMedia.removeEventListener('change', updateMedia);
+      window.removeEventListener('popstate', handlePopState);
       if (immersiveReader) onImmersiveChange(false);
       listController?.abort();
       detailController?.abort();
@@ -222,14 +225,9 @@
     detailProcessingError = null;
     stopPolling();
 
-    if (mobileViewport) {
+    if (listOnlyLayout) {
       openReader(item, true);
       return;
-    }
-
-    if (compactDetail) {
-      await tick();
-      requestAnimationFrame(() => detailHeading?.focus());
     }
 
     try {
@@ -319,7 +317,12 @@
 
   function startPolling(item: LibraryItem | null): void {
     stopPolling();
-    if (!item || item.processingStatus !== 'PENDING' || selectedUid !== item.uid) return;
+    if (
+      !item ||
+      (item.processingStatus !== 'PENDING' && item.refreshStatus !== 'PENDING') ||
+      selectedUid !== item.uid
+    )
+      return;
     const generation = pollGeneration;
     schedulePoll(item.uid, generation);
   }
@@ -342,7 +345,9 @@
       if (generation !== pollGeneration || selectedUid !== uid) return;
       replaceItem(updated);
       detailPollingError = null;
-      if (updated.processingStatus === 'PENDING') schedulePoll(uid, generation);
+      if (updated.processingStatus === 'PENDING' || updated.refreshStatus === 'PENDING') {
+        schedulePoll(uid, generation);
+      }
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === 'AbortError') return;
       if (generation !== pollGeneration || selectedUid !== uid) return;
@@ -367,13 +372,29 @@
     detailController?.abort();
     detailController = null;
     detailLoading = false;
-    if (item.processingStatus === 'PENDING') startPolling(item);
+    if (item.processingStatus === 'PENDING' || item.refreshStatus === 'PENDING') startPolling(item);
     else stopPolling();
     operationError = null;
     actionStatus = null;
     immersiveReader = immersive;
-    if (immersive) onImmersiveChange(true);
+    if (immersive) {
+      if (window.history.state?.[READER_HISTORY_KEY] !== item.uid) {
+        window.history.pushState(
+          { ...(window.history.state ?? {}), [READER_HISTORY_KEY]: item.uid },
+          '',
+          window.location.href,
+        );
+      }
+      onImmersiveChange(true);
+    }
     readerItem = item;
+  }
+
+  function leaveReader(): void {
+    const returnThroughHistory =
+      immersiveReader && window.history.state?.[READER_HISTORY_KEY] === readerItem?.uid;
+    void closeReader();
+    if (returnThroughHistory) window.history.back();
   }
 
   async function closeReader(): Promise<void> {
@@ -403,13 +424,7 @@
     ].find((button) => button.dataset.libraryExpand === uid);
     if (expandButton) {
       expandButton.focus();
-      return;
     }
-    const readButton = [
-      ...(pageElement?.querySelectorAll<HTMLButtonElement>('[data-library-read]') ?? []),
-    ].find((button) => button.dataset.libraryRead === uid);
-    if (readButton) readButton.focus();
-    else detailHeading?.focus();
   }
 
   async function toggleStar(item: LibraryItem): Promise<void> {
@@ -420,6 +435,24 @@
       { ...item, starred },
       starred ? 'Added to starred items.' : 'Removed from starred items.',
     );
+  }
+
+  async function resolveRefreshCandidate(item: LibraryItem, accept: boolean): Promise<void> {
+    if (busyUids.has(item.uid)) return;
+    markBusy(item.uid, true);
+    operationError = null;
+    actionStatus = null;
+    try {
+      const updated = accept
+        ? await acceptLibraryRefreshCandidate(item.uid)
+        : await discardLibraryRefreshCandidate(item.uid);
+      replaceItem(updated);
+      actionStatus = accept ? 'Refreshed version saved.' : 'Saved version kept.';
+    } catch (cause) {
+      operationError = errorMessage(cause, 'Unable to resolve the refreshed version.');
+    } finally {
+      markBusy(item.uid, false);
+    }
   }
 
   async function toggleArchive(item: LibraryItem): Promise<void> {
@@ -555,14 +588,10 @@
     if (readerItem) return;
     if (!selectedUid || event.defaultPrevented) return;
     if (document.querySelector('dialog[open]')) return;
-    if (!compactDetail && event.key === 'Escape') {
+    if (!listOnlyLayout && event.key === 'Escape') {
       event.preventDefault();
       void closeDetail();
     }
-  }
-
-  function handleDetailOpenChange(open: boolean): void {
-    if (!open && selectedUid) void closeDetail();
   }
 
   function displayTitle(item: LibraryItem): string {
@@ -600,21 +629,10 @@
   function visibleProcessingLabel(item: LibraryItem): string | null {
     if (item.processingStatus === 'PENDING') return 'Processing';
     if (item.processingStatus === 'FAILED') return 'Fetch failed';
+    if (item.refreshStatus === 'PENDING') return 'Refreshing';
+    if (item.refreshStatus === 'FAILED') return 'Refresh failed';
+    if (item.refreshStatus === 'REVIEW') return 'Review refresh';
     return null;
-  }
-
-  function processingLabel(item: LibraryItem): string {
-    if (item.processingStatus === 'PENDING') return 'Processing';
-    if (item.processingStatus === 'READY') return 'Ready';
-    if (item.processingStatus === 'FAILED') return 'Fetch failed';
-    return 'Saved';
-  }
-
-  function processingClass(item: LibraryItem): string {
-    if (item.processingStatus === 'FAILED') return 'failed';
-    if (item.processingStatus === 'READY') return 'ready';
-    if (item.processingStatus === 'PENDING') return 'pending';
-    return 'saved';
   }
 </script>
 
@@ -623,9 +641,11 @@
 {#if readerItem}
   <LibraryReader
     {actionStatus}
-    busy={busyUids.has(readerItem.uid)}
+    busy={busyUids.has(readerItem.uid) || retryingUid === readerItem.uid}
     item={readerItem}
-    onBack={closeReader}
+    onAcceptRefresh={(item) => resolveRefreshCandidate(item, true)}
+    onBack={leaveReader}
+    onDiscardRefresh={(item) => resolveRefreshCandidate(item, false)}
     onRetry={retryCapture}
     onToggleRead={toggleRead}
     {operationError}
@@ -633,7 +653,7 @@
   />
 {:else}
   <div bind:this={pageElement} class:detail-open={Boolean(selectedUid)} class="library-page">
-    <div class="library-primary" inert={compactDetail && Boolean(selectedUid)}>
+    <div class="library-primary">
       <header class="library-page-header">
         <h1 id="library-title">Library</h1>
         <LibraryCaptureForm onCreate={handleCreate} />
@@ -785,7 +805,12 @@
                           >{item.siteName || hostname(item) || item.originalUrl}</span
                         >
                         <span aria-hidden="true">·</span>
-                        <span>{formatCompactDate(item.createdAt, session.workspace.timezone)}</span>
+                        <span
+                          >{formatCompactDate(
+                            item.publishedAt ?? item.createdAt,
+                            session.workspace.timezone,
+                          )}</span
+                        >
                         {#if visibleProcessingLabel(item)}
                           <span aria-hidden="true">·</span>
                           <span
@@ -870,237 +895,33 @@
       </section>
     </div>
 
-    {#snippet detailContent()}
+    <aside aria-label="Library article preview" class="library-detail">
       {#if selectedItem}
-        {#if selectedItem.processingStatus === 'READY' && selectedItem.contentAvailable}
-          {#key selectedItem.uid}
-            <LibraryReader
-              {actionStatus}
-              busy={busyUids.has(selectedItem.uid)}
-              item={selectedItem}
-              mode="preview"
-              onBack={closeDetail}
-              onExpand={() => openReader(selectedItem!)}
-              onToggleRead={toggleRead}
-              {operationError}
-              timeZone={session.workspace.timezone}
-            />
-          {/key}
-        {:else}
-          <header class="detail-header">
-            <div>
-              <p class="eyebrow">
-                {selectedItem.itemKind === 'ARTICLE' ? 'Saved article' : 'Saved link'}
-              </p>
-              <h2 bind:this={detailHeading} tabindex="-1">{displayTitle(selectedItem)}</h2>
-            </div>
-            <Button
-              aria-label="Close Library item details"
-              onclick={() => void closeDetail()}
-              size="icon"
-              variant="ghost"><X /></Button
-            >
-          </header>
-
-          {#if detailLoading}<p aria-live="polite" class="detail-loading">Updating details…</p>{/if}
-          {#if detailError}<StatusMessage tone="error">{detailError}</StatusMessage>{/if}
-
-          <div class="detail-actions" role="group" aria-label="Library item actions">
-            {#if selectedItem.processingStatus === 'READY' && selectedItem.contentAvailable}
-              <Button
-                data-library-read={selectedItem.uid}
-                onclick={() => openReader(selectedItem!)}
-              >
-                <BookOpen data-icon="inline-start" />
-                Read
-              </Button>
-            {/if}
-            <Button
-              aria-pressed={selectedItem.starred}
-              disabled={busyUids.has(selectedItem.uid)}
-              onclick={() => void toggleStar(selectedItem!)}
-              variant={selectedItem.starred ? 'default' : 'secondary'}
-            >
-              <Star data-icon="inline-start" />
-              {selectedItem.starred ? 'Starred' : 'Star'}
-            </Button>
-            <Button
-              disabled={busyUids.has(selectedItem.uid)}
-              onclick={() => void toggleRead(selectedItem!)}
-              variant="secondary"
-            >
-              <BookOpenCheck data-icon="inline-start" />
-              {selectedItem.readAt ? 'Mark unread' : 'Mark read'}
-            </Button>
-            <Button
-              disabled={busyUids.has(selectedItem.uid)}
-              onclick={() => void toggleArchive(selectedItem!)}
-              variant="secondary"
-            >
-              {#if selectedItem.status === 'ACTIVE'}
-                <Archive data-icon="inline-start" />
-              {:else}
-                <RotateCcw data-icon="inline-start" />
-              {/if}
-              {selectedItem.status === 'ACTIVE' ? 'Archive' : 'Restore'}
-            </Button>
-            <Button
-              disabled={busyUids.has(selectedItem.uid)}
-              onclick={() => requestDelete(selectedItem!)}
-              variant="destructive"
-            >
-              <Trash2 data-icon="inline-start" />
-              Delete
-            </Button>
-          </div>
-
-          {#if selectedItem.processingStatus === 'PENDING'}
-            <section aria-live="polite" class="content-state pending">
-              <span aria-hidden="true" class="content-state-mark"></span>
-              <div>
-                <h3>Preparing article</h3>
-                <p>The saved page is being made ready for local reading.</p>
-              </div>
-            </section>
-          {:else if selectedItem.processingStatus === 'FAILED' || selectedItem.processingStatus === 'NOT_FETCHED'}
-            <section class="content-state unavailable">
-              <div>
-                <h3>
-                  {selectedItem.processingStatus === 'FAILED'
-                    ? 'Article capture failed'
-                    : 'Article not prepared'}
-                </h3>
-                <p>
-                  {selectedItem.lastError ||
-                    (selectedItem.processingStatus === 'FAILED'
-                      ? 'The latest capture could not be completed.'
-                      : 'Readable content has not been fetched yet.')}
-                </p>
-              </div>
-              <Button
-                disabled={retryingUid === selectedItem.uid}
-                onclick={() => void retryCapture(selectedItem!)}
-                variant="secondary"
-              >
-                {#if retryingUid === selectedItem.uid}<Spinner data-icon="inline-start" />{/if}
-                {retryingUid === selectedItem.uid ? 'Retrying…' : 'Retry'}
-              </Button>
-            </section>
-          {:else if !selectedItem.contentAvailable}
-            <section class="content-state unavailable">
-              <div>
-                <h3>No readable text</h3>
-                <p>The page was saved, but no article text was extracted.</p>
-              </div>
-            </section>
-          {/if}
-
-          {#if detailPollingError}<StatusMessage tone="error">{detailPollingError}</StatusMessage
-            >{/if}
-          {#if detailProcessingError}
-            <StatusMessage tone="error">{detailProcessingError}</StatusMessage>
-          {/if}
-
-          <dl class="detail-metadata">
-            <div>
-              <dt>Source</dt>
-              <dd>{selectedItem.siteName || hostname(selectedItem) || 'Unknown site'}</dd>
-            </div>
-            <div>
-              <dt>Capture</dt>
-              <dd class={`processing-state ${processingClass(selectedItem)}`}>
-                {processingLabel(selectedItem)}
-              </dd>
-            </div>
-            <div>
-              <dt>Added</dt>
-              <dd>{formatNoteTimestamp(selectedItem.createdAt, session.workspace.timezone)}</dd>
-            </div>
-            <div>
-              <dt>Reading</dt>
-              <dd>{selectedItem.readAt ? 'Read' : 'Unread'}</dd>
-            </div>
-            {#if selectedItem.author}
-              <div>
-                <dt>Author</dt>
-                <dd>{selectedItem.author}</dd>
-              </div>
-            {/if}
-            {#if selectedItem.publishedAt}
-              <div>
-                <dt>Published</dt>
-                <dd>{formatNoteTimestamp(selectedItem.publishedAt, session.workspace.timezone)}</dd>
-              </div>
-            {/if}
-          </dl>
-
-          {#if selectedItem.excerpt}
-            <section class="excerpt-section">
-              <h3>Excerpt</h3>
-              <p>{selectedItem.excerpt}</p>
-            </section>
-          {/if}
-
-          <section class="source-section">
-            <h3>Source</h3>
-            <p>{selectedItem.originalUrl}</p>
-            {#if selectedItem.tags.length > 0}
-              <div aria-label="Tags" class="detail-tags">
-                {#each selectedItem.tags as tag}<span>#{tag}</span>{/each}
-              </div>
-            {/if}
-          </section>
-
-          <section class="captures-section">
-            <div class="section-heading">
-              <h3>Capture history</h3>
-              <span>{selectedItem.captures.length}</span>
-            </div>
-            {#if selectedItem.captures.length === 0}
-              <p class="detail-empty">
-                No selections or notes were added when this link was saved.
-              </p>
-            {:else}
-              <div class="capture-history">
-                {#each selectedItem.captures as capture (capture.uid)}
-                  <article class="capture-record">
-                    <header>
-                      <span>{capture.capturedTitle || 'Manual capture'}</span>
-                      <time datetime={capture.createdAt}
-                        >{formatNoteTimestamp(capture.createdAt, session.workspace.timezone)}</time
-                      >
-                    </header>
-                    {#if capture.selectedText}<blockquote>{capture.selectedText}</blockquote>{/if}
-                    {#if capture.note}<p>{capture.note}</p>{/if}
-                  </article>
-                {/each}
-              </div>
-            {/if}
-          </section>
-        {/if}
+        {#key selectedItem.uid}
+          <LibraryReader
+            {actionStatus}
+            busy={detailLoading ||
+              busyUids.has(selectedItem.uid) ||
+              retryingUid === selectedItem.uid}
+            item={selectedItem}
+            mode="preview"
+            onAcceptRefresh={(item) => resolveRefreshCandidate(item, true)}
+            onBack={closeDetail}
+            onDiscardRefresh={(item) => resolveRefreshCandidate(item, false)}
+            onExpand={() => openReader(selectedItem!)}
+            onRetry={retryCapture}
+            onToggleRead={toggleRead}
+            operationError={operationError ||
+              detailError ||
+              detailPollingError ||
+              detailProcessingError}
+            timeZone={session.workspace.timezone}
+          />
+        {/key}
       {:else}
         <div aria-hidden="true" class="empty-preview"></div>
       {/if}
-    {/snippet}
-
-    {#if compactDetail}
-      <Sheet.Root onOpenChange={handleDetailOpenChange} open={Boolean(selectedUid)}>
-        <Sheet.Content
-          class="w-full max-w-[26rem] overflow-y-auto p-6 pb-[calc(5rem+env(safe-area-inset-bottom))] sm:max-w-md"
-          showCloseButton={false}
-        >
-          <Sheet.Header class="sr-only">
-            <Sheet.Title>Library item details</Sheet.Title>
-            <Sheet.Description>Review and manage the selected saved item.</Sheet.Description>
-          </Sheet.Header>
-          {@render detailContent()}
-        </Sheet.Content>
-      </Sheet.Root>
-    {:else}
-      <aside aria-label="Library item details" class="library-detail">
-        {@render detailContent()}
-      </aside>
-    {/if}
+    </aside>
   </div>
 {/if}
 
@@ -1291,18 +1112,8 @@
     white-space: nowrap;
   }
 
-  .detail-tags span {
-    color: var(--primary);
-    font-family: var(--font-mono);
-    font-size: 10px;
-  }
-
   .processing-state {
     font-weight: 620;
-  }
-
-  .processing-state.ready {
-    color: var(--primary);
   }
 
   .processing-state.failed {
@@ -1346,208 +1157,6 @@
     min-height: 100%;
   }
 
-  .detail-header {
-    display: flex;
-    gap: 16px;
-    align-items: start;
-    justify-content: space-between;
-    margin-bottom: 20px;
-  }
-
-  .detail-header h2 {
-    margin: 0;
-    font-family: var(--font-sans);
-    font-size: 21px;
-    font-weight: 650;
-    line-height: 1.35;
-    letter-spacing: -0.015em;
-    overflow-wrap: anywhere;
-  }
-
-  .detail-loading {
-    margin: -12px 0 14px;
-    color: var(--muted-foreground);
-    font-size: 11px;
-  }
-
-  .detail-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 7px;
-    padding-bottom: 20px;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .content-state {
-    display: flex;
-    gap: 12px;
-    align-items: start;
-    justify-content: space-between;
-    padding: 18px 0;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .content-state.pending {
-    justify-content: flex-start;
-    animation: content-state-enter 180ms ease both;
-  }
-
-  .content-state-mark {
-    width: 16px;
-    height: 2px;
-    margin-top: 9px;
-    background: var(--primary);
-    border-radius: 2px;
-  }
-
-  .content-state h3 {
-    margin: 0 0 3px;
-    font-size: 12px;
-    font-weight: 660;
-  }
-
-  .content-state p {
-    margin: 0;
-    color: var(--muted-foreground);
-    font-size: 11px;
-    line-height: 1.55;
-  }
-
-  .detail-metadata {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 16px 20px;
-    padding: 20px 0;
-    margin: 0;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .detail-metadata div {
-    min-width: 0;
-  }
-
-  .detail-metadata dt {
-    margin-bottom: 2px;
-    color: var(--muted-foreground);
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  .detail-metadata dd {
-    margin: 0;
-    overflow: hidden;
-    font-size: 12px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .excerpt-section,
-  .source-section,
-  .captures-section {
-    padding-top: 23px;
-  }
-
-  .excerpt-section h3,
-  .source-section h3,
-  .captures-section h3 {
-    margin-bottom: 10px;
-    font-size: 12px;
-    font-weight: 660;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  .excerpt-section p {
-    margin: 0;
-    color: var(--muted-foreground);
-    font-family: var(--font-sans);
-    font-size: 13px;
-    line-height: 1.68;
-  }
-
-  .source-section > p {
-    display: flex;
-    min-width: 0;
-    gap: 8px;
-    align-items: start;
-    justify-content: space-between;
-    margin: 0;
-    color: var(--primary);
-    font-family: var(--font-mono);
-    font-size: 10px;
-    line-height: 1.6;
-    overflow-wrap: anywhere;
-  }
-
-  .detail-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 7px 12px;
-    margin-top: 14px;
-  }
-
-  .section-heading {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .section-heading > span {
-    color: var(--muted-foreground);
-    font-family: var(--font-mono);
-    font-size: 10px;
-  }
-
-  .detail-empty {
-    padding: 18px 0;
-    color: var(--muted-foreground);
-    font-size: 12px;
-  }
-
-  .capture-record {
-    padding: 18px 0;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .capture-record header {
-    display: flex;
-    gap: 12px;
-    justify-content: space-between;
-    margin-bottom: 9px;
-    color: var(--muted-foreground);
-    font-size: 10px;
-  }
-
-  .capture-record time {
-    flex: none;
-    font-family: var(--font-mono);
-  }
-
-  .capture-record blockquote {
-    padding-left: 13px;
-    margin: 0 0 10px;
-    border-left: 2px solid var(--primary);
-    font-family: var(--font-sans);
-    font-size: 13px;
-    line-height: 1.65;
-  }
-
-  .capture-record p {
-    margin: 0;
-    color: var(--muted-foreground);
-    font-size: 12px;
-    white-space: pre-wrap;
-  }
-
-  @keyframes content-state-enter {
-    from {
-      opacity: 0;
-      transform: translateY(3px);
-    }
-  }
-
   @media (max-width: 1199px) {
     .library-page {
       display: block;
@@ -1559,6 +1168,10 @@
     .library-primary {
       padding: 0;
       border-right: 0;
+    }
+
+    .library-detail {
+      display: none;
     }
   }
 

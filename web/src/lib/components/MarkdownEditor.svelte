@@ -75,7 +75,7 @@
         '&': {
           color: 'var(--foreground)',
           backgroundColor: 'transparent',
-          fontSize: '14px',
+          fontSize: '15px',
         },
         '&.cm-focused': { outline: 'none' },
         '.cm-scroller': {
@@ -83,7 +83,7 @@
           maxHeight: 'min(420px, 56vh)',
           overflow: 'auto',
           fontFamily: 'var(--font-mono)',
-          lineHeight: '1.6',
+          lineHeight: '24px',
           scrollbarColor: 'var(--border) transparent',
         },
         '.cm-content': {
@@ -97,12 +97,9 @@
           backgroundColor: 'color-mix(in oklch, var(--primary), transparent 82%)',
         },
         '.cm-gutters': {
-          color: 'color-mix(in oklch, var(--muted-foreground), transparent 20%)',
-          backgroundColor: 'transparent',
-          border: 'none',
+          display: 'none',
         },
-        '.cm-lineNumbers .cm-gutterElement': { padding: '0 10px 0 2px' },
-        '.cm-activeLine, .cm-activeLineGutter': {
+        '.cm-activeLine': {
           backgroundColor: 'color-mix(in oklch, var(--muted), transparent 48%)',
         },
         '.cm-foldPlaceholder': {

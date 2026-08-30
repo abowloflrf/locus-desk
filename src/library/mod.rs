@@ -66,6 +66,15 @@ impl LibraryProcessingStatus {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum LibraryRefreshStatus {
+    Idle,
+    Pending,
+    Failed,
+    Review,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct CreateLibraryItemRequest {
@@ -130,9 +139,14 @@ pub struct LibraryItem {
     pub starred: bool,
     pub processing_status: LibraryProcessingStatus,
     pub last_error: Option<String>,
+    pub refresh_status: LibraryRefreshStatus,
+    pub refresh_error: Option<String>,
     pub fetched_at: Option<String>,
     pub content_version: u32,
     pub content_available: bool,
+    pub current_text_byte_len: Option<u64>,
+    pub candidate_content_version: Option<u32>,
+    pub candidate_text_byte_len: Option<u64>,
     pub tags: Vec<String>,
     pub captures: Vec<LibraryCapture>,
     pub created_at: String,
@@ -207,9 +221,14 @@ struct LibraryItemRow {
     starred: bool,
     processing_status: String,
     last_error: Option<String>,
+    refresh_status: String,
+    refresh_error: Option<String>,
     fetched_at: Option<i64>,
     content_version: i64,
     content_available: bool,
+    current_text_byte_len: Option<i64>,
+    candidate_content_version: Option<i64>,
+    candidate_text_byte_len: Option<i64>,
     created_at: i64,
     updated_at: i64,
 }
@@ -295,9 +314,9 @@ pub async fn create(
         INSERT INTO library_items (
           object_id, workspace_id, original_url, normalized_url, canonical_url,
           title, site_name, item_kind, status, read_at, starred,
-          processing_status, last_error
+          processing_status, last_error, refresh_status, refresh_error
         )
-        VALUES (?, ?, ?, ?, NULL, ?, ?, 'BOOKMARK', 'ACTIVE', NULL, 0, 'PENDING', NULL)
+        VALUES (?, ?, ?, ?, NULL, ?, ?, 'BOOKMARK', 'ACTIVE', NULL, 0, 'PENDING', NULL, 'PENDING', NULL)
         ON CONFLICT(workspace_id, normalized_url) DO NOTHING
         "#,
     )
@@ -610,32 +629,45 @@ pub async fn retry_fetch(
 ) -> AppResult<LibraryItem> {
     let mut transaction = pool.begin().await?;
     acquire_workspace_write_lock(&mut transaction, workspace_id).await?;
-    let (object_id, processing_status) = sqlx::query_as::<_, (i64, String)>(
-        r#"
-        SELECT o.id, li.processing_status
+    let (object_id, processing_status, content_available) =
+        sqlx::query_as::<_, (i64, String, bool)>(
+            r#"
+        SELECT o.id, li.processing_status,
+          EXISTS (
+            SELECT 1 FROM library_content_versions version
+            WHERE version.library_item_id = li.id
+              AND version.workspace_id = li.workspace_id
+              AND version.status = 'CURRENT'
+          ) AS content_available
         FROM library_items li
         JOIN objects o
           ON o.id = li.object_id AND o.workspace_id = li.workspace_id
         WHERE li.workspace_id = ? AND o.workspace_id = ?
           AND o.uid = ? AND o.object_type = 'LIBRARY_ITEM'
         "#,
-    )
-    .bind(workspace_id)
-    .bind(workspace_id)
-    .bind(uid)
-    .fetch_optional(&mut *transaction)
-    .await?
-    .ok_or_else(|| AppError::not_found("Library item"))?;
+        )
+        .bind(workspace_id)
+        .bind(workspace_id)
+        .bind(uid)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or_else(|| AppError::not_found("Library item"))?;
 
-    if processing_status != LibraryProcessingStatus::Pending.as_str() {
+    if processing_status != LibraryProcessingStatus::Pending.as_str() || content_available {
         jobs::enqueue_library_fetch(&mut transaction, workspace_id, object_id, now).await?;
         sqlx::query(
             r#"
             UPDATE library_items
-            SET processing_status = 'PENDING', last_error = NULL
+            SET
+              processing_status = CASE WHEN ? THEN 'READY' ELSE 'PENDING' END,
+              last_error = CASE WHEN ? THEN NULL ELSE last_error END,
+              refresh_status = 'PENDING',
+              refresh_error = NULL
             WHERE object_id = ? AND workspace_id = ?
             "#,
         )
+        .bind(content_available)
+        .bind(content_available)
         .bind(object_id)
         .bind(workspace_id)
         .execute(&mut *transaction)
@@ -651,6 +683,160 @@ pub async fn retry_fetch(
     }
     transaction.commit().await?;
     get(pool, workspace_id, uid).await
+}
+
+pub async fn accept_refresh_candidate(
+    pool: &SqlitePool,
+    workspace_id: i64,
+    uid: &str,
+    now: i64,
+) -> AppResult<LibraryItem> {
+    let mut transaction = pool.begin().await?;
+    acquire_workspace_write_lock(&mut transaction, workspace_id).await?;
+    let identity = find_candidate_identity(&mut transaction, workspace_id, uid).await?;
+
+    sqlx::query(
+        "UPDATE library_content_versions SET status = 'HISTORICAL' WHERE library_item_id = ? AND workspace_id = ? AND status = 'CURRENT'",
+    )
+    .bind(identity.0)
+    .bind(workspace_id)
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE library_content_versions SET status = 'CURRENT' WHERE id = ? AND workspace_id = ? AND status = 'CANDIDATE'",
+    )
+    .bind(identity.2)
+    .bind(workspace_id)
+    .execute(&mut *transaction)
+    .await?;
+
+    for (purpose, blob_id) in [
+        ("SOURCE_HTML", identity.3),
+        ("READER_HTML", identity.4),
+        ("READER_TEXT", identity.5),
+    ] {
+        sqlx::query(
+            r#"
+            INSERT INTO object_blobs (object_id, workspace_id, blob_id, purpose)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(object_id, purpose)
+            DO UPDATE SET workspace_id = excluded.workspace_id, blob_id = excluded.blob_id
+            "#,
+        )
+        .bind(identity.1)
+        .bind(workspace_id)
+        .bind(blob_id)
+        .bind(purpose)
+        .execute(&mut *transaction)
+        .await?;
+    }
+
+    sqlx::query(
+        r#"
+        UPDATE library_items
+        SET
+          canonical_url = COALESCE(candidate.canonical_url, library_items.canonical_url),
+          title = CASE
+            WHEN library_items.title = '' AND candidate.title <> '' THEN candidate.title
+            ELSE library_items.title
+          END,
+          site_name = COALESCE(candidate.site_name, library_items.site_name),
+          author = candidate.author,
+          published_at = candidate.published_at,
+          excerpt = candidate.excerpt,
+          item_kind = 'ARTICLE',
+          processing_status = 'READY',
+          last_error = NULL,
+          refresh_status = 'IDLE',
+          refresh_error = NULL,
+          fetched_at = candidate.fetched_at,
+          content_hash = candidate.content_hash,
+          content_version = candidate.version_number
+        FROM library_content_versions candidate
+        WHERE library_items.id = ? AND library_items.workspace_id = ?
+          AND candidate.id = ? AND candidate.workspace_id = library_items.workspace_id
+        "#,
+    )
+    .bind(identity.0)
+    .bind(workspace_id)
+    .bind(identity.2)
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE objects SET updated_at = MAX(updated_at, ?) WHERE id = ? AND workspace_id = ? AND object_type = 'LIBRARY_ITEM'",
+    )
+    .bind(now)
+    .bind(identity.1)
+    .bind(workspace_id)
+    .execute(&mut *transaction)
+    .await?;
+    jobs::cleanup_orphan_blobs(&mut transaction, workspace_id).await?;
+    transaction.commit().await?;
+    get(pool, workspace_id, uid).await
+}
+
+pub async fn discard_refresh_candidate(
+    pool: &SqlitePool,
+    workspace_id: i64,
+    uid: &str,
+    now: i64,
+) -> AppResult<LibraryItem> {
+    let mut transaction = pool.begin().await?;
+    acquire_workspace_write_lock(&mut transaction, workspace_id).await?;
+    let identity = find_candidate_identity(&mut transaction, workspace_id, uid).await?;
+    sqlx::query(
+        "DELETE FROM library_content_versions WHERE id = ? AND workspace_id = ? AND status = 'CANDIDATE'",
+    )
+    .bind(identity.2)
+    .bind(workspace_id)
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE library_items SET refresh_status = 'IDLE', refresh_error = NULL WHERE id = ? AND workspace_id = ?",
+    )
+    .bind(identity.0)
+    .bind(workspace_id)
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE objects SET updated_at = MAX(updated_at, ?) WHERE id = ? AND workspace_id = ? AND object_type = 'LIBRARY_ITEM'",
+    )
+    .bind(now)
+    .bind(identity.1)
+    .bind(workspace_id)
+    .execute(&mut *transaction)
+    .await?;
+    jobs::cleanup_orphan_blobs(&mut transaction, workspace_id).await?;
+    transaction.commit().await?;
+    get(pool, workspace_id, uid).await
+}
+
+async fn find_candidate_identity(
+    transaction: &mut Transaction<'_, Sqlite>,
+    workspace_id: i64,
+    uid: &str,
+) -> AppResult<(i64, i64, i64, i64, i64, i64)> {
+    sqlx::query_as(
+        r#"
+        SELECT li.id, o.id, candidate.id, candidate.source_blob_id,
+          candidate.reader_html_blob_id, candidate.reader_text_blob_id
+        FROM library_items li
+        JOIN objects o
+          ON o.id = li.object_id AND o.workspace_id = li.workspace_id
+        JOIN library_content_versions candidate
+          ON candidate.library_item_id = li.id
+         AND candidate.workspace_id = li.workspace_id
+         AND candidate.status = 'CANDIDATE'
+        WHERE li.workspace_id = ? AND o.workspace_id = ?
+          AND o.uid = ? AND o.object_type = 'LIBRARY_ITEM'
+        "#,
+    )
+    .bind(workspace_id)
+    .bind(workspace_id)
+    .bind(uid)
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or_else(|| AppError::conflict("Library item has no refresh candidate"))
 }
 
 pub async fn update(
@@ -800,6 +986,7 @@ async fn fetch_row(
           li.canonical_url, li.title, li.site_name, li.author, li.published_at,
           li.excerpt, li.item_kind, li.status,
           li.read_at, li.starred, li.processing_status, li.last_error,
+          li.refresh_status, li.refresh_error,
           li.fetched_at, li.content_version,
           EXISTS (
             SELECT 1
@@ -812,10 +999,21 @@ async fn fetch_row(
               AND html_link.workspace_id = o.workspace_id
               AND html_link.purpose = 'READER_HTML'
           ) AS content_available,
+          current_version.text_byte_len AS current_text_byte_len,
+          candidate_version.version_number AS candidate_content_version,
+          candidate_version.text_byte_len AS candidate_text_byte_len,
           o.created_at, o.updated_at
         FROM library_items li
         JOIN objects o
           ON o.id = li.object_id AND o.workspace_id = li.workspace_id
+        LEFT JOIN library_content_versions current_version
+          ON current_version.library_item_id = li.id
+         AND current_version.workspace_id = li.workspace_id
+         AND current_version.status = 'CURRENT'
+        LEFT JOIN library_content_versions candidate_version
+          ON candidate_version.library_item_id = li.id
+         AND candidate_version.workspace_id = li.workspace_id
+         AND candidate_version.status = 'CANDIDATE'
         WHERE li.workspace_id = ? AND o.workspace_id = ?
           AND o.uid = ? AND o.object_type = 'LIBRARY_ITEM'
         "#,
@@ -891,9 +1089,23 @@ async fn row_to_item(
         starred: row.starred,
         processing_status: parse_processing_status(&row.processing_status)?,
         last_error: row.last_error,
+        refresh_status: parse_refresh_status(&row.refresh_status)?,
+        refresh_error: row.refresh_error,
         fetched_at: row.fetched_at.map(format_timestamp).transpose()?,
         content_version: parse_content_version(row.content_version)?,
         content_available: row.content_available,
+        current_text_byte_len: parse_optional_u64(
+            row.current_text_byte_len,
+            "current text length",
+        )?,
+        candidate_content_version: row
+            .candidate_content_version
+            .map(parse_content_version)
+            .transpose()?,
+        candidate_text_byte_len: parse_optional_u64(
+            row.candidate_text_byte_len,
+            "candidate text length",
+        )?,
         tags,
         captures,
         created_at: format_timestamp(row.created_at)?,
@@ -1214,6 +1426,27 @@ fn parse_processing_status(value: &str) -> AppResult<LibraryProcessingStatus> {
     }
 }
 
+fn parse_refresh_status(value: &str) -> AppResult<LibraryRefreshStatus> {
+    match value {
+        "IDLE" => Ok(LibraryRefreshStatus::Idle),
+        "PENDING" => Ok(LibraryRefreshStatus::Pending),
+        "FAILED" => Ok(LibraryRefreshStatus::Failed),
+        "REVIEW" => Ok(LibraryRefreshStatus::Review),
+        _ => Err(AppError::Internal(format!(
+            "invalid stored Library refresh status: {value}"
+        ))),
+    }
+}
+
+fn parse_optional_u64(value: Option<i64>, field: &str) -> AppResult<Option<u64>> {
+    value
+        .map(|value| {
+            u64::try_from(value)
+                .map_err(|_| AppError::Internal(format!("invalid stored {field}: {value}")))
+        })
+        .transpose()
+}
+
 fn parse_content_version(value: i64) -> AppResult<u32> {
     u32::try_from(value)
         .map_err(|_| AppError::Internal(format!("invalid stored Library content version: {value}")))
@@ -1225,6 +1458,7 @@ SELECT
   li.canonical_url, li.title, li.site_name, li.author, li.published_at,
   li.excerpt, li.item_kind, li.status,
   li.read_at, li.starred, li.processing_status, li.last_error,
+  li.refresh_status, li.refresh_error,
   li.fetched_at, li.content_version,
   EXISTS (
     SELECT 1
@@ -1237,9 +1471,20 @@ SELECT
       AND html_link.workspace_id = o.workspace_id
       AND html_link.purpose = 'READER_HTML'
   ) AS content_available,
+  current_version.text_byte_len AS current_text_byte_len,
+  candidate_version.version_number AS candidate_content_version,
+  candidate_version.text_byte_len AS candidate_text_byte_len,
   o.created_at, o.updated_at
 FROM library_items li
 JOIN objects o ON o.id = li.object_id AND o.workspace_id = li.workspace_id
+LEFT JOIN library_content_versions current_version
+  ON current_version.library_item_id = li.id
+ AND current_version.workspace_id = li.workspace_id
+ AND current_version.status = 'CURRENT'
+LEFT JOIN library_content_versions candidate_version
+  ON candidate_version.library_item_id = li.id
+ AND candidate_version.workspace_id = li.workspace_id
+ AND candidate_version.status = 'CANDIDATE'
 WHERE li.workspace_id = ? AND o.workspace_id = ? AND o.object_type = 'LIBRARY_ITEM'
   AND li.status = ?
   AND (
@@ -1285,7 +1530,7 @@ WHERE li.workspace_id = ? AND o.workspace_id = ? AND o.object_type = 'LIBRARY_IT
   )
   AND (? IS NULL OR (? = 1 AND li.read_at IS NOT NULL) OR (? = 0 AND li.read_at IS NULL))
   AND (? IS NULL OR li.starred = ?)
-ORDER BY o.updated_at DESC, o.id DESC
+ORDER BY COALESCE(li.published_at, o.created_at) DESC, o.id DESC
 LIMIT ? OFFSET ?
 "#;
 
@@ -1374,6 +1619,70 @@ mod tests {
         .await
         .unwrap();
         (directory, state, workspace_id, creator_id)
+    }
+
+    #[tokio::test]
+    async fn list_uses_published_time_then_saved_creation_time_not_update_time() {
+        let (_directory, state, workspace_id, creator_id) = fixture().await;
+        for (url, now) in [
+            ("https://example.com/old-saved", 1_000),
+            ("https://example.com/middle-saved", 2_000),
+            ("https://example.com/new-saved", 3_000),
+        ] {
+            create(
+                state.pool(),
+                workspace_id,
+                creator_id,
+                capture_request(url, Some(url), None),
+                now,
+            )
+            .await
+            .unwrap();
+        }
+        sqlx::query(
+            r#"
+            UPDATE library_items
+            SET published_at = 4_000
+            WHERE normalized_url = 'https://example.com/old-saved' AND workspace_id = ?
+            "#,
+        )
+        .bind(workspace_id)
+        .execute(state.pool())
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"
+            UPDATE objects SET updated_at = 9_000
+            WHERE id = (
+              SELECT object_id FROM library_items
+              WHERE normalized_url = 'https://example.com/middle-saved' AND workspace_id = ?
+            )
+            "#,
+        )
+        .bind(workspace_id)
+        .execute(state.pool())
+        .await
+        .unwrap();
+
+        let items = list(
+            state.pool(),
+            workspace_id,
+            ListLibraryItemsOptions::default(),
+        )
+        .await
+        .unwrap()
+        .items;
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| item.normalized_url.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "https://example.com/old-saved",
+                "https://example.com/new-saved",
+                "https://example.com/middle-saved",
+            ]
+        );
     }
 
     fn capture_request(

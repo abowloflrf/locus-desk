@@ -251,7 +251,7 @@ async fn phase_one_upgrade_creates_a_recoverable_schema_one_backup() {
         AppState::initialize_with_clock(config.clone(), Arc::new(FixedClock::new(upgrade_time)))
             .await
             .expect("schema v1 should back up and migrate to the latest schema");
-    assert_eq!(crate::db::schema_version(upgraded.pool()).await.unwrap(), 3);
+    assert_eq!(crate::db::schema_version(upgraded.pool()).await.unwrap(), 4);
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM objects WHERE uid = 'pre_upgrade_note' AND object_type = 'NOTE'",
@@ -343,7 +343,7 @@ async fn bootstraps_authenticates_and_reports_real_schema() {
     );
     assert!(health.headers().contains_key("x-request-id"));
     let health = response_json(health).await;
-    assert_eq!(health["schemaVersion"], 3);
+    assert_eq!(health["schemaVersion"], 4);
 
     let bootstrap = application
         .request(Method::GET, "/api/v1/bootstrap/status", None, None)

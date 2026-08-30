@@ -70,6 +70,24 @@ const REQUIRED_SCHEMA_V3_TABLES: &[&str] = &[
     "jobs",
     "_sqlx_migrations",
 ];
+const REQUIRED_SCHEMA_V4_TABLES: &[&str] = &[
+    "users",
+    "workspaces",
+    "workspace_members",
+    "sessions",
+    "objects",
+    "notes",
+    "note_tags",
+    "tasks",
+    "object_tags",
+    "library_items",
+    "library_captures",
+    "blobs",
+    "object_blobs",
+    "library_content_versions",
+    "jobs",
+    "_sqlx_migrations",
+];
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 pub type DataManagementResult<T> = Result<T, DataManagementError>;
@@ -1383,6 +1401,7 @@ async fn validate_sqlite_snapshot(path: &Path) -> DataManagementResult<()> {
         1 => REQUIRED_SCHEMA_V1_TABLES,
         2 => REQUIRED_SCHEMA_V2_TABLES,
         3 => REQUIRED_SCHEMA_V3_TABLES,
+        4 => REQUIRED_SCHEMA_V4_TABLES,
         _ => {
             return Err(DataManagementError::InvalidBackup {
                 path: path.to_owned(),
@@ -2590,6 +2609,78 @@ mod tests {
         .execute(&pool)
         .await;
         assert!(mismatched_length.is_err());
+
+        for (id, uid, hash, mime_type, body) in [
+            (
+                41_i64,
+                "source-a",
+                "c".repeat(64),
+                "text/html",
+                b"S".as_slice(),
+            ),
+            (
+                42_i64,
+                "reader-a",
+                "d".repeat(64),
+                "text/html",
+                b"H".as_slice(),
+            ),
+            (
+                43_i64,
+                "text-a",
+                "e".repeat(64),
+                "text/plain",
+                b"T".as_slice(),
+            ),
+        ] {
+            sqlx::query(
+                "INSERT INTO blobs (id, uid, workspace_id, sha256, mime_type, byte_len, body, created_at) VALUES (?, ?, 10, ?, ?, 1, ?, 1500)",
+            )
+            .bind(id)
+            .bind(uid)
+            .bind(hash)
+            .bind(mime_type)
+            .bind(body)
+            .execute(&pool)
+            .await
+            .expect("version backfill blob should insert");
+        }
+        for (blob_id, purpose) in [
+            (41_i64, "SOURCE_HTML"),
+            (42_i64, "READER_HTML"),
+            (43_i64, "READER_TEXT"),
+        ] {
+            sqlx::query(
+                "INSERT INTO object_blobs (object_id, workspace_id, blob_id, purpose) VALUES (20, 10, ?, ?)",
+            )
+            .bind(blob_id)
+            .bind(purpose)
+            .execute(&pool)
+            .await
+            .expect("version backfill link should insert");
+        }
+        sqlx::query(
+            "UPDATE library_items SET processing_status = 'READY', fetched_at = 1500, content_hash = ?, content_version = 2 WHERE id = 30",
+        )
+        .bind("d".repeat(64))
+        .execute(&pool)
+        .await
+        .expect("version backfill item should update");
+        sqlx::raw_sql(include_str!(
+            "../migrations/0004_library_content_versions.sql"
+        ))
+        .execute(&pool)
+        .await
+        .expect("schema v4 should apply");
+        let version = sqlx::query(
+            "SELECT version_number, status, text_byte_len FROM library_content_versions WHERE library_item_id = 30",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("current content version should be backfilled");
+        assert_eq!(version.get::<i64, _>("version_number"), 2);
+        assert_eq!(version.get::<String, _>("status"), "CURRENT");
+        assert_eq!(version.get::<i64, _>("text_byte_len"), 1);
         pool.close().await;
     }
 
@@ -2624,7 +2715,7 @@ mod tests {
             metadata.get::<String, _>("application_version"),
             env!("CARGO_PKG_VERSION")
         );
-        assert_eq!(metadata.get::<i64, _>("schema_version"), 3);
+        assert_eq!(metadata.get::<i64, _>("schema_version"), 4);
         assert!(!metadata.get::<String, _>("git_commit").is_empty());
 
         let error = create_sqlite_backup(&fixture.pool, &fixture.backups, &backup)
@@ -2654,7 +2745,7 @@ mod tests {
         assert!(!json.contains("tokenHash"));
         let payload: Value = serde_json::from_str(&json).expect("JSON export should be valid");
         assert_eq!(payload["formatVersion"], 3);
-        assert_eq!(payload["schemaVersion"], 3);
+        assert_eq!(payload["schemaVersion"], 4);
         assert_eq!(payload["notes"][0]["tags"][0], "中文");
         assert_eq!(payload["tasks"][0]["title"], "Ship the safe export");
         assert_eq!(payload["libraryItems"][0]["uid"], "library_01");

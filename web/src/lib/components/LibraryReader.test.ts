@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getLibraryContent } from '../api/library';
 import type { LibraryItem } from '../api/types';
+import { READER_PREFERENCES_STORAGE_KEY } from '../reader-preferences';
 import LibraryReader from './LibraryReader.svelte';
 import readerSource from './LibraryReader.svelte?raw';
 
@@ -11,17 +12,19 @@ vi.mock('../api/library', () => ({
 }));
 
 beforeEach(() => {
+  window.localStorage.clear();
   vi.mocked(getLibraryContent).mockResolvedValue({
     contentVersion: 3,
     fetchedAt: '2026-08-24T03:00:00.000Z',
     plainText: 'A safe article.',
     safeHtml:
-      '<p>A <strong>safe</strong> article. <a href="/next">Next</a></p><script>alert(1)</script>',
+      '<p>A <strong>safe</strong> article. <a href="/next">Next</a></p><img src="/media/hero.jpg" alt="Article illustration"><script>alert(1)</script>',
   });
 });
 
 afterEach(() => {
   vi.clearAllMocks();
+  window.localStorage.clear();
   document.body.replaceChildren();
 });
 
@@ -41,6 +44,55 @@ describe('LibraryReader', () => {
       expect(link.href).toBe('https://example.com/next');
       expect(link.rel).toBe('noopener noreferrer');
       expect(link.target).toBe('_blank');
+      const image = content.querySelector<HTMLImageElement>('img')!;
+      expect(image.src).toBe('https://example.com/media/hero.jpg');
+      expect(image.alt).toBe('Article illustration');
+      expect(image.getAttribute('loading')).toBe('lazy');
+      expect(image.getAttribute('referrerpolicy')).toBe('no-referrer');
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it('lets ready articles be refreshed so previously sanitized captures can be replaced', async () => {
+    const onRetry = vi.fn();
+    const { component, target } = mountReader({ onRetry });
+
+    try {
+      await vi.waitFor(() => expect(target.querySelector('.reader-content')).not.toBeNull());
+      const refresh = target.querySelector<HTMLButtonElement>(
+        'button[aria-label="Refresh article"]',
+      )!;
+      refresh.click();
+      expect(onRetry).toHaveBeenCalledOnce();
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it('keeps saved content visible while a shorter refresh waits for a decision', async () => {
+    const onAcceptRefresh = vi.fn();
+    const onDiscardRefresh = vi.fn();
+    const { component, target } = mountReader({
+      item: libraryItem({ refreshStatus: 'REVIEW' }),
+      onAcceptRefresh,
+      onDiscardRefresh,
+    });
+
+    try {
+      await vi.waitFor(() => expect(target.querySelector('.reader-content')).not.toBeNull());
+      expect(target.textContent).toContain('Shorter refresh needs review');
+      expect(target.textContent).toContain('A safe article.');
+      const keep = [...target.querySelectorAll<HTMLButtonElement>('button')].find(
+        (button) => button.textContent?.trim() === 'Keep saved version',
+      )!;
+      keep.click();
+      expect(onDiscardRefresh).toHaveBeenCalledOnce();
+      const use = [...target.querySelectorAll<HTMLButtonElement>('button')].find(
+        (button) => button.textContent?.trim() === 'Use refreshed version',
+      )!;
+      use.click();
+      expect(onAcceptRefresh).toHaveBeenCalledOnce();
     } finally {
       await unmount(component);
     }
@@ -60,6 +112,38 @@ describe('LibraryReader', () => {
       expect(readerSource).toContain('env(safe-area-inset-top)');
       expect(readerSource).toContain('calc(48px + env(safe-area-inset-bottom))');
       expect(readerSource).toContain('.reader-heading h1:focus-visible');
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it('loads and persists browser reading preferences', async () => {
+    window.localStorage.setItem(
+      READER_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({ fontPreset: 'atkinson', fontSize: 'large', lineHeight: 'spacious' }),
+    );
+    const { component, target } = mountReader();
+
+    try {
+      const reader = target.querySelector<HTMLElement>('.library-reader')!;
+      await vi.waitFor(() => expect(reader.dataset.readerFont).toBe('atkinson'));
+      expect(reader.dataset.readerSize).toBe('large');
+      expect(reader.dataset.readerLineHeight).toBe('spacious');
+
+      target.querySelector<HTMLButtonElement>('[aria-label="Reading preferences"]')!.click();
+      await vi.waitFor(() =>
+        expect(
+          document.querySelector<HTMLButtonElement>('[aria-label="16 pixel text"]'),
+        ).not.toBeNull(),
+      );
+      document.querySelector<HTMLButtonElement>('[aria-label="16 pixel text"]')!.click();
+
+      await vi.waitFor(() => expect(reader.dataset.readerSize).toBe('small'));
+      expect(JSON.parse(window.localStorage.getItem(READER_PREFERENCES_STORAGE_KEY)!)).toEqual({
+        fontPreset: 'atkinson',
+        fontSize: 'small',
+        lineHeight: 'spacious',
+      });
     } finally {
       await unmount(component);
     }
@@ -118,6 +202,8 @@ function mountReader(
   overrides: {
     item?: LibraryItem;
     onBack?: () => void;
+    onAcceptRefresh?: (item: LibraryItem) => void;
+    onDiscardRefresh?: (item: LibraryItem) => void;
     onRetry?: (item: LibraryItem) => void;
   } = {},
 ): {
@@ -130,6 +216,8 @@ function mountReader(
     props: {
       item: overrides.item ?? libraryItem(),
       onBack: overrides.onBack ?? vi.fn(),
+      onAcceptRefresh: overrides.onAcceptRefresh,
+      onDiscardRefresh: overrides.onDiscardRefresh,
       onRetry: overrides.onRetry,
       onToggleRead: vi.fn(),
       timeZone: 'Asia/Singapore',
@@ -154,6 +242,8 @@ function libraryItem(overrides: Partial<LibraryItem> = {}): LibraryItem {
     normalizedUrl: 'https://example.com/article',
     originalUrl: 'https://example.com/article',
     processingStatus: 'READY',
+    refreshError: null,
+    refreshStatus: 'IDLE',
     publishedAt: '2026-08-20T01:00:00.000Z',
     readAt: null,
     siteName: 'Example',

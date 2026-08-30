@@ -107,6 +107,7 @@ export interface ListTagsResponse {
 export type LibraryItemKind = 'BOOKMARK' | 'ARTICLE';
 export type LibraryItemStatus = 'ACTIVE' | 'ARCHIVED';
 export type LibraryProcessingStatus = 'NOT_FETCHED' | 'PENDING' | 'READY' | 'FAILED';
+export type LibraryRefreshStatus = 'IDLE' | 'PENDING' | 'FAILED' | 'REVIEW';
 
 export interface LibraryCapture {
   uid: string;
@@ -132,9 +133,14 @@ export interface LibraryItem {
   starred: boolean;
   processingStatus: LibraryProcessingStatus;
   lastError: string | null;
+  refreshStatus?: LibraryRefreshStatus;
+  refreshError?: string | null;
   fetchedAt: string | null;
   contentVersion: number;
   contentAvailable: boolean;
+  currentTextByteLen?: number | null;
+  candidateContentVersion?: number | null;
+  candidateTextByteLen?: number | null;
   tags: string[];
   captures: LibraryCapture[];
   createdAt: string;

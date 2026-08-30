@@ -31,7 +31,7 @@
     session: SessionInfo;
     refreshToken?: number;
     children: Snippet;
-    onNavigate: (route: ProtectedRoute) => void;
+    onNavigate: (route: ProtectedRoute, replace?: boolean) => void;
     onLogout: () => void | Promise<void>;
     notice?: string | null;
     onDismissNotice: () => void;
@@ -40,26 +40,44 @@
   type WorkspaceLayout = 'notes' | 'split' | 'todo';
 
   let compact = $state(false);
+  let mobile = $state(false);
   let sidebarCollapsed = $state(false);
   let todoOpen = $state(false);
+  let topbarHidden = $state(false);
   let workspaceLayout = $state<WorkspaceLayout>('split');
   let todoButton = $state<HTMLButtonElement | null>(null);
+  let lastScrollTop = 0;
+  let scrollDelta = 0;
 
   onMount(() => {
     sidebarCollapsed = window.localStorage.getItem('locus:sidebar-collapsed') === 'true';
-    const media = window.matchMedia('(max-width: 1199px)');
-    const update = () => {
-      compact = media.matches;
+    const compactMedia = window.matchMedia('(max-width: 1199px)');
+    const mobileMedia = window.matchMedia('(max-width: 767px)');
+    const updateCompact = () => {
+      compact = compactMedia.matches;
       if (!compact) todoOpen = false;
     };
-    update();
-    media.addEventListener('change', update);
-    return () => media.removeEventListener('change', update);
+    const updateMobile = () => {
+      mobile = mobileMedia.matches;
+      if (!mobile) topbarHidden = false;
+    };
+    updateCompact();
+    updateMobile();
+    compactMedia.addEventListener('change', updateCompact);
+    mobileMedia.addEventListener('change', updateMobile);
+    return () => {
+      compactMedia.removeEventListener('change', updateCompact);
+      mobileMedia.removeEventListener('change', updateMobile);
+    };
   });
 
   $effect(() => {
     current;
     todoOpen = false;
+    topbarHidden = false;
+    lastScrollTop = 0;
+    scrollDelta = 0;
+    if (mobile && current === 'home') queueMicrotask(() => onNavigate('notes', true));
   });
 
   async function openTodo(): Promise<void> {
@@ -78,6 +96,30 @@
   function toggleSidebar(): void {
     sidebarCollapsed = !sidebarCollapsed;
     window.localStorage.setItem('locus:sidebar-collapsed', String(sidebarCollapsed));
+  }
+
+  function handleWorkspaceScroll(event: Event): void {
+    const scrollTop = (event.currentTarget as HTMLElement).scrollTop;
+    if (!mobile) {
+      lastScrollTop = scrollTop;
+      scrollDelta = 0;
+      return;
+    }
+
+    const delta = scrollTop - lastScrollTop;
+    scrollDelta = delta > 0 ? Math.max(0, scrollDelta) + delta : Math.min(0, scrollDelta) + delta;
+
+    if (scrollTop <= 12) {
+      topbarHidden = false;
+      scrollDelta = 0;
+    } else if (scrollTop > 48 && scrollDelta >= 12) {
+      topbarHidden = true;
+      scrollDelta = 0;
+    } else if (scrollDelta <= -8) {
+      topbarHidden = false;
+      scrollDelta = 0;
+    }
+    lastScrollTop = scrollTop;
   }
 </script>
 
@@ -106,6 +148,7 @@
     blocked={(compact && todoOpen) || immersive}
     collapsed={sidebarCollapsed}
     {current}
+    {mobile}
     {onLogout}
     {onNavigate}
     onToggleCollapsed={toggleSidebar}
@@ -124,13 +167,14 @@
       class="workspace-column"
       inert={(compact && todoOpen) ||
         (!compact && current === 'home' && workspaceLayout === 'todo')}
+      onscroll={handleWorkspaceScroll}
     >
-      <header class="compact-topbar">
+      <header class:topbar-hidden={topbarHidden} class="compact-topbar">
         <a
-          href="/"
+          href={mobile ? '/notes' : '/'}
           onclick={(event) => {
             event.preventDefault();
-            onNavigate('home');
+            onNavigate(mobile ? 'notes' : 'home');
           }}>Locus</a
         >
         <span
@@ -145,7 +189,7 @@
                   : 'Archive'}</span
         >
         <div class="compact-topbar-actions">
-          {#if current === 'home'}
+          {#if current === 'home' && !mobile}
             <Button
               bind:ref={todoButton}
               aria-controls="todo-panel"
@@ -211,7 +255,7 @@
   </div>
 </div>
 
-{#if compact && current === 'home'}
+{#if compact && !mobile && current === 'home'}
   <Sheet.Root bind:open={todoOpen} onOpenChange={handleTodoOpenChange}>
     <Sheet.Content
       class="w-full max-w-[24.375rem] overflow-y-auto p-6 pb-[calc(5rem+env(safe-area-inset-bottom))] sm:max-w-sm"
@@ -412,6 +456,8 @@
       padding: calc(8px + env(safe-area-inset-top)) 20px 8px;
       background: var(--background);
       border-bottom: 1px solid var(--border);
+      transition: transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+      will-change: transform;
     }
 
     .compact-topbar > a {
@@ -439,8 +485,20 @@
     }
 
     .compact-topbar {
+      min-height: calc(48px + env(safe-area-inset-top));
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: 0;
       padding-right: calc(16px + env(safe-area-inset-right));
       padding-left: calc(16px + env(safe-area-inset-left));
+    }
+
+    .compact-topbar.topbar-hidden {
+      transform: translateY(-100%);
+    }
+
+    .compact-topbar-actions :global(button) {
+      min-width: 44px;
+      min-height: 44px;
     }
 
     .workspace-column {
@@ -462,6 +520,7 @@
   @media (prefers-reduced-motion: reduce) {
     .skip-link,
     .app-shell,
+    .compact-topbar,
     .workspace-stage.has-workspace-layout .workspace-column,
     .workspace-stage.has-workspace-layout .todo-rail {
       transition-duration: 0.01ms;

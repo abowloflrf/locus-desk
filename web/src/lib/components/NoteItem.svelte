@@ -12,6 +12,7 @@
   import { formatNoteTimestamp } from '../utils/date';
   import MarkdownEditor from './MarkdownEditor.svelte';
   import MarkdownContent from './MarkdownContent.svelte';
+  import { Badge } from './ui/badge';
   import { Button } from './ui/button';
   import * as DropdownMenu from './ui/dropdown-menu';
   import { Spinner } from './ui/spinner';
@@ -132,12 +133,15 @@
         <div aria-label="Tags" class="note-tags">
           {#each note.tags as tag}
             <Button
-              class="tag-chip"
+              aria-label={`Filter by tag ${tag}`}
+              class="tag-chip pointer-coarse:min-w-11 px-0"
               disabled={!onTag}
               onclick={() => onTag?.(tag)}
               size="xs"
-              variant="secondary">#{tag}</Button
+              variant="ghost"
             >
+              <Badge variant="tag">#{tag}</Badge>
+            </Button>
           {/each}
         </div>
       {/if}

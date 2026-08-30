@@ -2,8 +2,10 @@ import { mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  acceptLibraryRefreshCandidate,
   createLibraryItem,
   deleteLibraryItem,
+  discardLibraryRefreshCandidate,
   getLibraryContent,
   getLibraryItem,
   listLibraryItems,
@@ -14,8 +16,10 @@ import type { LibraryItem, ListLibraryItemsResponse, SessionInfo } from '../api/
 import LibraryPage from './LibraryPage.svelte';
 
 vi.mock('../api/library', () => ({
+  acceptLibraryRefreshCandidate: vi.fn(),
   createLibraryItem: vi.fn(),
   deleteLibraryItem: vi.fn(),
+  discardLibraryRefreshCandidate: vi.fn(),
   getLibraryContent: vi.fn(),
   getLibraryItem: vi.fn(),
   listLibraryItems: vi.fn(),
@@ -35,6 +39,7 @@ const session: SessionInfo = {
 };
 
 beforeEach(() => {
+  window.history.replaceState({}, '', '/library');
   vi.stubGlobal(
     'matchMedia',
     vi.fn(
@@ -52,7 +57,9 @@ beforeEach(() => {
     return 1;
   });
   vi.mocked(createLibraryItem).mockResolvedValue(item('created', 'Created link'));
+  vi.mocked(acceptLibraryRefreshCandidate).mockImplementation(async (uid) => item(uid, uid));
   vi.mocked(deleteLibraryItem).mockResolvedValue();
+  vi.mocked(discardLibraryRefreshCandidate).mockImplementation(async (uid) => item(uid, uid));
   vi.mocked(getLibraryContent).mockResolvedValue({
     contentVersion: 1,
     fetchedAt: '2026-08-24T02:00:00.000Z',
@@ -115,6 +122,10 @@ describe('LibraryPage', () => {
         ),
       );
       expect(target.querySelectorAll('[data-focus-uid="alpha"]')).toHaveLength(1);
+      await vi.waitFor(() =>
+        expect(target.querySelector('.library-reader.preview')).not.toBeNull(),
+      );
+      expect(target.querySelector('.detail-metadata')).toBeNull();
     } finally {
       await unmount(component);
     }
@@ -254,7 +265,8 @@ describe('LibraryPage', () => {
     }
   });
 
-  it('shows capture history in the compact detail drawer and restores focus on Escape', async () => {
+  it('opens a tablet-width article as a full reader page without a drawer', async () => {
+    const historyBack = vi.spyOn(window.history, 'back').mockImplementation(() => {});
     vi.stubGlobal(
       'matchMedia',
       vi.fn(
@@ -267,21 +279,14 @@ describe('LibraryPage', () => {
           }) as unknown as MediaQueryList,
       ),
     );
-    const summary = item('alpha', 'Alpha');
-    const detail = item('alpha', 'Alpha', {
-      captures: [
-        {
-          capturedTitle: 'Alpha page',
-          createdAt: '2026-08-24T01:00:00.000Z',
-          note: 'Use this in the migration plan.',
-          selectedText: 'Keep the content pipeline observable.',
-          uid: 'capture-1',
-        },
-      ],
+    const summary = item('alpha', 'Alpha', {
+      contentAvailable: true,
+      contentVersion: 1,
+      processingStatus: 'READY',
     });
     vi.mocked(listLibraryItems).mockResolvedValue(page([summary]));
-    vi.mocked(getLibraryItem).mockResolvedValue(detail);
-    const { component, target } = mountPage();
+    const onImmersiveChange = vi.fn();
+    const { component, target } = mountPage(onImmersiveChange);
 
     try {
       const select = await vi.waitFor(() => {
@@ -292,24 +297,87 @@ describe('LibraryPage', () => {
       select.focus();
       select.click();
 
-      await vi.waitFor(() =>
-        expect(document.body.textContent).toContain('Keep the content pipeline observable.'),
-      );
-      const detailPanel = document.body.querySelector<HTMLElement>('[data-slot="sheet-content"]')!;
-      expect(detailPanel.getAttribute('role')).toBe('dialog');
-      expect(document.activeElement?.textContent).toContain('Alpha');
+      await vi.waitFor(() => expect(target.querySelector('.library-reader')).not.toBeNull());
+      expect(target.querySelector('.library-reader.preview')).toBeNull();
+      expect(document.body.querySelector('[data-slot="sheet-content"]')).toBeNull();
+      expect(getLibraryItem).not.toHaveBeenCalled();
+      expect(onImmersiveChange).toHaveBeenLastCalledWith(true);
 
-      document.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' }));
-      await vi.waitFor(() =>
-        expect(document.body.querySelector('[data-slot="sheet-content"]')).toBeNull(),
-      );
-      expect(document.activeElement).toBe(select);
+      const back = [...target.querySelectorAll<HTMLButtonElement>('button')].find(
+        (button) => button.textContent?.trim() === 'Back to Library',
+      )!;
+      back.click();
+
+      const restored = await vi.waitFor(() => {
+        const button = target.querySelector<HTMLButtonElement>('[data-library-select="alpha"]');
+        expect(button).not.toBeNull();
+        return button!;
+      });
+      await vi.waitFor(() => expect(document.activeElement).toBe(restored));
+      expect(onImmersiveChange).toHaveBeenLastCalledWith(false);
+      expect(historyBack).toHaveBeenCalledOnce();
     } finally {
       await unmount(component);
     }
   });
 
-  it('opens a mobile article directly in the full reader and restores the list on Back', async () => {
+  it('closes a side preview when resizing into the list-only layout', async () => {
+    let listOnly = false;
+    let mediaChange: ((event: MediaQueryListEvent) => void) | undefined;
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(
+        (query: string) =>
+          ({
+            addEventListener: vi.fn((_type, listener) => {
+              mediaChange = listener as (event: MediaQueryListEvent) => void;
+            }),
+            get matches() {
+              return listOnly;
+            },
+            media: query,
+            removeEventListener: vi.fn(),
+          }) as unknown as MediaQueryList,
+      ),
+    );
+    const ready = item('alpha', 'Alpha', {
+      contentAvailable: true,
+      contentVersion: 1,
+      processingStatus: 'READY',
+    });
+    vi.mocked(listLibraryItems).mockResolvedValue(page([ready]));
+    vi.mocked(getLibraryItem).mockResolvedValue(ready);
+    const { component, target } = mountPage();
+
+    try {
+      const select = await vi.waitFor(() => {
+        const button = target.querySelector<HTMLButtonElement>('[data-library-select="alpha"]');
+        expect(button).not.toBeNull();
+        return button!;
+      });
+      select.click();
+      await vi.waitFor(() =>
+        expect(target.querySelector('.library-reader.preview')).not.toBeNull(),
+      );
+
+      listOnly = true;
+      mediaChange?.({ matches: true, media: '(max-width: 1199px)' } as MediaQueryListEvent);
+
+      await vi.waitFor(() => expect(target.querySelector('.library-reader.preview')).toBeNull());
+      await vi.waitFor(() => expect(document.activeElement).toBe(select));
+      expect(target.querySelector('[data-library-select="alpha"]')).not.toBeNull();
+      expect(document.body.querySelector('[data-slot="sheet-content"]')).toBeNull();
+
+      select.click();
+      await vi.waitFor(() => expect(target.querySelector('.library-reader')).not.toBeNull());
+      expect(target.querySelector('.library-reader.preview')).toBeNull();
+      expect(getLibraryItem).toHaveBeenCalledOnce();
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it('opens a mobile article directly and restores the Library list on browser Back', async () => {
     vi.stubGlobal(
       'matchMedia',
       vi.fn(
@@ -345,11 +413,10 @@ describe('LibraryPage', () => {
       expect(document.body.querySelector('[data-slot="sheet-content"]')).toBeNull();
       expect(getLibraryItem).not.toHaveBeenCalled();
       expect(onImmersiveChange).toHaveBeenLastCalledWith(true);
+      expect(window.history.state?.locusLibraryReader).toBe('alpha');
 
-      const back = [...target.querySelectorAll<HTMLButtonElement>('button')].find(
-        (button) => button.textContent?.trim() === 'Back to Library',
-      )!;
-      back.click();
+      window.history.replaceState({}, '', '/library');
+      window.dispatchEvent(new PopStateEvent('popstate', { state: {} }));
 
       const restored = await vi.waitFor(() => {
         const button = target.querySelector<HTMLButtonElement>('[data-library-select="alpha"]');
@@ -530,23 +597,16 @@ describe('LibraryPage', () => {
     }
   });
 
-  it('preserves full capture history when a list page refreshes the selected summary', async () => {
-    const summary = item('alpha', 'Alpha');
-    const detail = item('alpha', 'Alpha', {
-      captures: [
-        {
-          capturedTitle: 'Alpha',
-          createdAt: '2026-08-24T01:00:00.000Z',
-          note: 'Keep this capture visible.',
-          selectedText: 'Selected context',
-          uid: 'capture-1',
-        },
-      ],
+  it('keeps the reader preview mounted while a ready article is refreshed', async () => {
+    const ready = item('alpha', 'Alpha', {
+      contentAvailable: true,
+      contentVersion: 1,
+      processingStatus: 'READY',
     });
-    vi.mocked(listLibraryItems)
-      .mockResolvedValueOnce({ ...page([summary]), total: 2 })
-      .mockResolvedValueOnce({ ...page([item('beta', 'Beta')]), page: 2, total: 2 });
-    vi.mocked(getLibraryItem).mockResolvedValue(detail);
+    const pending = item('alpha', 'Alpha', { processingStatus: 'PENDING' });
+    vi.mocked(listLibraryItems).mockResolvedValue(page([ready]));
+    vi.mocked(getLibraryItem).mockResolvedValue(ready);
+    vi.mocked(retryLibraryItem).mockResolvedValue(pending);
     const { component, target } = mountPage();
 
     try {
@@ -556,16 +616,19 @@ describe('LibraryPage', () => {
         return button!;
       });
       select.click();
-      await vi.waitFor(() => expect(target.textContent).toContain('Keep this capture visible.'));
+      const refresh = await vi.waitFor(() => {
+        expect(target.querySelector('.library-reader.preview')).not.toBeNull();
+        const button = target.querySelector<HTMLButtonElement>('[aria-label="Refresh article"]');
+        expect(button).not.toBeNull();
+        return button!;
+      });
+      refresh.click();
 
-      const loadMore = [...target.querySelectorAll<HTMLButtonElement>('button')].find(
-        (button) => button.textContent?.trim() === 'Load more',
-      )!;
-      loadMore.click();
-
-      await vi.waitFor(() => expect(target.textContent).toContain('Beta'));
-      expect(target.textContent).toContain('Keep this capture visible.');
-      expect(target.querySelector('.captures-section span')?.textContent).toBe('1');
+      await vi.waitFor(() => expect(target.textContent).toContain('Preparing article…'));
+      expect(target.querySelector('.library-reader.preview')).not.toBeNull();
+      expect(
+        target.querySelector('.detail-header, .detail-metadata, .captures-section'),
+      ).toBeNull();
     } finally {
       await unmount(component);
     }
@@ -614,7 +677,7 @@ describe('LibraryPage', () => {
       alphaRetry.resolve(item('alpha', 'Alpha', { processingStatus: 'PENDING' }));
 
       await vi.waitFor(() => expect(target.textContent).toContain('Preparing article'));
-      expect(target.querySelector('.library-detail h2')?.textContent).toBe('Beta');
+      expect(target.querySelector('#library-reader-title')?.textContent).toBe('Beta');
       expect(target.querySelector('[data-action-status]')?.textContent).toContain(
         'Content capture queued.',
       );

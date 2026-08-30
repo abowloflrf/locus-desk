@@ -25,6 +25,7 @@
     todoOpen,
     blocked = false,
     collapsed = false,
+    mobile = false,
   }: {
     current: ProtectedRoute;
     session: SessionInfo;
@@ -34,6 +35,7 @@
     todoOpen: boolean;
     blocked?: boolean;
     collapsed?: boolean;
+    mobile?: boolean;
   } = $props();
 
   const primaryItems: Array<{
@@ -91,19 +93,20 @@
 
   <nav class="primary-nav">
     {#each primaryItems as item}
-      {@const NavIcon = item.icon}
-      <a
-        aria-current={current === item.route ? 'page' : undefined}
-        class:active={current === item.route}
-        class:mobile-overflow-item={item.route === 'archive'}
-        class="nav-item"
-        href={item.route === 'home' ? '/' : `/${item.route}`}
-        onclick={(event) => openRoute(event, item.route)}
-        title={item.label}
-      >
-        <NavIcon />
-        <span>{item.label}</span>
-      </a>
+      {#if !mobile || (item.route !== 'home' && item.route !== 'archive')}
+        {@const NavIcon = item.icon}
+        <a
+          aria-current={current === item.route ? 'page' : undefined}
+          class:active={current === item.route}
+          class="nav-item"
+          href={item.route === 'home' ? '/' : `/${item.route}`}
+          onclick={(event) => openRoute(event, item.route)}
+          title={item.label}
+        >
+          <NavIcon />
+          <span>{item.label}</span>
+        </a>
+      {/if}
     {/each}
   </nav>
 
@@ -434,7 +437,7 @@
       z-index: 2;
       width: min(100%, 440px);
       height: var(--mobile-navigation-content-height, 64px);
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 2px;
       padding: 5px;
       margin-inline: auto;
@@ -499,10 +502,6 @@
     .primary-nav .nav-item:focus-visible {
       outline: 2px solid var(--foreground);
       outline-offset: -3px;
-    }
-
-    .primary-nav .mobile-overflow-item {
-      display: none;
     }
   }
 </style>

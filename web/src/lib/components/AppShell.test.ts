@@ -82,7 +82,7 @@ describe('AppShell modal boundaries', () => {
     }
   });
 
-  it('keeps mobile navigation focused on the four primary destinations', async () => {
+  it('keeps mobile navigation focused on Memos, Library, and Tasks', async () => {
     const target = document.createElement('div');
     document.body.append(target);
     const children = createRawSnippet(() => ({ render: () => '<h1>Notes</h1>' }));
@@ -102,16 +102,30 @@ describe('AppShell modal boundaries', () => {
       await tick();
       expect(target.querySelector('.mobile-more-trigger')).toBeNull();
       expect(target.textContent).not.toContain('More');
-      expect(target.querySelector('.nav-item[title="Archive"]')?.classList).toContain(
-        'mobile-overflow-item',
-      );
-      expect(sidebarSource).toContain('grid-template-columns: repeat(4, minmax(0, 1fr))');
+      expect(target.querySelector('.nav-item[title="Workspace"]')).toBeNull();
+      expect(target.querySelector('.nav-item[title="Memos"]')).not.toBeNull();
+      expect(target.querySelector('.nav-item[title="Library"]')).not.toBeNull();
+      expect(target.querySelector('.nav-item[title="Tasks"]')).not.toBeNull();
+      expect(target.querySelector('.nav-item[title="Archive"]')).toBeNull();
+      expect(sidebarSource).toContain('grid-template-columns: repeat(3, minmax(0, 1fr))');
     } finally {
       await unmount(component);
     }
   });
 
-  it('isolates the notice while the mobile Todo sheet is open', async () => {
+  it('isolates the notice while the compact Todo sheet is open', async () => {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(
+        (query: string) =>
+          ({
+            addEventListener: vi.fn(),
+            matches: query === '(max-width: 1199px)',
+            media: query,
+            removeEventListener: vi.fn(),
+          }) as unknown as MediaQueryList,
+      ),
+    );
     const target = document.createElement('div');
     document.body.append(target);
     const children = createRawSnippet(() => ({ render: () => '<h1>Notes</h1>' }));
@@ -158,6 +172,68 @@ describe('AppShell modal boundaries', () => {
       );
       expect(notice?.hasAttribute('inert')).toBe(false);
       expect(notice?.hidden).toBe(false);
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it('redirects the mobile Workspace route to Memos', async () => {
+    const target = document.createElement('div');
+    document.body.append(target);
+    const children = createRawSnippet(() => ({ render: () => '<h1>Workspace</h1>' }));
+    const onNavigate = vi.fn();
+    const component = mount(AppShell, {
+      props: {
+        children,
+        current: 'home',
+        onDismissNotice: vi.fn(),
+        onLogout: vi.fn(),
+        onNavigate,
+        session,
+      },
+      target,
+    });
+
+    try {
+      await vi.waitFor(() => expect(onNavigate).toHaveBeenCalledWith('notes', true));
+      expect(target.querySelector('.nav-item[title="Workspace"]')).toBeNull();
+      expect(target.querySelector('.todo-trigger')).toBeNull();
+      expect(document.body.querySelector('[data-slot="sheet-content"]')).toBeNull();
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it('hides the mobile top bar on downward scroll and restores it on upward scroll', async () => {
+    const target = document.createElement('div');
+    document.body.append(target);
+    const children = createRawSnippet(() => ({ render: () => '<h1>Memos</h1>' }));
+    const component = mount(AppShell, {
+      props: {
+        children,
+        current: 'notes',
+        onDismissNotice: vi.fn(),
+        onLogout: vi.fn(),
+        onNavigate: vi.fn(),
+        session,
+      },
+      target,
+    });
+
+    try {
+      await tick();
+      const scroller = target.querySelector<HTMLElement>('.workspace-column')!;
+      const topbar = target.querySelector('.compact-topbar')!;
+
+      scroller.scrollTop = 80;
+      scroller.dispatchEvent(new Event('scroll'));
+      await tick();
+      expect(topbar.classList).toContain('topbar-hidden');
+
+      scroller.scrollTop = 32;
+      scroller.dispatchEvent(new Event('scroll'));
+      await tick();
+      expect(topbar.classList).not.toContain('topbar-hidden');
     } finally {
       await unmount(component);
     }

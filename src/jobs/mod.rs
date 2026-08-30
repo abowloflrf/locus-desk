@@ -21,6 +21,8 @@ const IDLE_POLL_INTERVAL: Duration = Duration::from_millis(750);
 const ERROR_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const MAX_AUTHOR_CHARACTERS: usize = 500;
 const MAX_EXCERPT_BYTES: usize = 65_536;
+const SHRINK_REVIEW_MINIMUM_SAVED_BYTES: i64 = 1_024;
+const SHRINK_REVIEW_PERCENT: i64 = 60;
 
 #[derive(Debug, FromRow)]
 struct ClaimedJob {
@@ -229,6 +231,47 @@ async fn complete_claimed_job(
         return Ok(());
     }
 
+    let current = sqlx::query_as::<_, (i64, i64, i64)>(
+        r#"
+        SELECT li.id, version.version_number, version.text_byte_len
+        FROM library_items li
+        JOIN library_content_versions version
+          ON version.library_item_id = li.id
+         AND version.workspace_id = li.workspace_id
+         AND version.status = 'CURRENT'
+        WHERE li.object_id = ? AND li.workspace_id = ?
+        "#,
+    )
+    .bind(job.object_id)
+    .bind(job.workspace_id)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    let library_item_id = match current {
+        Some((id, _, _)) => id,
+        None => sqlx::query_scalar::<_, i64>(
+            "SELECT id FROM library_items WHERE object_id = ? AND workspace_id = ?",
+        )
+        .bind(job.object_id)
+        .bind(job.workspace_id)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or_else(|| AppError::not_found("Library item"))?,
+    };
+    let next_version = sqlx::query_scalar::<_, i64>(
+        "SELECT COALESCE(MAX(version_number), 0) + 1 FROM library_content_versions WHERE library_item_id = ? AND workspace_id = ?",
+    )
+    .bind(library_item_id)
+    .bind(job.workspace_id)
+    .fetch_one(&mut *transaction)
+    .await?;
+    sqlx::query(
+        "DELETE FROM library_content_versions WHERE library_item_id = ? AND workspace_id = ? AND status = 'CANDIDATE'",
+    )
+    .bind(library_item_id)
+    .bind(job.workspace_id)
+    .execute(&mut *transaction)
+    .await?;
+
     let source_blob = store_blob(
         &mut transaction,
         job.workspace_id,
@@ -253,30 +296,6 @@ async fn complete_claimed_job(
         now,
     )
     .await?;
-    link_blob(
-        &mut transaction,
-        job.workspace_id,
-        job.object_id,
-        source_blob,
-        "SOURCE_HTML",
-    )
-    .await?;
-    link_blob(
-        &mut transaction,
-        job.workspace_id,
-        job.object_id,
-        reader_html_blob,
-        "READER_HTML",
-    )
-    .await?;
-    link_blob(
-        &mut transaction,
-        job.workspace_id,
-        job.object_id,
-        reader_text_blob,
-        "READER_TEXT",
-    )
-    .await?;
 
     let canonical_url = choose_canonical_url(&mut transaction, job, &document).await?;
     let site_name = Url::parse(&document.final_url)
@@ -291,8 +310,100 @@ async fn complete_claimed_job(
             .collect::<String>()
     });
     let excerpt = truncate_utf8(document.excerpt.trim(), MAX_EXCERPT_BYTES);
-    let result = sqlx::query(
+    let text_byte_len = i64::try_from(document.plain_text.len()).map_err(|_| {
+        AppError::Internal("Library reader text length cannot be represented".to_owned())
+    })?;
+    let requires_review = current.is_some_and(|(_, _, saved_len)| {
+        saved_len >= SHRINK_REVIEW_MINIMUM_SAVED_BYTES
+            && text_byte_len.saturating_mul(100) < saved_len.saturating_mul(SHRINK_REVIEW_PERCENT)
+    });
+    let version_status = if requires_review {
+        "CANDIDATE"
+    } else {
+        "CURRENT"
+    };
+    if !requires_review {
+        sqlx::query(
+            "UPDATE library_content_versions SET status = 'HISTORICAL' WHERE library_item_id = ? AND workspace_id = ? AND status = 'CURRENT'",
+        )
+        .bind(library_item_id)
+        .bind(job.workspace_id)
+        .execute(&mut *transaction)
+        .await?;
+    }
+    sqlx::query(
         r#"
+        INSERT INTO library_content_versions (
+          uid, library_item_id, workspace_id, version_number, status,
+          source_blob_id, reader_html_blob_id, reader_text_blob_id,
+          content_hash, text_byte_len, canonical_url, title, site_name, author,
+          published_at, excerpt, fetched_at, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+    )
+    .bind(Ulid::generate().to_string())
+    .bind(library_item_id)
+    .bind(job.workspace_id)
+    .bind(next_version)
+    .bind(version_status)
+    .bind(source_blob)
+    .bind(reader_html_blob)
+    .bind(reader_text_blob)
+    .bind(&document.content_hash)
+    .bind(text_byte_len)
+    .bind(canonical_url.as_deref())
+    .bind(title)
+    .bind(site_name.as_deref())
+    .bind(author.as_deref())
+    .bind(document.published_at)
+    .bind(excerpt)
+    .bind(now)
+    .bind(now)
+    .execute(&mut *transaction)
+    .await?;
+
+    let result = if requires_review {
+        sqlx::query(
+            r#"
+            UPDATE library_items
+            SET processing_status = 'READY', last_error = NULL,
+                refresh_status = 'REVIEW',
+                refresh_error = 'The refreshed article is much shorter than the saved version. Review it before replacing the saved content.'
+            WHERE object_id = ? AND workspace_id = ?
+            "#,
+        )
+        .bind(job.object_id)
+        .bind(job.workspace_id)
+        .execute(&mut *transaction)
+        .await?
+    } else {
+        link_blob(
+            &mut transaction,
+            job.workspace_id,
+            job.object_id,
+            source_blob,
+            "SOURCE_HTML",
+        )
+        .await?;
+        link_blob(
+            &mut transaction,
+            job.workspace_id,
+            job.object_id,
+            reader_html_blob,
+            "READER_HTML",
+        )
+        .await?;
+        link_blob(
+            &mut transaction,
+            job.workspace_id,
+            job.object_id,
+            reader_text_blob,
+            "READER_TEXT",
+        )
+        .await?;
+        sqlx::query(
+            r#"
         UPDATE library_items
         SET
           canonical_url = COALESCE(?, canonical_url),
@@ -304,25 +415,29 @@ async fn complete_claimed_job(
           item_kind = 'ARTICLE',
           processing_status = 'READY',
           last_error = NULL,
+          refresh_status = 'IDLE',
+          refresh_error = NULL,
           fetched_at = ?,
           content_hash = ?,
-          content_version = content_version + 1
+          content_version = ?
         WHERE object_id = ? AND workspace_id = ?
         "#,
-    )
-    .bind(canonical_url.as_deref())
-    .bind(title)
-    .bind(title)
-    .bind(site_name.as_deref())
-    .bind(author.as_deref())
-    .bind(document.published_at)
-    .bind(excerpt)
-    .bind(now)
-    .bind(&document.content_hash)
-    .bind(job.object_id)
-    .bind(job.workspace_id)
-    .execute(&mut *transaction)
-    .await?;
+        )
+        .bind(canonical_url.as_deref())
+        .bind(title)
+        .bind(title)
+        .bind(site_name.as_deref())
+        .bind(author.as_deref())
+        .bind(document.published_at)
+        .bind(excerpt)
+        .bind(now)
+        .bind(&document.content_hash)
+        .bind(next_version)
+        .bind(job.object_id)
+        .bind(job.workspace_id)
+        .execute(&mut *transaction)
+        .await?
+    };
     if result.rows_affected() != 1 {
         transaction.rollback().await?;
         return Ok(());
@@ -368,6 +483,7 @@ async fn fail_claimed_job(
     let final_attempt = job.attempt_count >= job.max_attempts;
     let next_status = if final_attempt { "DEAD" } else { "RETRY" };
     let processing_status = if final_attempt { "FAILED" } else { "PENDING" };
+    let refresh_status = if final_attempt { "FAILED" } else { "PENDING" };
     let run_after = now.saturating_add(retry_delay_ms(job.attempt_count));
     let mut transaction = pool.begin().await?;
     let result = sqlx::query(
@@ -396,11 +512,33 @@ async fn fail_claimed_job(
     sqlx::query(
         r#"
         UPDATE library_items
-        SET processing_status = ?, last_error = ?
+        SET
+          processing_status = CASE
+            WHEN EXISTS (
+              SELECT 1 FROM library_content_versions version
+              WHERE version.library_item_id = library_items.id
+                AND version.workspace_id = library_items.workspace_id
+                AND version.status = 'CURRENT'
+            ) THEN 'READY'
+            ELSE ?
+          END,
+          last_error = CASE
+            WHEN EXISTS (
+              SELECT 1 FROM library_content_versions version
+              WHERE version.library_item_id = library_items.id
+                AND version.workspace_id = library_items.workspace_id
+                AND version.status = 'CURRENT'
+            ) THEN NULL
+            ELSE ?
+          END,
+          refresh_status = ?,
+          refresh_error = ?
         WHERE object_id = ? AND workspace_id = ?
         "#,
     )
     .bind(processing_status)
+    .bind(message)
+    .bind(refresh_status)
     .bind(message)
     .bind(job.object_id)
     .bind(job.workspace_id)
@@ -547,6 +685,15 @@ pub(crate) async fn cleanup_orphan_blobs(
             SELECT 1 FROM object_blobs ob
             WHERE ob.blob_id = blobs.id AND ob.workspace_id = blobs.workspace_id
           )
+          AND NOT EXISTS (
+            SELECT 1 FROM library_content_versions version
+            WHERE version.workspace_id = blobs.workspace_id
+              AND (
+                version.source_blob_id = blobs.id
+                OR version.reader_html_blob_id = blobs.id
+                OR version.reader_text_blob_id = blobs.id
+              )
+          )
         "#,
     )
     .bind(workspace_id)
@@ -649,7 +796,8 @@ mod tests {
         config::Config,
         content::{ContentError, ExtractedDocument, PageFetcher},
         library::{
-            self, CreateLibraryItemRequest, LibraryProcessingStatus, ListLibraryItemsOptions,
+            self, CreateLibraryItemRequest, LibraryProcessingStatus, LibraryRefreshStatus,
+            ListLibraryItemsOptions,
         },
         state::AppState,
     };
@@ -729,6 +877,23 @@ mod tests {
         }
     }
 
+    fn long_document(marker: &str, repeat: usize) -> ExtractedDocument {
+        let plain_text = marker.repeat(repeat);
+        let safe_html = format!("<article><p>{plain_text}</p></article>");
+        ExtractedDocument {
+            final_url: "https://example.com/article".to_owned(),
+            canonical_url: Some("https://example.com/article".to_owned()),
+            title: Some("Fetched title".to_owned()),
+            author: Some("Reader Author".to_owned()),
+            published_at: Some(1_750_000_000_000),
+            excerpt: marker.to_owned(),
+            content_hash: sha256_hex(safe_html.as_bytes()),
+            safe_html,
+            plain_text,
+            source_html: format!("<html><body>{marker}</body></html>").into_bytes(),
+        }
+    }
+
     #[tokio::test]
     async fn worker_persists_reader_content_searches_it_and_cleans_blobs() {
         let (_directory, state, workspace_id, user_id) = fixture().await;
@@ -774,7 +939,8 @@ mod tests {
         let retried = library::retry_fetch(state.pool(), workspace_id, &uid, 3_000)
             .await
             .unwrap();
-        assert_eq!(retried.processing_status, LibraryProcessingStatus::Pending);
+        assert_eq!(retried.processing_status, LibraryProcessingStatus::Ready);
+        assert_eq!(retried.refresh_status, LibraryRefreshStatus::Pending);
         assert!(
             process_one(state.pool(), &StaticFetcher, "worker-a", 3_001)
                 .await
@@ -864,6 +1030,154 @@ mod tests {
                 .await
                 .unwrap(),
             "DEAD"
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_refresh_keeps_the_current_reader_version() {
+        let (_directory, state, workspace_id, user_id) = fixture().await;
+        let uid = create_item(&state, workspace_id, user_id).await;
+        assert!(
+            process_one(state.pool(), &StaticFetcher, "worker-a", 2_000)
+                .await
+                .unwrap()
+        );
+        let original = library::get_content(state.pool(), workspace_id, &uid)
+            .await
+            .unwrap();
+
+        library::retry_fetch(state.pool(), workspace_id, &uid, 3_000)
+            .await
+            .unwrap();
+        let mut job = claim_next(state.pool(), "worker-a", 3_001)
+            .await
+            .unwrap()
+            .unwrap();
+        job.max_attempts = job.attempt_count;
+        fail_claimed_job(
+            state.pool(),
+            &job,
+            "worker-a",
+            3_002,
+            "The source article is no longer available",
+        )
+        .await
+        .unwrap();
+
+        let item = library::get(state.pool(), workspace_id, &uid)
+            .await
+            .unwrap();
+        assert_eq!(item.processing_status, LibraryProcessingStatus::Ready);
+        assert_eq!(item.refresh_status, LibraryRefreshStatus::Failed);
+        assert!(item.last_error.is_none());
+        assert_eq!(
+            library::get_content(state.pool(), workspace_id, &uid)
+                .await
+                .unwrap()
+                .plain_text,
+            original.plain_text
+        );
+    }
+
+    #[tokio::test]
+    async fn shorter_refresh_waits_for_confirmation_before_replacing_content() {
+        let (_directory, state, workspace_id, user_id) = fixture().await;
+        let uid = create_item(&state, workspace_id, user_id).await;
+        let initial = claim_next(state.pool(), "worker-a", 2_000)
+            .await
+            .unwrap()
+            .unwrap();
+        complete_claimed_job(
+            state.pool(),
+            &initial,
+            "worker-a",
+            long_document("saved-version-", 100),
+            2_001,
+        )
+        .await
+        .unwrap();
+
+        library::retry_fetch(state.pool(), workspace_id, &uid, 3_000)
+            .await
+            .unwrap();
+        let refresh = claim_next(state.pool(), "worker-a", 3_001)
+            .await
+            .unwrap()
+            .unwrap();
+        complete_claimed_job(
+            state.pool(),
+            &refresh,
+            "worker-a",
+            long_document("short-version", 1),
+            3_002,
+        )
+        .await
+        .unwrap();
+
+        let review = library::get(state.pool(), workspace_id, &uid)
+            .await
+            .unwrap();
+        assert_eq!(review.refresh_status, LibraryRefreshStatus::Review);
+        assert_eq!(review.content_version, 1);
+        assert_eq!(review.candidate_content_version, Some(2));
+        assert!(
+            library::get_content(state.pool(), workspace_id, &uid)
+                .await
+                .unwrap()
+                .plain_text
+                .contains("saved-version-")
+        );
+
+        let discarded = library::discard_refresh_candidate(state.pool(), workspace_id, &uid, 3_003)
+            .await
+            .unwrap();
+        assert_eq!(discarded.refresh_status, LibraryRefreshStatus::Idle);
+        assert_eq!(discarded.content_version, 1);
+        assert!(
+            library::get_content(state.pool(), workspace_id, &uid)
+                .await
+                .unwrap()
+                .plain_text
+                .contains("saved-version-")
+        );
+
+        library::retry_fetch(state.pool(), workspace_id, &uid, 4_000)
+            .await
+            .unwrap();
+        let second_refresh = claim_next(state.pool(), "worker-a", 4_001)
+            .await
+            .unwrap()
+            .unwrap();
+        complete_claimed_job(
+            state.pool(),
+            &second_refresh,
+            "worker-a",
+            long_document("short-version", 1),
+            4_002,
+        )
+        .await
+        .unwrap();
+        let accepted = library::accept_refresh_candidate(state.pool(), workspace_id, &uid, 4_003)
+            .await
+            .unwrap();
+        assert_eq!(accepted.refresh_status, LibraryRefreshStatus::Idle);
+        assert_eq!(accepted.content_version, 2);
+        assert_eq!(accepted.candidate_content_version, None);
+        assert_eq!(
+            library::get_content(state.pool(), workspace_id, &uid)
+                .await
+                .unwrap()
+                .plain_text,
+            "short-version"
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM library_content_versions WHERE status = 'HISTORICAL'",
+            )
+            .fetch_one(state.pool())
+            .await
+            .unwrap(),
+            1
         );
     }
 

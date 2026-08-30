@@ -209,6 +209,7 @@ describe('NotesPage request ordering', () => {
         return button!;
       });
       tagFilter.click();
+      await vi.waitFor(() => expect(tagFilter.dataset.state).toBe('on'));
       await vi.waitFor(() => expect(listNotes).toHaveBeenCalledTimes(2));
       (await openNoteAction(target, 'first-work', 'Edit memo')).click();
       const editor = await vi.waitFor(() => {

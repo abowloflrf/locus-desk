@@ -250,7 +250,7 @@
     notice={authError}
     onDismissNotice={() => (authError = null)}
     onLogout={handleLogout}
-    onNavigate={(next) => navigate(next)}
+    onNavigate={(next, replace = false) => navigate(next, replace)}
     refreshToken={taskRefreshToken}
     {session}
   >

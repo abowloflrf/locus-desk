@@ -12,7 +12,8 @@ describe('Library content sanitization', () => {
       `
         <script>alert('xss')</script>
         <svg><script>alert('svg')</script></svg>
-        <img src="https://tracker.example/pixel" onerror="alert('image')">
+        <img src="/media/hero.jpg" alt="Article illustration" width="1200" height="800" onerror="alert('image')">
+        <img src="data:image/png;base64,tracking" alt="Embedded tracker">
         <p class="remote" id="override" style="position:fixed" onclick="alert('event')">
           Safe <strong>reading</strong>
         </p>
@@ -25,8 +26,16 @@ describe('Library content sanitization', () => {
 
     expect(template.content.textContent).toContain('Safe reading');
     expect(template.content.querySelector('strong')).not.toBeNull();
-    expect(template.content.querySelector('script, svg, img, form, input')).toBeNull();
+    expect(template.content.querySelector('script, svg, form, input')).toBeNull();
     expect(template.content.querySelector('p')?.attributes).toHaveLength(0);
+    const image = template.content.querySelector('img');
+    expect(image?.src).toBe('https://source.example/media/hero.jpg');
+    expect(image?.alt).toBe('Article illustration');
+    expect(image?.getAttribute('loading')).toBe('lazy');
+    expect(image?.getAttribute('decoding')).toBe('async');
+    expect(image?.getAttribute('referrerpolicy')).toBe('no-referrer');
+    expect(image?.hasAttribute('onerror')).toBe(false);
+    expect(template.content.querySelectorAll('img')).toHaveLength(1);
   });
 
   it('keeps only resolved http(s) links and isolates every outgoing navigation', () => {

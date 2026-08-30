@@ -123,4 +123,10 @@
     border: 0;
     border-top: 1px solid var(--border);
   }
+
+  @media (max-width: 767px) {
+    .markdown-content {
+      font-size: 16px;
+    }
+  }
 </style>

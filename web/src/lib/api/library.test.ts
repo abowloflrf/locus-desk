@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  acceptLibraryRefreshCandidate,
   createLibraryItem,
+  discardLibraryRefreshCandidate,
   getLibraryContent,
   listLibraryItems,
   retryLibraryItem,
@@ -84,6 +86,27 @@ describe('Library API', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/library/item%2Fwith%20space/content');
     expect(fetchMock.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ method: 'GET' }));
     expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/v1/library/item%2Fwith%20space/retry');
+    expect(fetchMock.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ method: 'POST' }));
+  });
+
+  it('accepts or discards a protected refresh candidate', async () => {
+    const item = libraryItem();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(item))
+      .mockResolvedValueOnce(jsonResponse(item));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await acceptLibraryRefreshCandidate('item/with space');
+    await discardLibraryRefreshCandidate('item/with space');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      '/api/v1/library/item%2Fwith%20space/refresh-candidate/accept',
+    );
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      '/api/v1/library/item%2Fwith%20space/refresh-candidate/discard',
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ method: 'POST' }));
     expect(fetchMock.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ method: 'POST' }));
   });
 });

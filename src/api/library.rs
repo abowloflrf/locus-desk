@@ -23,6 +23,14 @@ pub fn router() -> Router<AppState> {
         .route("/library/{uid}", get(get_one).patch(update).delete(delete))
         .route("/library/{uid}/content", get(get_content))
         .route("/library/{uid}/retry", post(retry_fetch))
+        .route(
+            "/library/{uid}/refresh-candidate/accept",
+            post(accept_refresh_candidate),
+        )
+        .route(
+            "/library/{uid}/refresh-candidate/discard",
+            post(discard_refresh_candidate),
+        )
 }
 
 #[derive(Deserialize)]
@@ -131,6 +139,38 @@ async fn retry_fetch(
             )
             .await?,
         ),
+    ))
+}
+
+async fn accept_refresh_candidate(
+    State(state): State<AppState>,
+    context: RequestContext,
+    Path(uid): Path<String>,
+) -> AppResult<Json<LibraryItem>> {
+    Ok(Json(
+        library::accept_refresh_candidate(
+            state.pool(),
+            context.workspace_id,
+            &uid,
+            state.clock().now().timestamp_millis(),
+        )
+        .await?,
+    ))
+}
+
+async fn discard_refresh_candidate(
+    State(state): State<AppState>,
+    context: RequestContext,
+    Path(uid): Path<String>,
+) -> AppResult<Json<LibraryItem>> {
+    Ok(Json(
+        library::discard_refresh_candidate(
+            state.pool(),
+            context.workspace_id,
+            &uid,
+            state.clock().now().timestamp_millis(),
+        )
+        .await?,
     ))
 }
 

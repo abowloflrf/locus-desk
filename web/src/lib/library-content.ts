@@ -16,6 +16,7 @@ const ALLOWED_TAGS = [
   'h5',
   'h6',
   'hr',
+  'img',
   'li',
   'ol',
   'p',
@@ -34,7 +35,18 @@ const ALLOWED_TAGS = [
   'ul',
 ] as const;
 
-const ALLOWED_ATTRIBUTES = ['colspan', 'datetime', 'href', 'rowspan', 'start', 'title'] as const;
+const ALLOWED_ATTRIBUTES = [
+  'alt',
+  'colspan',
+  'datetime',
+  'height',
+  'href',
+  'rowspan',
+  'src',
+  'start',
+  'title',
+  'width',
+] as const;
 
 export function sanitizeLibraryHtml(source: string, sourceUrl: string): string {
   const clean = DOMPurify.sanitize(source, {
@@ -42,7 +54,7 @@ export function sanitizeLibraryHtml(source: string, sourceUrl: string): string {
     ALLOWED_TAGS: [...ALLOWED_TAGS],
     ALLOW_ARIA_ATTR: false,
     ALLOW_DATA_ATTR: false,
-    FORBID_ATTR: ['class', 'id', 'name', 'src', 'srcset', 'style'],
+    FORBID_ATTR: ['class', 'id', 'name', 'srcset', 'style'],
     FORBID_TAGS: ['form', 'iframe', 'math', 'script', 'style', 'svg', 'template'],
   });
 
@@ -61,6 +73,19 @@ export function sanitizeLibraryHtml(source: string, sourceUrl: string): string {
     anchor.setAttribute('href', href);
     anchor.setAttribute('rel', 'noopener noreferrer');
     anchor.setAttribute('target', '_blank');
+  }
+
+  for (const image of template.content.querySelectorAll('img')) {
+    const src = normalizeHttpUrl(image.getAttribute('src'), sourceUrl);
+    if (!src) {
+      image.remove();
+      continue;
+    }
+
+    image.setAttribute('src', src);
+    image.setAttribute('loading', 'lazy');
+    image.setAttribute('decoding', 'async');
+    image.setAttribute('referrerpolicy', 'no-referrer');
   }
 
   return template.innerHTML.trim();

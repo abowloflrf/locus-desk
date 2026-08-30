@@ -3,6 +3,8 @@
   import BookOpenCheck from '@lucide/svelte/icons/book-open-check';
   import ExternalLink from '@lucide/svelte/icons/external-link';
   import Maximize2 from '@lucide/svelte/icons/maximize-2';
+  import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+  import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
   import X from '@lucide/svelte/icons/x';
   import { onMount, tick } from 'svelte';
 
@@ -10,9 +12,17 @@
   import { getLibraryContent } from '../api/library';
   import type { LibraryContentResponse, LibraryItem } from '../api/types';
   import { safeLibrarySourceUrl, sanitizeLibraryHtml } from '../library-content';
+  import {
+    DEFAULT_READER_PREFERENCES,
+    loadReaderPreferences,
+    saveReaderPreferences,
+    type ReaderPreferences,
+  } from '../reader-preferences';
   import { formatNoteTimestamp } from '../utils/date';
+  import ReaderPreferencesControl from './ReaderPreferences.svelte';
   import StatusMessage from './StatusMessage.svelte';
   import { Button } from './ui/button';
+  import * as Alert from './ui/alert';
   import * as Empty from './ui/empty';
   import { Spinner } from './ui/spinner';
 
@@ -21,6 +31,8 @@
     busy = false,
     item,
     onBack,
+    onAcceptRefresh,
+    onDiscardRefresh,
     onExpand,
     onRetry,
     onToggleRead,
@@ -32,6 +44,8 @@
     busy?: boolean;
     item: LibraryItem;
     onBack: () => void | Promise<void>;
+    onAcceptRefresh?: (item: LibraryItem) => void | Promise<void>;
+    onDiscardRefresh?: (item: LibraryItem) => void | Promise<void>;
     onExpand?: () => void | Promise<void>;
     onRetry?: (item: LibraryItem) => void | Promise<void>;
     onToggleRead: (item: LibraryItem) => void | Promise<void>;
@@ -44,6 +58,7 @@
   let loading = $state(false);
   let loadError = $state<string | null>(null);
   let loadStatus = $state('');
+  let readerPreferences = $state<ReaderPreferences>({ ...DEFAULT_READER_PREFERENCES });
   let readerHeading = $state<HTMLHeadingElement>();
   let contentController: AbortController | null = null;
   let contentRequestId = 0;
@@ -58,6 +73,7 @@
   const plainText = $derived(content?.plainText.trim() ?? '');
 
   onMount(() => {
+    readerPreferences = loadReaderPreferences(window.localStorage);
     if (mode === 'full') void tick().then(() => readerHeading?.focus());
 
     return () => {
@@ -116,6 +132,11 @@
     void onBack();
   }
 
+  function updateReaderPreferences(preferences: ReaderPreferences): void {
+    readerPreferences = preferences;
+    saveReaderPreferences(window.localStorage, preferences);
+  }
+
   function displayTitle(): string {
     return item.title.trim() || item.siteName || sourceHostname() || 'Untitled article';
   }
@@ -148,10 +169,16 @@
 <svelte:window onkeydown={handleWindowKeydown} />
 
 <section
-  aria-busy={loading || item.processingStatus === 'PENDING' || busy}
+  aria-busy={loading ||
+    item.processingStatus === 'PENDING' ||
+    item.refreshStatus === 'PENDING' ||
+    busy}
   aria-labelledby="library-reader-title"
   class:preview={mode === 'preview'}
   class="library-reader"
+  data-reader-font={readerPreferences.fontPreset}
+  data-reader-line-height={readerPreferences.lineHeight}
+  data-reader-size={readerPreferences.fontSize}
 >
   <header class="reader-toolbar">
     {#if mode === 'full'}
@@ -164,6 +191,10 @@
     {/if}
 
     <div class="reader-actions">
+      <ReaderPreferencesControl
+        onChange={updateReaderPreferences}
+        preferences={readerPreferences}
+      />
       {#if sourceUrl}
         <Button
           aria-label={`Open source: ${sourceHostname() || 'saved page'}`}
@@ -177,6 +208,22 @@
           <ExternalLink data-icon="inline-end" />
         </Button>
       {/if}
+      {#if onRetry && item.processingStatus === 'READY'}
+        <Button
+          aria-label="Refresh article"
+          disabled={busy || item.refreshStatus === 'PENDING'}
+          onclick={() => void onRetry(item)}
+          title="Refresh article"
+          variant="ghost"
+        >
+          {#if busy || item.refreshStatus === 'PENDING'}<Spinner
+              data-icon="inline-start"
+            />{:else}<RefreshCw data-icon="inline-start" />{/if}
+          <span class="reader-action-label"
+            >{item.refreshStatus === 'PENDING' ? 'Refreshing' : 'Refresh'}</span
+          >
+        </Button>
+      {/if}
       <Button
         aria-label={item.readAt ? 'Mark as unread' : 'Mark as read'}
         aria-pressed={Boolean(item.readAt)}
@@ -187,7 +234,7 @@
         <BookOpenCheck data-icon="inline-start" />
         <span class="reader-action-label">{item.readAt ? 'Read' : 'Mark read'}</span>
       </Button>
-      {#if mode === 'preview' && onExpand}
+      {#if mode === 'preview' && onExpand && item.processingStatus === 'READY' && item.contentAvailable}
         <Button
           aria-label="Open full screen"
           data-library-expand={item.uid}
@@ -228,6 +275,48 @@
     </header>
 
     {#if operationError}<StatusMessage tone="error">{operationError}</StatusMessage>{/if}
+    {#if item.refreshStatus === 'PENDING' && item.contentAvailable}
+      <Alert.Root>
+        <Spinner />
+        <Alert.Title>Refreshing saved article</Alert.Title>
+        <Alert.Description
+          >The current saved version remains available while this runs.</Alert.Description
+        >
+      </Alert.Root>
+    {:else if item.refreshStatus === 'FAILED' && item.contentAvailable}
+      <Alert.Root variant="destructive">
+        <TriangleAlert />
+        <Alert.Title>Refresh failed</Alert.Title>
+        <Alert.Description>
+          {item.refreshError || 'The source could not be refreshed. The saved version was kept.'}
+        </Alert.Description>
+      </Alert.Root>
+    {:else if item.refreshStatus === 'REVIEW' && item.contentAvailable}
+      <Alert.Root>
+        <TriangleAlert />
+        <Alert.Title>Shorter refresh needs review</Alert.Title>
+        <Alert.Description>
+          The refreshed text is much shorter than the saved version. The saved version is still
+          displayed.
+        </Alert.Description>
+        {#if onAcceptRefresh && onDiscardRefresh}
+          <div class="refresh-review-actions">
+            <Button
+              disabled={busy}
+              onclick={() => void onDiscardRefresh(item)}
+              size="sm"
+              variant="secondary">Keep saved version</Button
+            >
+            <Button
+              disabled={busy}
+              onclick={() => void onAcceptRefresh(item)}
+              size="sm"
+              variant="outline">Use refreshed version</Button
+            >
+          </div>
+        {/if}
+      </Alert.Root>
+    {/if}
     <div aria-atomic="true" aria-live="polite" class="sr-only" role="status">
       {actionStatus ?? ''}
     </div>
@@ -253,6 +342,15 @@
         {#if onRetry}
           <Button disabled={busy} onclick={() => void onRetry(item)} variant="secondary">
             Retry
+          </Button>
+        {/if}
+      </div>
+    {:else if item.processingStatus === 'NOT_FETCHED'}
+      <div class="reader-state">
+        <p>Article not prepared.</p>
+        {#if onRetry}
+          <Button disabled={busy} onclick={() => void onRetry(item)} variant="secondary">
+            Prepare article
           </Button>
         {/if}
       </div>
@@ -287,10 +385,44 @@
 
 <style>
   .library-reader {
+    --reader-font-sans: var(--font-sans);
+    --reader-font-mono: var(--font-mono);
+    --reader-font-size: 18px;
+    --reader-line-height: 1.82;
     width: 100%;
     min-height: 100%;
     padding: 24px 32px 88px;
     animation: reader-enter 180ms ease both;
+  }
+
+  .library-reader[data-reader-font='atkinson'] {
+    --reader-font-sans:
+      'Atkinson Hyperlegible Next Variable', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei',
+      sans-serif;
+    --reader-font-mono: 'Atkinson Hyperlegible Mono Variable', ui-monospace, monospace;
+  }
+
+  .library-reader[data-reader-font='system'] {
+    --reader-font-sans:
+      ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC',
+      'PingFang SC', 'Microsoft YaHei', sans-serif;
+    --reader-font-mono: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  }
+
+  .library-reader[data-reader-size='small'] {
+    --reader-font-size: 16px;
+  }
+
+  .library-reader[data-reader-size='large'] {
+    --reader-font-size: 20px;
+  }
+
+  .library-reader[data-reader-line-height='compact'] {
+    --reader-line-height: 1.62;
+  }
+
+  .library-reader[data-reader-line-height='spacious'] {
+    --reader-line-height: 2;
   }
 
   .reader-toolbar {
@@ -301,6 +433,14 @@
     align-items: center;
     justify-content: space-between;
     margin: 0 auto 52px;
+  }
+
+  .refresh-review-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    grid-column: 2;
+    margin-top: 8px;
   }
 
   .reader-toolbar-label {
@@ -349,11 +489,6 @@
     font-size: 16px;
   }
 
-  .library-reader.preview .reader-content {
-    font-size: 16px;
-    line-height: 1.76;
-  }
-
   .reader-heading {
     padding-bottom: 34px;
   }
@@ -369,7 +504,7 @@
 
   .reader-heading h1 {
     margin: 0;
-    font-family: var(--font-sans);
+    font-family: var(--reader-font-sans);
     font-size: clamp(32px, 4vw, 46px);
     font-weight: 650;
     line-height: 1.14;
@@ -385,7 +520,7 @@
     max-width: 660px;
     margin: 20px 0 0;
     color: var(--muted-foreground);
-    font-family: var(--font-sans);
+    font-family: var(--reader-font-sans);
     font-size: 18px;
     line-height: 1.65;
   }
@@ -396,7 +531,7 @@
     gap: 5px 16px;
     margin: 18px 0 0;
     color: var(--muted-foreground);
-    font-family: var(--font-mono);
+    font-family: var(--reader-font-mono);
     font-size: 10px;
   }
 
@@ -422,10 +557,13 @@
 
   .reader-content {
     color: var(--foreground);
-    font-family: var(--font-sans);
-    font-size: 18px;
-    line-height: 1.82;
+    font-family: var(--reader-font-sans);
+    font-size: var(--reader-font-size);
+    line-height: var(--reader-line-height);
     overflow-wrap: anywhere;
+    transition:
+      font-size 160ms ease,
+      line-height 160ms ease;
   }
 
   .reader-plain-text {
@@ -449,7 +587,7 @@
   .reader-content :global(h5),
   .reader-content :global(h6) {
     margin: 1.8em 0 0.65em;
-    font-family: var(--font-sans);
+    font-family: var(--reader-font-sans);
     font-weight: 680;
     line-height: 1.3;
     letter-spacing: -0.018em;
@@ -487,7 +625,7 @@
     overflow: auto;
     background: var(--muted);
     border-radius: var(--radius-md);
-    font-family: var(--font-mono);
+    font-family: var(--reader-font-mono);
     font-size: 13px;
     line-height: 1.65;
   }
@@ -496,7 +634,7 @@
     padding: 2px 4px;
     background: var(--muted);
     border-radius: 4px;
-    font-family: var(--font-mono);
+    font-family: var(--reader-font-mono);
     font-size: 0.82em;
   }
 
@@ -506,7 +644,7 @@
     max-width: 100%;
     overflow-x: auto;
     border-collapse: collapse;
-    font-family: var(--font-sans);
+    font-family: var(--reader-font-sans);
     font-size: 13px;
     line-height: 1.55;
   }
@@ -528,8 +666,17 @@
 
   .reader-content :global(figcaption) {
     color: var(--muted-foreground);
-    font-family: var(--font-sans);
+    font-family: var(--reader-font-sans);
     font-size: 12px;
+  }
+
+  .reader-content :global(img) {
+    display: block;
+    width: auto;
+    max-width: 100%;
+    height: auto;
+    margin: 0 auto 1.45em;
+    border-radius: var(--radius-md);
   }
 
   @keyframes reader-enter {
@@ -573,11 +720,6 @@
 
     .reader-excerpt {
       font-size: 17px;
-    }
-
-    .reader-content {
-      font-size: 17px;
-      line-height: 1.78;
     }
 
     .reader-content :global(pre) {

@@ -121,6 +121,10 @@
     void loadNotesPage(true);
   }
 
+  function handleTagFilterChange(): void {
+    void loadNotesPage(true);
+  }
+
   async function handleCreate(content: string): Promise<Note> {
     invalidateListRequest();
     operationError = null;
@@ -323,18 +327,25 @@
   {#if tags.length > 0}
     <ToggleGroup.Root
       aria-label="Filter by tag"
+      bind:value={selectedTag}
       class="tag-filter mb-[17px] max-w-full flex-wrap pb-1"
+      onValueChange={handleTagFilterChange}
       size="xs"
       spacing={1}
       type="single"
-      value={selectedTag}
       variant="outline"
     >
-      <ToggleGroup.Item onclick={() => selectTag('')} value="">
+      <ToggleGroup.Item
+        class="data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:font-semibold data-[state=on]:text-primary-foreground data-[state=on]:shadow-none"
+        value=""
+      >
         <span class="font-mono text-[11px] leading-none">All</span>
       </ToggleGroup.Item>
       {#each tags as tag}
-        <ToggleGroup.Item onclick={() => selectTag(tag)} value={tag}>
+        <ToggleGroup.Item
+          class="data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:font-semibold data-[state=on]:text-primary-foreground data-[state=on]:shadow-none"
+          value={tag}
+        >
           <span class="font-mono text-[11px] leading-none">#{tag}</span>
         </ToggleGroup.Item>
       {/each}
@@ -445,6 +456,39 @@
     .notes-header :global(.search-field) {
       width: 100%;
       max-width: none;
+    }
+
+    :global(.tag-filter [data-slot='toggle-group-item']) {
+      position: relative;
+      isolation: isolate;
+      height: 44px;
+      min-width: 44px;
+      padding-inline: 10px;
+      background: transparent;
+      border-color: transparent;
+      box-shadow: none;
+    }
+
+    :global(.tag-filter [data-slot='toggle-group-item']::before) {
+      position: absolute;
+      inset: 10px 0;
+      z-index: 0;
+      pointer-events: none;
+      background: var(--background);
+      border: 1px solid var(--input);
+      border-radius: var(--radius-md);
+      box-shadow: 0 1px 2px color-mix(in oklch, var(--foreground), transparent 94%);
+      content: '';
+    }
+
+    :global(.tag-filter [data-slot='toggle-group-item'] > span) {
+      position: relative;
+      z-index: 1;
+    }
+
+    :global(.tag-filter [data-slot='toggle-group-item'][data-state='on']::before) {
+      background: var(--primary);
+      border-color: var(--primary);
     }
   }
 </style>
