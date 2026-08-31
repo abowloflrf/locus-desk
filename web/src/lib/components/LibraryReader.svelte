@@ -59,10 +59,18 @@
   let loadError = $state<string | null>(null);
   let loadStatus = $state('');
   let readerPreferences = $state<ReaderPreferences>({ ...DEFAULT_READER_PREFERENCES });
+  let readerRoot = $state<HTMLElement>();
   let readerHeading = $state<HTMLHeadingElement>();
+  let readerToolbar = $state<HTMLElement>();
+  let toolbarHidden = $state(false);
   let contentController: AbortController | null = null;
   let contentRequestId = 0;
   let requestedContentKey = '';
+  let readerScrollElement: HTMLElement | null = null;
+  let lastScrollTop = 0;
+  let scrollDelta = 0;
+  let keyboardInteraction = false;
+  let toolbarKeyboardFocus = false;
 
   const sourceUrl = $derived(
     safeLibrarySourceUrl(item.canonicalUrl ?? item.normalizedUrl ?? item.originalUrl),
@@ -75,8 +83,14 @@
   onMount(() => {
     readerPreferences = loadReaderPreferences(window.localStorage);
     if (mode === 'full') void tick().then(() => readerHeading?.focus());
+    readerScrollElement =
+      readerRoot?.closest<HTMLElement>('.library-detail, .workspace-column') ?? null;
+    const scrollTarget: EventTarget = readerScrollElement ?? window;
+    lastScrollTop = currentScrollTop();
+    scrollTarget.addEventListener('scroll', handleReaderScroll, { passive: true });
 
     return () => {
+      scrollTarget.removeEventListener('scroll', handleReaderScroll);
       contentRequestId += 1;
       contentController?.abort();
       contentController = null;
@@ -120,6 +134,11 @@
   }
 
   function handleWindowKeydown(event: KeyboardEvent): void {
+    keyboardInteraction = true;
+    if (readerToolbar?.contains(document.activeElement)) {
+      toolbarKeyboardFocus = true;
+      toolbarHidden = false;
+    }
     if (
       mode === 'preview' ||
       event.defaultPrevented ||
@@ -132,9 +151,50 @@
     void onBack();
   }
 
+  function handlePointerInteraction(): void {
+    keyboardInteraction = false;
+    toolbarKeyboardFocus = false;
+  }
+
+  function handleToolbarFocusIn(): void {
+    toolbarKeyboardFocus = keyboardInteraction;
+    toolbarHidden = false;
+  }
+
+  function handleToolbarFocusOut(event: FocusEvent): void {
+    if (!(event.relatedTarget instanceof Node) || !readerToolbar?.contains(event.relatedTarget)) {
+      toolbarKeyboardFocus = false;
+    }
+  }
+
   function updateReaderPreferences(preferences: ReaderPreferences): void {
     readerPreferences = preferences;
     saveReaderPreferences(window.localStorage, preferences);
+  }
+
+  function currentScrollTop(): number {
+    return Math.max(0, readerScrollElement?.scrollTop ?? window.scrollY);
+  }
+
+  function handleReaderScroll(): void {
+    const scrollTop = currentScrollTop();
+    const delta = scrollTop - lastScrollTop;
+    scrollDelta = delta > 0 ? Math.max(0, scrollDelta) + delta : Math.min(0, scrollDelta) + delta;
+
+    if (toolbarKeyboardFocus && readerToolbar?.contains(document.activeElement)) {
+      toolbarHidden = false;
+      scrollDelta = 0;
+    } else if (scrollTop <= 16) {
+      toolbarHidden = false;
+      scrollDelta = 0;
+    } else if (scrollTop > 72 && scrollDelta >= 16) {
+      toolbarHidden = true;
+      scrollDelta = 0;
+    } else if (scrollDelta <= -10) {
+      toolbarHidden = false;
+      scrollDelta = 0;
+    }
+    lastScrollTop = scrollTop;
   }
 
   function displayTitle(): string {
@@ -166,7 +226,11 @@
   }
 </script>
 
-<svelte:window onkeydown={handleWindowKeydown} />
+<svelte:window
+  onkeydown={handleWindowKeydown}
+  onpointerdown={handlePointerInteraction}
+  onwheel={handlePointerInteraction}
+/>
 
 <section
   aria-busy={loading ||
@@ -174,13 +238,21 @@
     item.refreshStatus === 'PENDING' ||
     busy}
   aria-labelledby="library-reader-title"
+  bind:this={readerRoot}
   class:preview={mode === 'preview'}
   class="library-reader"
   data-reader-font={readerPreferences.fontPreset}
   data-reader-line-height={readerPreferences.lineHeight}
   data-reader-size={readerPreferences.fontSize}
+  data-reader-width={readerPreferences.width}
 >
-  <header class="reader-toolbar">
+  <header
+    bind:this={readerToolbar}
+    class:toolbar-hidden={toolbarHidden}
+    class="reader-toolbar"
+    onfocusin={handleToolbarFocusIn}
+    onfocusout={handleToolbarFocusOut}
+  >
     {#if mode === 'full'}
       <Button onclick={() => void onBack()} variant="ghost">
         <ArrowLeft data-icon="inline-start" />
@@ -264,7 +336,12 @@
     <header class="reader-heading">
       <p class="reader-source">{item.siteName || sourceHostname() || 'Saved article'}</p>
       <h1 bind:this={readerHeading} id="library-reader-title" tabindex="-1">{displayTitle()}</h1>
-      {#if item.excerpt}<p class="reader-excerpt">{item.excerpt}</p>{/if}
+      {#if item.excerpt}
+        <aside aria-label="Article excerpt" class="reader-excerpt">
+          <p class="reader-excerpt-label">Article excerpt</p>
+          <p class="reader-excerpt-copy">{item.excerpt}</p>
+        </aside>
+      {/if}
       <p class="reader-byline">
         {#if item.author}<span>{item.author}</span>{/if}
         {#if publishedLabel()}<span>{publishedLabel()}</span>{/if}
@@ -389,6 +466,7 @@
     --reader-font-mono: var(--font-mono);
     --reader-font-size: 18px;
     --reader-line-height: 1.82;
+    --reader-column-width: 800px;
     width: 100%;
     min-height: 100%;
     padding: 24px 32px 88px;
@@ -425,7 +503,18 @@
     --reader-line-height: 2;
   }
 
+  .library-reader[data-reader-width='narrow'] {
+    --reader-column-width: 680px;
+  }
+
+  .library-reader[data-reader-width='wide'] {
+    --reader-column-width: 920px;
+  }
+
   .reader-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
     display: flex;
     width: min(100%, 1040px);
     min-height: 44px;
@@ -433,6 +522,17 @@
     align-items: center;
     justify-content: space-between;
     margin: 0 auto 52px;
+    background: var(--background);
+    transition:
+      opacity 160ms ease,
+      transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    will-change: transform;
+  }
+
+  .reader-toolbar.toolbar-hidden {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(calc(-100% - 4px));
   }
 
   .refresh-review-actions {
@@ -458,8 +558,9 @@
   }
 
   .reader-column {
-    width: min(100%, 720px);
+    width: min(100%, var(--reader-column-width));
     margin-inline: auto;
+    transition: width 180ms ease;
   }
 
   .library-reader.preview {
@@ -468,24 +569,18 @@
   }
 
   .library-reader.preview .reader-toolbar {
-    position: sticky;
     top: -3px;
-    z-index: 2;
     width: 100%;
     padding: 3px 0 14px;
     margin-bottom: 30px;
     background: var(--background);
   }
 
-  .library-reader.preview .reader-column {
-    width: min(100%, 680px);
-  }
-
   .library-reader.preview .reader-heading h1 {
     font-size: clamp(26px, 3vw, 38px);
   }
 
-  .library-reader.preview .reader-excerpt {
+  .library-reader.preview .reader-excerpt-copy {
     font-size: 16px;
   }
 
@@ -518,10 +613,27 @@
 
   .reader-excerpt {
     max-width: 660px;
-    margin: 20px 0 0;
+    margin: 24px 0 0;
+    padding-inline-start: 16px;
+    border-inline-start: 2px solid var(--border);
+  }
+
+  .reader-excerpt-label {
+    margin: 0 0 8px;
+    color: var(--muted-foreground);
+    font-family: var(--reader-font-mono);
+    font-size: 10px;
+    font-weight: 650;
+    letter-spacing: 0.06em;
+    line-height: 1.4;
+    text-transform: uppercase;
+  }
+
+  .reader-excerpt-copy {
+    margin: 0;
     color: var(--muted-foreground);
     font-family: var(--reader-font-sans);
-    font-size: 18px;
+    font-size: 17px;
     line-height: 1.65;
   }
 
@@ -693,6 +805,7 @@
     }
 
     .reader-toolbar {
+      top: env(safe-area-inset-top);
       gap: 8px;
       margin-bottom: 34px;
     }
@@ -719,12 +832,32 @@
     }
 
     .reader-excerpt {
-      font-size: 17px;
+      padding-inline-start: 12px;
+    }
+
+    .reader-excerpt-copy {
+      font-size: 16px;
     }
 
     .reader-content :global(pre) {
       padding: 14px;
       font-size: 12px;
+    }
+  }
+
+  @media (min-width: 768px) and (max-width: 1199px) {
+    .library-reader:not(.preview) .reader-toolbar {
+      top: calc(56px + env(safe-area-inset-top));
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .library-reader,
+    .reader-toolbar,
+    .reader-column,
+    .reader-content {
+      transition-duration: 0.01ms;
+      animation-duration: 0.01ms;
     }
   }
 </style>

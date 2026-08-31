@@ -54,6 +54,22 @@ describe('LibraryReader', () => {
     }
   });
 
+  it('presents captured metadata as an article excerpt separate from the reader body', async () => {
+    const { component, target } = mountReader();
+
+    try {
+      const excerpt = target.querySelector<HTMLElement>('aside[aria-label="Article excerpt"]')!;
+      expect(excerpt.querySelector('.reader-excerpt-label')?.textContent).toBe('Article excerpt');
+      expect(excerpt.querySelector('.reader-excerpt-copy')?.textContent).toBe(
+        'A short, calm summary.',
+      );
+      await vi.waitFor(() => expect(target.querySelector('.reader-content')).not.toBeNull());
+      expect(target.querySelector('.reader-content')?.contains(excerpt)).toBe(false);
+    } finally {
+      await unmount(component);
+    }
+  });
+
   it('lets ready articles be refreshed so previously sanitized captures can be replaced', async () => {
     const onRetry = vi.fn();
     const { component, target } = mountReader({ onRetry });
@@ -120,7 +136,12 @@ describe('LibraryReader', () => {
   it('loads and persists browser reading preferences', async () => {
     window.localStorage.setItem(
       READER_PREFERENCES_STORAGE_KEY,
-      JSON.stringify({ fontPreset: 'atkinson', fontSize: 'large', lineHeight: 'spacious' }),
+      JSON.stringify({
+        fontPreset: 'atkinson',
+        fontSize: 'large',
+        lineHeight: 'spacious',
+        width: 'wide',
+      }),
     );
     const { component, target } = mountReader();
 
@@ -129,6 +150,7 @@ describe('LibraryReader', () => {
       await vi.waitFor(() => expect(reader.dataset.readerFont).toBe('atkinson'));
       expect(reader.dataset.readerSize).toBe('large');
       expect(reader.dataset.readerLineHeight).toBe('spacious');
+      expect(reader.dataset.readerWidth).toBe('wide');
 
       target.querySelector<HTMLButtonElement>('[aria-label="Reading preferences"]')!.click();
       await vi.waitFor(() =>
@@ -137,13 +159,47 @@ describe('LibraryReader', () => {
         ).not.toBeNull(),
       );
       document.querySelector<HTMLButtonElement>('[aria-label="16 pixel text"]')!.click();
+      document.querySelector<HTMLButtonElement>('[aria-label="Balanced article width"]')!.click();
 
       await vi.waitFor(() => expect(reader.dataset.readerSize).toBe('small'));
+      expect(reader.dataset.readerWidth).toBe('balanced');
       expect(JSON.parse(window.localStorage.getItem(READER_PREFERENCES_STORAGE_KEY)!)).toEqual({
         fontPreset: 'atkinson',
         fontSize: 'small',
         lineHeight: 'spacious',
+        width: 'balanced',
       });
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it('hides the sticky toolbar while scrolling down and reveals it while scrolling up', async () => {
+    const { component, target } = mountReader();
+
+    try {
+      const toolbar = target.querySelector<HTMLElement>('.reader-toolbar')!;
+      const preferences = target.querySelector<HTMLButtonElement>(
+        '[aria-label="Reading preferences"]',
+      )!;
+      await vi.waitFor(() => expect(document.activeElement?.id).toBe('library-reader-title'));
+
+      window.dispatchEvent(new Event('pointerdown'));
+      preferences.focus();
+      for (const scrollTop of [8, 16, 24, 32, 40, 48, 56, 64, 72, 80]) {
+        target.scrollTop = scrollTop;
+        target.dispatchEvent(new Event('scroll'));
+      }
+      await vi.waitFor(() => expect(toolbar.classList).toContain('toolbar-hidden'));
+
+      for (const scrollTop of [76, 72, 68]) {
+        target.scrollTop = scrollTop;
+        target.dispatchEvent(new Event('scroll'));
+      }
+      await vi.waitFor(() => expect(toolbar.classList).not.toContain('toolbar-hidden'));
+
+      expect(readerSource).toContain('position: sticky');
+      expect(readerSource).toContain('prefers-reduced-motion');
     } finally {
       await unmount(component);
     }
@@ -211,6 +267,7 @@ function mountReader(
   target: HTMLDivElement;
 } {
   const target = document.createElement('div');
+  target.className = 'workspace-column';
   document.body.append(target);
   const component = mount(LibraryReader, {
     props: {

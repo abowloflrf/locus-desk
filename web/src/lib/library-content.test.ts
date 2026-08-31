@@ -66,6 +66,62 @@ describe('Library content sanitization', () => {
     }
   });
 
+  it('preserves safe article semantics and layout attributes', () => {
+    const html = sanitizeLibraryHtml(
+      `
+        <article lang="zh-CN" dir="ltr">
+          <header><address>By Ada</address></header>
+          <section>
+            <aside><abbr title="Application programming interface">API</abbr></aside>
+            <dl><dt>Term</dt><dd>Definition</dd></dl>
+            <details open><summary>Notes</summary><mark>Important</mark></details>
+            <ol start="3"><li><kbd>Ctrl</kbd> <samp>Output</samp> <var>value</var></li></ol>
+            <blockquote cite="https://source.example/original"><q cite="https://source.example/quote">Quoted</q></blockquote>
+            <table>
+              <caption>Results</caption>
+              <colgroup><col></colgroup>
+              <tbody><tr><th colspan="2">Heading</th><td rowspan="2">Value</td></tr></tbody>
+            </table>
+            <p><small>Small</small> <s>Old</s> <u>Underlined</u> <ins>New</ins><wbr></p>
+          </section>
+        </article>
+      `,
+      'https://source.example/articles/one',
+    );
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    const article = template.content.querySelector('article')!;
+
+    expect(article.lang).toBe('zh-CN');
+    expect(article.dir).toBe('ltr');
+    for (const selector of [
+      'header address',
+      'section aside abbr',
+      'dl > dt',
+      'dl > dd',
+      'details[open] > summary',
+      'mark',
+      'kbd',
+      'samp',
+      'var',
+      'blockquote > q',
+      'caption',
+      'colgroup > col',
+      'small',
+      's',
+      'u',
+      'ins',
+      'wbr',
+    ]) {
+      expect(article.querySelector(selector), selector).not.toBeNull();
+    }
+    expect(article.querySelector('ol')?.start).toBe(3);
+    expect(article.querySelector('th')?.colSpan).toBe(2);
+    expect(article.querySelector('td')?.rowSpan).toBe(2);
+    expect(article.querySelector('blockquote')?.cite).toBe('https://source.example/original');
+    expect(article.querySelector('q')?.cite).toBe('https://source.example/quote');
+  });
+
   it('rejects non-web protocols and deceptive user-info URLs', () => {
     expect(safeLibrarySourceUrl('file:///tmp/article.html')).toBeNull();
     expect(safeLibrarySourceUrl('https://trusted.example@evil.example/read')).toBeNull();

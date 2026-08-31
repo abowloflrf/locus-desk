@@ -18,20 +18,29 @@ export const READER_LINE_HEIGHTS = [
   { label: 'Airy', value: 'spacious' },
 ] as const;
 
+export const READER_WIDTHS = [
+  { label: 'Narrow', value: 'narrow' },
+  { label: 'Balanced', value: 'balanced' },
+  { label: 'Wide', value: 'wide' },
+] as const;
+
 export type ReaderFontPreset = (typeof READER_FONT_PRESETS)[number]['value'];
 export type ReaderFontSize = (typeof READER_FONT_SIZES)[number]['value'];
 export type ReaderLineHeight = (typeof READER_LINE_HEIGHTS)[number]['value'];
+export type ReaderWidth = (typeof READER_WIDTHS)[number]['value'];
 
 export interface ReaderPreferences {
   fontPreset: ReaderFontPreset;
   fontSize: ReaderFontSize;
   lineHeight: ReaderLineHeight;
+  width: ReaderWidth;
 }
 
 export const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
   fontPreset: 'plex',
   fontSize: 'medium',
   lineHeight: 'comfortable',
+  width: 'balanced',
 };
 
 export function loadReaderPreferences(storage: Pick<Storage, 'getItem'>): ReaderPreferences {
@@ -49,6 +58,7 @@ export function loadReaderPreferences(storage: Pick<Storage, 'getItem'>): Reader
       lineHeight: isOption(READER_LINE_HEIGHTS, value.lineHeight)
         ? value.lineHeight
         : DEFAULT_READER_PREFERENCES.lineHeight,
+      width: isOption(READER_WIDTHS, value.width) ? value.width : DEFAULT_READER_PREFERENCES.width,
     };
   } catch {
     return { ...DEFAULT_READER_PREFERENCES };

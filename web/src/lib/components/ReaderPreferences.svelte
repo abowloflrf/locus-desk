@@ -7,10 +7,12 @@
     READER_FONT_PRESETS,
     READER_FONT_SIZES,
     READER_LINE_HEIGHTS,
+    READER_WIDTHS,
     type ReaderFontPreset,
     type ReaderFontSize,
     type ReaderLineHeight,
     type ReaderPreferences,
+    type ReaderWidth,
   } from '../reader-preferences';
   import { Button, buttonVariants } from './ui/button';
   import * as Field from './ui/field';
@@ -38,6 +40,11 @@
   function setLineHeight(value: string): void {
     if (!READER_LINE_HEIGHTS.some((option) => option.value === value)) return;
     update({ lineHeight: value as ReaderLineHeight });
+  }
+
+  function setWidth(value: string): void {
+    if (!READER_WIDTHS.some((option) => option.value === value)) return;
+    update({ width: value as ReaderWidth });
   }
 
   function update(change: Partial<ReaderPreferences>): void {
@@ -121,6 +128,29 @@
         >
           {#each READER_LINE_HEIGHTS as option}
             <ToggleGroup.Item class="flex-1" value={option.value}>{option.label}</ToggleGroup.Item>
+          {/each}
+        </ToggleGroup.Root>
+      </Field.Field>
+
+      <Field.Field>
+        <Field.Title id="reader-width-label">Article width</Field.Title>
+        <ToggleGroup.Root
+          aria-labelledby="reader-width-label"
+          class="w-full"
+          onValueChange={setWidth}
+          spacing={2}
+          type="single"
+          value={preferences.width}
+          variant="outline"
+        >
+          {#each READER_WIDTHS as option}
+            <ToggleGroup.Item
+              aria-label={`${option.label} article width`}
+              class="flex-1"
+              value={option.value}
+            >
+              {option.label}
+            </ToggleGroup.Item>
           {/each}
         </ToggleGroup.Root>
       </Field.Field>

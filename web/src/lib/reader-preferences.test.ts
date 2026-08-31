@@ -18,6 +18,7 @@ describe('reader preferences', () => {
       fontPreset: 'atkinson',
       fontSize: DEFAULT_READER_PREFERENCES.fontSize,
       lineHeight: 'spacious',
+      width: DEFAULT_READER_PREFERENCES.width,
     });
   });
 
@@ -32,6 +33,7 @@ describe('reader preferences', () => {
       fontPreset: 'system',
       fontSize: 'large',
       lineHeight: 'compact',
+      width: 'wide',
     } as const;
 
     expect(

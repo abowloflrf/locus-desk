@@ -49,7 +49,7 @@ pub fn extract_document(
     let excerpt = extract_description(&document)
         .map(|value| truncate_chars(&value, MAX_EXCERPT_CHARACTERS))
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| truncate_chars(&plain_text, MAX_EXCERPT_CHARACTERS));
+        .unwrap_or_default();
     let content_hash = format!("{:x}", Sha256::digest(safe_html.as_bytes()));
 
     Ok(ExtractedDocument {
@@ -207,6 +207,7 @@ fn sanitize_html(input: &str, base_url: &Url) -> String {
         "abbr",
         "address",
         "article",
+        "aside",
         "b",
         "blockquote",
         "br",
@@ -288,7 +289,10 @@ fn sanitize_html(input: &str, base_url: &Url) -> String {
                 .into_iter()
                 .collect(),
         ),
+        ("ol", ["start"].into_iter().collect()),
         ("q", ["cite"].into_iter().collect()),
+        ("td", ["colspan", "rowspan"].into_iter().collect()),
+        ("th", ["colspan", "rowspan"].into_iter().collect()),
         ("time", ["datetime"].into_iter().collect()),
     ]
     .into_iter()
@@ -301,7 +305,7 @@ fn sanitize_html(input: &str, base_url: &Url) -> String {
         .tags(tags)
         .clean_content_tags(clean_content_tags)
         .tag_attributes(tag_attributes)
-        .generic_attributes(HashSet::new())
+        .generic_attributes(["dir", "lang"].into_iter().collect())
         .url_schemes(url_schemes)
         .set_tag_attribute_value("img", "loading", "lazy")
         .set_tag_attribute_value("img", "decoding", "async")
@@ -579,6 +583,60 @@ mod tests {
     }
 
     #[test]
+    fn preserves_safe_article_semantics_and_layout_attributes() {
+        let base_url = Url::parse("https://example.com/articles/one").expect("valid URL");
+        let safe_html = sanitize_html(
+            r#"
+                <article lang="zh-CN" dir="ltr">
+                  <header><address>By Ada</address></header>
+                  <section>
+                    <aside><abbr title="Application programming interface">API</abbr></aside>
+                    <dl><dt>Term</dt><dd>Definition</dd></dl>
+                    <details open><summary>Notes</summary><mark>Important</mark></details>
+                    <ol start="3"><li><kbd>Ctrl</kbd> <samp>Output</samp> <var>value</var></li></ol>
+                    <blockquote cite="/sources/original"><q cite="/sources/quote">Quoted</q></blockquote>
+                    <table>
+                      <caption>Results</caption>
+                      <colgroup><col></colgroup>
+                      <tbody><tr><th colspan="2">Heading</th><td rowspan="2">Value</td></tr></tbody>
+                    </table>
+                    <p><small>Small</small> <s>Old</s> <u>Underlined</u> <ins>New</ins><wbr></p>
+                  </section>
+                </article>
+            "#,
+            &base_url,
+        );
+
+        for fragment in [
+            "<article lang=\"zh-CN\" dir=\"ltr\">",
+            "<header><address>By Ada</address></header>",
+            "<aside><abbr title=\"Application programming interface\">API</abbr></aside>",
+            "<dl><dt>Term</dt><dd>Definition</dd></dl>",
+            "<details open=\"\"><summary>Notes</summary><mark>Important</mark></details>",
+            "<ol start=\"3\">",
+            "<kbd>Ctrl</kbd>",
+            "<samp>Output</samp>",
+            "<var>value</var>",
+            "<caption>Results</caption>",
+            "<colgroup><col></colgroup>",
+            "<th colspan=\"2\">Heading</th>",
+            "<td rowspan=\"2\">Value</td>",
+            "<small>Small</small>",
+            "<s>Old</s>",
+            "<u>Underlined</u>",
+            "<ins>New</ins>",
+            "<wbr>",
+        ] {
+            assert!(
+                safe_html.contains(fragment),
+                "missing {fragment} in {safe_html}"
+            );
+        }
+        assert!(safe_html.contains("cite=\"/sources/original\""));
+        assert!(safe_html.contains("cite=\"/sources/quote\""));
+    }
+
+    #[test]
     fn accepts_only_safe_same_host_canonical_url() {
         let cases = [
             ("/canonical#section", Some("https://example.com/canonical")),
@@ -603,16 +661,16 @@ mod tests {
     }
 
     #[test]
-    fn derives_nonempty_excerpt_from_body() {
+    fn leaves_excerpt_empty_without_description_metadata() {
         let extracted = extract_document(
             "https://example.com/story",
-            "<article><p>The body becomes the fallback excerpt.</p></article>"
+            "<article><p>The article body is not an excerpt.</p></article>"
                 .as_bytes()
                 .to_vec(),
         )
         .expect("document extracts");
 
-        assert_eq!(extracted.excerpt, "The body becomes the fallback excerpt.");
+        assert!(extracted.excerpt.is_empty());
     }
 
     #[test]
