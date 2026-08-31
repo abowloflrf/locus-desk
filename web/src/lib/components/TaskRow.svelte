@@ -5,7 +5,7 @@
   import Flag from '@lucide/svelte/icons/flag';
   import Minus from '@lucide/svelte/icons/minus';
   import Trash2 from '@lucide/svelte/icons/trash-2';
-  import { tick } from 'svelte';
+  import { onMount, tick } from 'svelte';
 
   import { errorMessage } from '../api/client';
   import type { Task, TaskPriority, UpdateTaskRequest } from '../api/types';
@@ -17,6 +17,7 @@
   import * as Field from './ui/field';
   import * as InputGroup from './ui/input-group';
   import * as Popover from './ui/popover';
+  import * as Sheet from './ui/sheet';
   import { Spinner } from './ui/spinner';
   import * as ToggleGroup from './ui/toggle-group';
 
@@ -38,7 +39,8 @@
     onDelete: (task: Task) => void;
   } = $props();
 
-  let editing = $state(false);
+  let editorSurface = $state<'inline' | 'drawer' | null>(null);
+  let mobile = $state(false);
   let actionsOpen = $state(false);
   let title = $state('');
   let description = $state('');
@@ -52,12 +54,53 @@
   let titleInput = $state<HTMLInputElement | null>(null);
   let descriptionInput = $state<HTMLTextAreaElement | null>(null);
   let titleButton = $state<HTMLButtonElement | null>(null);
+  let drawerViewportStyle = $state<string | undefined>(undefined);
+  let editing = $derived(editorSurface !== null);
   let dateLabel = $derived(taskDateLabel(task, today));
   let descriptionPreview = $derived(
     mode === 'todo' ? task.description.split(/\r?\n/, 1)[0] : task.description,
   );
   let calendarValue = $derived(dueDate ? parseDate(dueDate) : undefined);
   let calendarPlaceholder = $derived(parseDate(dueDate || today));
+
+  onMount(() => {
+    const mobileQuery = window.matchMedia?.('(max-width: 767px)');
+    if (!mobileQuery) return;
+    const updateMobile = () => (mobile = mobileQuery.matches);
+    updateMobile();
+    mobileQuery.addEventListener('change', updateMobile);
+    return () => mobileQuery.removeEventListener('change', updateMobile);
+  });
+
+  $effect(() => {
+    if (editorSurface !== 'drawer') {
+      drawerViewportStyle = undefined;
+      return;
+    }
+    const visualViewport = window.visualViewport;
+    const updateDrawerViewport = () => {
+      if (!visualViewport) {
+        drawerViewportStyle = undefined;
+        return;
+      }
+      const bottomInset = Math.max(
+        0,
+        Math.round(window.innerHeight - visualViewport.height - visualViewport.offsetTop),
+      );
+      const maxHeight = Math.max(0, Math.floor(visualViewport.height * 0.9));
+      drawerViewportStyle = `bottom: ${bottomInset}px; max-height: min(42rem, ${maxHeight}px);`;
+    };
+    updateDrawerViewport();
+    visualViewport?.addEventListener('resize', updateDrawerViewport);
+    visualViewport?.addEventListener('scroll', updateDrawerViewport);
+    window.addEventListener('resize', updateDrawerViewport);
+
+    return () => {
+      visualViewport?.removeEventListener('resize', updateDrawerViewport);
+      visualViewport?.removeEventListener('scroll', updateDrawerViewport);
+      window.removeEventListener('resize', updateDrawerViewport);
+    };
+  });
 
   async function beginEdit(): Promise<void> {
     title = task.title;
@@ -66,15 +109,19 @@
     dueDate = task.dueDate ?? '';
     datePickerOpen = false;
     error = null;
-    editing = true;
+    actionsOpen = false;
+    const nextSurface = mobile ? 'drawer' : 'inline';
+    editorSurface = nextSurface;
     await tick();
-    titleInput?.focus();
-    titleInput?.select();
+    if (nextSurface === 'inline') {
+      titleInput?.focus();
+      titleInput?.select();
+    }
   }
 
   async function closeEditor(restoreFocus = true): Promise<void> {
     datePickerOpen = false;
-    editing = false;
+    editorSurface = null;
     error = null;
     await tick();
     if (restoreFocus) titleButton?.focus();
@@ -152,6 +199,7 @@
   }
 
   function handleEditorFocusout(event: FocusEvent & { currentTarget: HTMLFormElement }): void {
+    if (editorSurface === 'drawer') return;
     if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) {
       return;
     }
@@ -164,11 +212,31 @@
 
   function handleWindowPointerdown(event: PointerEvent): void {
     if (!editing || busy || saving || !(event.target instanceof Node)) return;
+    if (editorSurface === 'drawer') return;
     if (rowElement?.contains(event.target)) return;
     if (event.target instanceof Element && event.target.closest('[data-slot="popover-content"]')) {
       return;
     }
     void save(undefined, false);
+  }
+
+  function handleDrawerOpenChange(open: boolean): void {
+    if (open || editorSurface !== 'drawer') return;
+    void closeEditor();
+  }
+
+  function handleDrawerOpenAutoFocus(event: Event): void {
+    event.preventDefault();
+    const input = titleInput;
+    if (!input) return;
+    input.focus();
+    const end = input.value.length;
+    input.setSelectionRange(end, end);
+  }
+
+  function handleDrawerCloseAutoFocus(event: Event): void {
+    event.preventDefault();
+    titleButton?.focus();
   }
 </script>
 
@@ -177,17 +245,18 @@
 <article
   bind:this={rowElement}
   class:task-done={task.status === 'DONE'}
-  class:task-editing={editing}
-  class:task-row-compact={mode === 'todo' && !editing && !task.description}
+  class:task-editing={editorSurface === 'inline'}
+  class:task-row-compact={mode === 'todo' && editorSurface !== 'inline' && !task.description}
   class:task-row-full={mode === 'all'}
   class:task-row-todo={mode === 'todo'}
   class="task-row"
   data-focus-uid={task.uid}
   tabindex="-1"
 >
-  {#if editing}
+  {#snippet taskEditor(surface: 'inline' | 'drawer')}
     <form
       bind:this={editForm}
+      class:task-edit-form-drawer={surface === 'drawer'}
       class="task-edit-form"
       onfocusout={handleEditorFocusout}
       onsubmit={save}
@@ -198,7 +267,7 @@
           <InputGroup.Input
             aria-invalid={error ? 'true' : undefined}
             bind:ref={titleInput}
-            class="h-8 px-3"
+            class="task-edit-title h-8 px-3"
             disabled={busy || saving}
             emphasis="title"
             id={`task-title-${task.uid}`}
@@ -266,8 +335,9 @@
                 <Flag />
               </ToggleGroup.Item>
             </ToggleGroup.Root>
-            <div class="ml-auto flex items-center gap-1">
+            <div class="task-edit-actions ml-auto flex items-center gap-1">
               <InputGroup.Button
+                class="task-edit-action"
                 disabled={busy || saving}
                 onclick={() => void closeEditor()}
                 onkeydown={handleEditorKeydown}
@@ -275,6 +345,7 @@
                 variant="ghost">Cancel</InputGroup.Button
               >
               <InputGroup.Button
+                class="task-edit-action"
                 disabled={busy || saving || !title.trim()}
                 onkeydown={handleEditorKeydown}
                 size="xs"
@@ -290,6 +361,10 @@
         {#if error}<Field.Error aria-live="assertive">{error}</Field.Error>{/if}
       </Field.Field>
     </form>
+  {/snippet}
+
+  {#if editorSurface === 'inline'}
+    {@render taskEditor('inline')}
   {:else}
     <Checkbox
       aria-label={task.status === 'DONE' ? `Restore ${task.title}` : `Complete ${task.title}`}
@@ -317,8 +392,8 @@
           </span>
         {/if}
       </div>
-      {#if descriptionPreview}<p>{descriptionPreview}</p>{/if}
-      {#if mode === 'all' && dateLabel}
+      {#if task.status === 'TODO' && descriptionPreview}<p>{descriptionPreview}</p>{/if}
+      {#if task.status === 'TODO' && mode === 'all' && dateLabel}
         <span class:overdue={isTaskOverdue(task, today)} class="task-date">{dateLabel}</span>
       {/if}
     </div>
@@ -354,6 +429,25 @@
       </DropdownMenu.Root>
     </div>
   {/if}
+
+  <Sheet.Root open={editorSurface === 'drawer'} onOpenChange={handleDrawerOpenChange}>
+    <Sheet.Content
+      class="task-editor-sheet max-h-[min(90dvh,42rem)] overflow-y-auto rounded-t-xl p-0 pb-[max(1rem,env(safe-area-inset-bottom))]"
+      onCloseAutoFocus={handleDrawerCloseAutoFocus}
+      onOpenAutoFocus={handleDrawerOpenAutoFocus}
+      showCloseButton={false}
+      side="bottom"
+      style={drawerViewportStyle}
+    >
+      <Sheet.Header class="px-5 pt-5 pb-2 text-left">
+        <Sheet.Title>Edit task</Sheet.Title>
+        <Sheet.Description class="sr-only">
+          Update the task title, details, due date, and priority.
+        </Sheet.Description>
+      </Sheet.Header>
+      {@render taskEditor('drawer')}
+    </Sheet.Content>
+  </Sheet.Root>
 </article>
 
 <style>
@@ -476,10 +570,16 @@
     font-weight: 580;
   }
 
-  .task-done .task-title-line h3 {
+  .task-done {
     color: var(--muted-foreground);
-    text-decoration: line-through;
-    text-decoration-color: var(--border);
+  }
+
+  .task-done .task-title-line h3 {
+    font-weight: 500;
+  }
+
+  .task-done .row-actions {
+    color: var(--muted-foreground);
   }
 
   .row-actions {
@@ -506,6 +606,43 @@
     animation: editor-enter 180ms ease both;
   }
 
+  .task-edit-form-drawer {
+    grid-column: auto;
+    padding: 0 20px;
+    animation: none;
+  }
+
+  .task-edit-form-drawer :global(.task-edit-title) {
+    height: 44px;
+    padding-inline: 12px;
+    font-size: 16px;
+  }
+
+  .task-edit-form-drawer :global(.task-edit-details) {
+    min-height: 112px;
+    max-height: min(320px, 40dvh);
+    padding: 8px 12px;
+    font-size: 16px;
+    line-height: 24px;
+  }
+
+  .task-edit-form-drawer :global(.task-edit-toolbar) {
+    gap: 8px;
+    padding: 8px 10px 10px;
+  }
+
+  .task-edit-form-drawer .task-edit-actions {
+    width: 100%;
+    justify-content: flex-end;
+    padding-top: 2px;
+    margin-left: 0;
+  }
+
+  .task-edit-form-drawer :global(.task-edit-action) {
+    min-height: 44px;
+    padding-inline: 14px;
+  }
+
   :global(.task-edit-details) {
     field-sizing: content;
   }
@@ -522,6 +659,11 @@
 
   .task-row-full .task-title-line h3 {
     font-size: 14px;
+  }
+
+  .task-row-full.task-done {
+    align-items: center;
+    padding-block: 9px;
   }
 
   @keyframes editor-enter {
@@ -584,6 +726,10 @@
   @media (prefers-reduced-motion: reduce) {
     .task-edit-form {
       animation-duration: 0.01ms;
+    }
+
+    :global(.task-editor-sheet) {
+      transition-duration: 0.01ms;
     }
 
     .row-actions {

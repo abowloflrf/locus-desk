@@ -108,6 +108,9 @@ describe('AppShell modal boundaries', () => {
       expect(target.querySelector('.nav-item[title="Tasks"]')).not.toBeNull();
       expect(target.querySelector('.nav-item[title="Archive"]')).toBeNull();
       expect(sidebarSource).toContain('grid-template-columns: repeat(3, minmax(0, 1fr))');
+      expect(sidebarSource).toMatch(
+        /@media \(max-width: 767px\)[\s\S]*?\.sidebar \{[\s\S]*?z-index: 40;/,
+      );
     } finally {
       await unmount(component);
     }

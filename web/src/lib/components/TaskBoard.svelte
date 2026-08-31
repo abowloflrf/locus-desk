@@ -429,6 +429,11 @@
     background: var(--border);
   }
 
+  .completed-section > h2 {
+    color: var(--muted-foreground);
+    font-weight: 600;
+  }
+
   .task-list {
     display: grid;
   }

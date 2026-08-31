@@ -12,7 +12,7 @@
       size: {
         default:
           'h-9 min-w-9 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2',
-        xs: 'h-6 min-w-6 px-1.5 text-xs pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:px-2',
+        xs: 'relative h-6 min-w-6 px-1.5 text-xs pointer-coarse:min-h-7 pointer-coarse:min-w-11 pointer-coarse:px-2 pointer-coarse:before:absolute pointer-coarse:before:-inset-y-2 pointer-coarse:before:inset-x-0',
         sm: 'h-8 min-w-8 px-2.5 has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5',
         lg: 'h-10 min-w-10 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2',
       },

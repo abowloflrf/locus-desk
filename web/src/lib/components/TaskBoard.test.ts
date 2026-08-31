@@ -336,6 +336,39 @@ describe('TaskBoard focus and filtering', () => {
       await unmount(component);
     }
   });
+
+  it('renders completed tasks as compact title-only summaries', async () => {
+    vi.mocked(listTasks).mockResolvedValue({
+      items: [
+        {
+          ...task('done', 'Completed task', 'DONE'),
+          description: 'Details that no longer need attention',
+        },
+      ],
+    });
+    const target = document.createElement('div');
+    document.body.append(target);
+    const component = mount(TaskBoard, {
+      props: { mode: 'all', today: '2026-08-23' },
+      target,
+    });
+
+    try {
+      const completedRow = await vi.waitFor(() => {
+        const row = target.querySelector<HTMLElement>('[data-focus-uid="done"]');
+        expect(row).not.toBeNull();
+        return row!;
+      });
+
+      expect(completedRow.classList).toContain('task-done');
+      expect(completedRow.textContent).toContain('Completed task');
+      expect(completedRow.textContent).not.toContain('Details that no longer need attention');
+      expect(completedRow.textContent).not.toContain('Today');
+      expect(completedRow.querySelector('[aria-label="Restore Completed task"]')).not.toBeNull();
+    } finally {
+      await unmount(component);
+    }
+  });
 });
 
 function task(uid: string, title: string, status: TaskStatus = 'TODO'): Task {

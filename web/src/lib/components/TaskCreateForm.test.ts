@@ -62,7 +62,12 @@ describe('Todo task creation', () => {
 
       target.querySelector<HTMLButtonElement>('[aria-label="Set priority"]')!.click();
       await vi.waitFor(() => expect(document.body.querySelector('[role="menu"]')).not.toBeNull());
-      document.body.querySelectorAll<HTMLElement>('[role="menuitemradio"]')[1].click();
+      const priorityItem = document.body.querySelectorAll<HTMLElement>('[role="menuitemradio"]')[1];
+      target
+        .querySelector('form')!
+        .dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: priorityItem }));
+      expect(target.querySelector('.quick-actions')?.classList.contains('visible')).toBe(true);
+      priorityItem.click();
 
       titleInput.value = 'Send the report';
       titleInput.dispatchEvent(new Event('input', { bubbles: true }));

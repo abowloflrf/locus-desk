@@ -384,7 +384,7 @@
       right: 0;
       bottom: 0;
       left: 0;
-      z-index: 60;
+      z-index: 40;
       display: block;
       width: 100%;
       height: calc(
@@ -397,10 +397,6 @@
       overflow: visible;
       background: transparent;
       border: 0;
-    }
-
-    .sidebar.todo-open {
-      z-index: 40;
     }
 
     .sidebar::after {

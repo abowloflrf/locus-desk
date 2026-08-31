@@ -33,6 +33,7 @@
   let priorityOpen = $state(false);
   let moreButton = $state<HTMLButtonElement | null>(null);
   let formBusy = $derived(busy || submitting);
+  let quickActionsVisible = $derived(compactFocused || priorityOpen);
 
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
@@ -118,9 +119,9 @@
   </Field.Field>
 
   <div
-    aria-hidden={!compactFocused}
+    aria-hidden={!quickActionsVisible}
     class:wide={mode === 'all'}
-    class:visible={compactFocused}
+    class:visible={quickActionsVisible}
     class="quick-actions"
   >
     <label
@@ -133,13 +134,13 @@
         class="absolute inset-0 min-h-0 cursor-pointer p-0 opacity-0"
         aria-label="Due date"
         disabled={formBusy}
-        tabindex={compactFocused ? 0 : -1}
+        tabindex={quickActionsVisible ? 0 : -1}
         type="date"
         bind:value={dueDate}
       />
     </label>
     <DropdownMenu.Root bind:open={priorityOpen}>
-      <DropdownMenu.Trigger disabled={formBusy} tabindex={compactFocused ? 0 : -1}>
+      <DropdownMenu.Trigger disabled={formBusy} tabindex={quickActionsVisible ? 0 : -1}>
         {#snippet child({ props })}
           <Button
             {...props}
@@ -177,7 +178,7 @@
         disabled={formBusy}
         onclick={() => (detailsOpen = !detailsOpen)}
         size="icon-sm"
-        tabindex={compactFocused ? 0 : -1}
+        tabindex={quickActionsVisible ? 0 : -1}
         title="More task options"
         variant={detailsOpen || description || dueTime ? 'secondary' : 'ghost'}
       >
