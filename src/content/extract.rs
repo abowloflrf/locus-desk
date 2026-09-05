@@ -45,7 +45,7 @@ pub fn extract_document(
     let title = extract_title(&document).map(|value| truncate_chars(&value, MAX_TITLE_CHARACTERS));
     let author =
         extract_author(&document).map(|value| truncate_chars(&value, MAX_AUTHOR_CHARACTERS));
-    let published_at = extract_published_at(&document);
+    let published_at = extract_published_at(&document, &final_url);
     let excerpt = extract_description(&document)
         .map(|value| truncate_chars(&value, MAX_EXCERPT_CHARACTERS))
         .filter(|value| !value.is_empty())
@@ -152,7 +152,11 @@ fn sanitize_candidate(
         return Err(ContentError::ResponseTooLarge);
     }
 
-    let safe_html = sanitize_html(&candidate_html, base_url);
+    let normalized_html = normalize_reader_markup(&candidate_html, base_url);
+    if normalized_html.len() > MAX_READER_BYTES {
+        return Err(ContentError::ResponseTooLarge);
+    }
+    let safe_html = sanitize_html(&normalized_html, base_url);
     if safe_html.len() > MAX_READER_BYTES {
         return Err(ContentError::ResponseTooLarge);
     }
@@ -199,6 +203,118 @@ fn bounded_relative_url_growth<'a>(
         }
     }
     Some(growth)
+}
+
+fn normalize_reader_markup(input: &str, base_url: &Url) -> String {
+    let mut fragment = Html::parse_fragment(input);
+    let headings = Selector::parse("h1, h2, h3, h4, h5, h6").expect("valid heading selector");
+    let anchor_markers: Vec<_> = fragment
+        .select(&headings)
+        .filter(|heading| is_heading_anchor_marker(*heading, base_url))
+        .map(|heading| heading.id())
+        .collect();
+    for id in anchor_markers {
+        fragment
+            .tree
+            .get_mut(id)
+            .expect("existing heading node")
+            .detach();
+    }
+    let selector = Selector::parse("pre, code").expect("valid code selector");
+    let languages: Vec<_> = fragment
+        .select(&selector)
+        .filter_map(|element| {
+            let language = std::iter::once(element)
+                .chain(element.ancestors().take(3).filter_map(ElementRef::wrap))
+                .find_map(code_language)?;
+            Some((element.id(), language))
+        })
+        .collect();
+    for (id, language) in languages {
+        let mut node = fragment.tree.get_mut(id).expect("existing code node");
+        if let scraper::Node::Element(element) = node.value() {
+            let mut name = element.name.clone();
+            name.ns = Default::default();
+            name.prefix = None;
+            name.local = "data-language".into();
+            element
+                .attrs
+                .retain(|(key, _)| key.local.as_ref() != "data-language");
+            element.attrs.push((name, language.into()));
+        }
+    }
+    fragment.root_element().inner_html()
+}
+
+fn is_heading_anchor_marker(heading: ElementRef<'_>, base_url: &Url) -> bool {
+    if heading.text().collect::<String>().trim() != "#"
+        || heading
+            .ancestors()
+            .filter_map(ElementRef::wrap)
+            .any(|ancestor| matches!(ancestor.value().name(), "pre" | "code"))
+    {
+        return false;
+    }
+    let Some(anchor) = heading
+        .parent()
+        .and_then(ElementRef::wrap)
+        .filter(|parent| parent.value().name() == "a")
+    else {
+        return false;
+    };
+    let Some(mut target) = anchor
+        .attr("href")
+        .and_then(|href| base_url.join(href).ok())
+    else {
+        return false;
+    };
+    if target.fragment().is_none_or(str::is_empty) {
+        return false;
+    }
+    target.set_fragment(None);
+    if target != *base_url {
+        return false;
+    }
+    anchor
+        .children()
+        .filter_map(ElementRef::wrap)
+        .any(|sibling| {
+            let text = sibling.text().collect::<String>();
+            sibling.id() != heading.id()
+                && sibling.value().name() == heading.value().name()
+                && !text.trim().is_empty()
+                && text.trim() != "#"
+        })
+}
+
+fn code_language(element: ElementRef<'_>) -> Option<String> {
+    ["data-language", "data-lang"]
+        .into_iter()
+        .filter_map(|attribute| element.attr(attribute))
+        .chain(
+            element
+                .attr("class")
+                .into_iter()
+                .flat_map(str::split_ascii_whitespace)
+                .filter_map(|class| {
+                    class
+                        .strip_prefix("language-")
+                        .or_else(|| class.strip_prefix("lang-"))
+                        .or_else(|| class.strip_prefix("highlight-source-"))
+                }),
+        )
+        .find_map(normalize_language)
+}
+
+fn normalize_language(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()
+        && value.len() <= 32
+        && value.as_bytes()[0].is_ascii_alphanumeric()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"_+.#-".contains(&byte)))
+    .then(|| value.to_ascii_lowercase())
 }
 
 fn sanitize_html(input: &str, base_url: &Url) -> String {
@@ -279,6 +395,8 @@ fn sanitize_html(input: &str, base_url: &Url) -> String {
     let tag_attributes: HashMap<_, HashSet<_>> = [
         ("a", ["href", "title"].into_iter().collect()),
         ("abbr", ["title"].into_iter().collect()),
+        ("pre", ["data-language"].into_iter().collect()),
+        ("code", ["data-language"].into_iter().collect()),
         ("blockquote", ["cite"].into_iter().collect()),
         ("del", ["cite", "datetime"].into_iter().collect()),
         ("details", ["open"].into_iter().collect()),
@@ -311,6 +429,9 @@ fn sanitize_html(input: &str, base_url: &Url) -> String {
         .set_tag_attribute_value("img", "decoding", "async")
         .set_tag_attribute_value("img", "referrerpolicy", "no-referrer")
         .attribute_filter(move |_element, attribute, value| {
+            if attribute == "data-language" {
+                return normalize_language(value).map(Into::into);
+            }
             if matches!(attribute, "href" | "cite" | "src") {
                 let Ok(url) = attribute_base_url.join(value) else {
                     return None;
@@ -367,18 +488,132 @@ fn extract_description(document: &Html) -> Option<String> {
     )
 }
 
-fn extract_published_at(document: &Html) -> Option<i64> {
-    let value = first_attribute(
+fn extract_published_at(document: &Html, final_url: &Url) -> Option<i64> {
+    published_date_attribute(
         document,
         &[
-            ("meta[property=\"article:published_time\"]", "content"),
-            ("meta[itemprop=\"datePublished\"]", "content"),
-            ("meta[name=\"date\"]", "content"),
-            ("time[itemprop=\"datePublished\"]", "datetime"),
-            ("time[datetime]", "datetime"),
+            (
+                "meta[property=\"article:published_time\"], meta[name=\"article:published_time\"]",
+                "content",
+            ),
+            ("meta[itemprop~=\"datePublished\"]", "content"),
+            ("time[itemprop~=\"datePublished\"]", "datetime"),
         ],
-    )?;
-    parse_published_at(&value)
+    )
+    .or_else(|| published_date_json_ld(document, final_url))
+    .or_else(|| published_date_attribute(document, &[("time[pubdate]", "datetime")]))
+}
+
+fn published_date_attribute(document: &Html, selectors: &[(&str, &str)]) -> Option<i64> {
+    selectors.iter().find_map(|(selector, attribute)| {
+        let selector = Selector::parse(selector).expect("valid publication date selector");
+        document
+            .select(&selector)
+            .take(MAX_METADATA_TEXT_CANDIDATES_PER_SELECTOR)
+            .filter_map(|element| element.attr(attribute))
+            .find_map(|value| parse_published_at(value.trim()))
+    })
+}
+
+fn published_date_json_ld(document: &Html, final_url: &Url) -> Option<i64> {
+    let mut page_urls = vec![final_url.clone()];
+    if let Some(canonical) =
+        extract_canonical_url(document, final_url).and_then(|value| Url::parse(&value).ok())
+    {
+        page_urls.push(canonical);
+    }
+    let selector =
+        Selector::parse("script[type=\"application/ld+json\"]").expect("valid JSON-LD selector");
+    let mut remaining = 128;
+    let mut fallback = None;
+    for script in document.select(&selector).take(8) {
+        let text = script.text().collect::<String>();
+        if text.len() > 256 * 1024 {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        if let Some((matched, date)) = json_ld_article_date(&value, &page_urls, 0, &mut remaining) {
+            if matched {
+                return Some(date);
+            }
+            fallback = fallback.or(Some(date));
+        }
+    }
+    fallback
+}
+
+fn json_ld_article_date(
+    value: &serde_json::Value,
+    page_urls: &[Url],
+    depth: usize,
+    remaining: &mut usize,
+) -> Option<(bool, i64)> {
+    if depth > 8 || *remaining == 0 {
+        return None;
+    }
+    *remaining -= 1;
+    let is_article_type = |value: &serde_json::Value| {
+        value.as_str().is_some_and(|name| {
+            matches!(
+                name.rsplit('/').next(),
+                Some(
+                    "Article" | "BlogPosting" | "NewsArticle" | "TechArticle" | "ScholarlyArticle"
+                )
+            )
+        })
+    };
+    let article = value.get("@type").is_some_and(|kind| {
+        is_article_type(kind)
+            || kind
+                .as_array()
+                .is_some_and(|kinds| kinds.iter().any(is_article_type))
+    });
+    let mut best = None;
+    if article
+        && let Some(date) = value
+            .get("datePublished")
+            .and_then(|date| date.as_str())
+            .and_then(parse_published_at)
+    {
+        let identity = value.get("url").or_else(|| value.get("mainEntityOfPage"));
+        let url = identity.and_then(|url| {
+            url.as_str()
+                .or_else(|| url.get("@id").and_then(|id| id.as_str()))
+        });
+        let matched = url.is_some_and(|url| {
+            page_urls[0].join(url).ok().is_some_and(|mut candidate| {
+                candidate.set_fragment(None);
+                page_urls.contains(&candidate)
+            })
+        });
+        if matched {
+            return Some((true, date));
+        }
+        if identity.is_none() {
+            best = Some((false, date));
+        }
+    }
+    // Only traverse article containers, not embedded products, comments, or recommendations.
+    let children: Vec<_> = if let Some(values) = value.as_array() {
+        values.iter().take(*remaining).collect()
+    } else {
+        ["@graph", "mainEntity"]
+            .iter()
+            .filter_map(|key| value.get(*key))
+            .collect()
+    };
+    for child in children {
+        if let Some((matched, date)) = json_ld_article_date(child, page_urls, depth + 1, remaining)
+        {
+            if matched {
+                return Some((true, date));
+            }
+            best = best.or(Some((false, date)));
+        }
+    }
+    best
 }
 
 fn parse_published_at(value: &str) -> Option<i64> {
@@ -474,6 +709,88 @@ fn has_userinfo(url: &Url) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn removes_decorative_heading_markers_without_removing_meaningful_hashes() {
+        let source = br##"<article>
+          <a href="#map"><h2 id="map">Normal map</h2><h2 class="hash" data-pagefind-ignore arialabel="Anchor">#</h2></a>
+          <a href="https://example.com/article#lookup"><h3>Lookup</h3><h3>#</h3></a>
+          <h2>#</h2><h3>C#</h3>
+          <h2><a href="#symbol">#</a></h2>
+          <a href="https://other.example/article#symbol"><h2>Symbol</h2><h2>#</h2></a>
+          <pre><code><a href="#code"><h2>Code</h2><h2>#</h2></a></code></pre>
+        </article>"##.to_vec();
+        let extracted = extract_document("https://example.com/article", source).unwrap();
+        let html = Html::parse_fragment(&extracted.safe_html);
+        let selector = Selector::parse("h2, h3").unwrap();
+        let headings: Vec<_> = html
+            .select(&selector)
+            .map(|heading| heading.text().collect::<String>())
+            .collect();
+        assert_eq!(
+            headings,
+            [
+                "Normal map",
+                "Lookup",
+                "#",
+                "C#",
+                "#",
+                "Symbol",
+                "#",
+                "Code",
+                "#"
+            ]
+        );
+    }
+
+    #[test]
+    fn preserves_code_languages_without_source_styles_or_unsafe_attributes() {
+        let source = br#"<article>
+          <pre class="remote"><code class="language-Python token" onclick="bad()">print(&quot;hello&quot;)
+  pass</code></pre>
+          <pre data-lang="JS"><code>const x = 1;</code></pre>
+          <div class="highlight-source-rust"><pre>fn main() {}</pre></div>
+          <pre><code class="lang-c++">int x;</code></pre>
+          <pre data-language="bad language" style="color:red">unknown</pre>
+          <p data-language="python">Body</p>
+        </article>"#.to_vec();
+        let extracted = extract_document("https://example.com/code", source).unwrap();
+        let html = Html::parse_fragment(&extracted.safe_html);
+        let selector = Selector::parse("pre").unwrap();
+        let blocks: Vec<_> = html.select(&selector).collect();
+        assert_eq!(
+            blocks[0]
+                .select(&Selector::parse("code").unwrap())
+                .next()
+                .unwrap()
+                .attr("data-language"),
+            Some("python")
+        );
+        assert_eq!(
+            blocks[0].text().collect::<String>(),
+            "print(\"hello\")\n  pass"
+        );
+        assert_eq!(blocks[1].attr("data-language"), Some("js"));
+        assert_eq!(blocks[2].attr("data-language"), Some("rust"));
+        assert_eq!(
+            blocks[3]
+                .select(&Selector::parse("code").unwrap())
+                .next()
+                .unwrap()
+                .attr("data-language"),
+            Some("c++")
+        );
+        assert_eq!(blocks[4].attr("data-language"), None);
+        for forbidden in [
+            "class=",
+            "style=",
+            "onclick=",
+            "data-lang=",
+            "<p data-language",
+        ] {
+            assert!(!extracted.safe_html.contains(forbidden), "{forbidden}");
+        }
+    }
 
     #[test]
     fn extracts_chinese_article_and_metadata() {
@@ -749,6 +1066,77 @@ mod tests {
         let extracted = extract_document(
             "https://example.com/story",
             br#"<meta property="article:published_time" content="sometime soon"><article><p>Body</p></article>"#.to_vec(),
+        )
+        .expect("document extracts");
+
+        assert_eq!(extracted.published_at, None);
+    }
+
+    #[test]
+    fn reads_article_json_ld_instead_of_embedded_model_update_time() {
+        let extracted = extract_document(
+            "https://huggingface.co/blog/grpo-with-trl-ifstruct",
+            br#"<script type="application/ld+json">{
+              "@type": "Article",
+              "url": "https://huggingface.co/blog/grpo-with-trl-ifstruct",
+              "datePublished": "2026-09-03T00:00:00.742Z"
+            }</script>
+            <article><p>Fine-tuning a model.</p>
+              <div><span>Updated</span><time datetime="2026-08-05T17:01:13">A month ago</time></div>
+            </article>"#
+                .to_vec(),
+        )
+        .expect("document extracts");
+
+        assert_eq!(
+            extracted.published_at,
+            parse_published_at("2026-09-03T00:00:00.742Z")
+        );
+    }
+
+    #[test]
+    fn finds_current_article_in_json_ld_graph_despite_unrelated_or_invalid_dates() {
+        let document = Html::parse_document(
+            r#"
+            <link rel="canonical" href="https://example.com/story">
+            <meta property="article:published_time" content="invalid">
+            <script type="application/ld+json">invalid json</script>
+            <script type="application/ld+json">[{"@graph": [
+              {"@type":"Article","url":"https://example.com/other","datePublished":"2026-08-06"},
+              {"@type":"Product","datePublished":"2026-08-07"},
+              {"@type":"Article","datePublished":"2026-08-08"},
+              {"@type":"WebPage","mainEntity":{
+                "@type":["CreativeWork","https://schema.org/BlogPosting"],
+                "mainEntityOfPage":{"@id":"https://example.com/story"},
+                "datePublished":"2026-09-03"
+              }}
+            ]}]</script>
+        "#,
+        );
+        let url = Url::parse("https://example.com/story?ref=feed").unwrap();
+
+        assert_eq!(
+            extract_published_at(&document, &url),
+            parse_published_at("2026-09-03")
+        );
+    }
+
+    #[test]
+    fn leaves_publication_unknown_without_an_explicit_publication_date() {
+        let extracted = extract_document(
+            "https://example.com/story",
+            br#"<meta name="date" content="2026-08-06">
+            <script type="application/ld+json">{"@type":"Article",
+              "dateCreated":"2026-08-06","dateModified":"2026-08-07"
+            }</script>
+            <script type="application/ld+json">{"@type":"Article",
+              "url":"https://example.com/other","datePublished":"2026-08-08"
+            }</script>
+            <article><header><time datetime="2026-08-09">Updated</time></header>
+              <time datetime="2026-08-10">Event date</time>
+              <p>Article body.</p>
+            </article>"#
+                .to_vec(),
         )
         .expect("document extracts");
 

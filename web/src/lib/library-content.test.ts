@@ -1,12 +1,23 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { safeLibrarySourceUrl, sanitizeLibraryHtml } from './library-content';
+import { highlightLibraryHtml, safeLibrarySourceUrl, sanitizeLibraryHtml } from './library-content';
 
 afterEach(() => {
   document.body.replaceChildren();
 });
 
 describe('Library content sanitization', () => {
+  it('preserves meaningful hash headings, external links, and code when removing anchor decorations', () => {
+    const source =
+      '<h2>#</h2><h3>C#</h3><h2><a href="#symbol">#</a></h2><a href="https://other.example/article#symbol"><h2>Symbol</h2><h2>#</h2></a><pre><code><a href="#code"><h2>Code</h2><h2>#</h2></a></code></pre>';
+    const template = document.createElement('template');
+    template.innerHTML = sanitizeLibraryHtml(source, 'https://source.example/article');
+    expect(
+      [...template.content.querySelectorAll('h2, h3')].map((heading) => heading.textContent),
+    ).toEqual(['#', 'C#', '#', 'Symbol', '#']);
+    expect(template.content.querySelector('code')?.textContent).toBe('Code#');
+  });
+
   it('applies an explicit HTML allowlist and removes executable content', () => {
     const html = sanitizeLibraryHtml(
       `
@@ -128,4 +139,53 @@ describe('Library content sanitization', () => {
     expect(safeLibrarySourceUrl('https://reader:secret@example.com/read')).toBeNull();
     expect(safeLibrarySourceUrl('https://example.com/read')).toBe('https://example.com/read');
   });
+});
+
+it('preserves validated language labels and highlights aliases without changing code text', async () => {
+  const source =
+    '<p data-language="js">Body</p><pre><code data-language="JS" class="sidebar">const x = &quot;&lt;script&gt;&quot;;\n  x;</code></pre><pre data-language="bad language">plain</pre><pre data-language="unknown">untouched</pre><pre>unlabelled</pre>';
+  const template = document.createElement('template');
+  template.innerHTML = await highlightLibraryHtml(source, 'https://example.com');
+  const blocks = template.content.querySelectorAll('pre');
+  expect(blocks[0]?.getAttribute('data-language')).toBe('js');
+  expect(blocks[0]?.querySelector('span[class^="shiki-"]')).not.toBeNull();
+  expect(blocks[0]?.textContent).toBe('const x = "<script>";\n  x;');
+  expect(template.content.querySelector('script, .sidebar, p[data-language]')).toBeNull();
+  expect(blocks[1]?.hasAttribute('data-language')).toBe(false);
+  expect(blocks[2]?.innerHTML).toBe('untouched');
+  expect(blocks[3]?.innerHTML).toBe('unlabelled');
+});
+
+it('preserves structural code lines, blank lines, indentation and escaping through highlighting', async () => {
+  // Mirrors Mastra's Docusaurus output: token-line divs ending in br, without text newlines.
+  const source =
+    '<pre data-language="typescript"><code><div><span>const answer = 42;</span><br></div><div><span></span><br></div><div><span>  console.log(&quot;&lt;script&gt;&quot;, answer);</span><br></div></code></pre>';
+  const expected = 'const answer = 42;\n\n  console.log("<script>", answer);\n';
+  const sanitized = sanitizeLibraryHtml(source, 'https://example.com');
+  const template = document.createElement('template');
+  template.innerHTML = sanitized;
+  expect(template.content.querySelector('code')?.textContent).toBe(expected);
+  expect(sanitizeLibraryHtml(sanitized, 'https://example.com')).toBe(sanitized);
+  template.innerHTML = await highlightLibraryHtml(sanitized, 'https://example.com');
+  expect(template.content.querySelector('code')?.textContent).toBe(expected);
+  expect(template.content.querySelector('code span[class^="shiki-"]')).not.toBeNull();
+  expect(template.content.querySelector('script')).toBeNull();
+});
+
+it('preserves br-only and block-only lines without doubling existing newlines', async () => {
+  const cases = [
+    ['first<br><br>  last', 'first\n\n  last'],
+    ['<div>first</div><div></div><div>  last</div>', 'first\n\n  last\n'],
+    ['<div>first\n</div><div>  last\n</div>', 'first\n  last\n'],
+    ['<div>first</div>\n<div>  last</div>', 'first\n  last\n'],
+    ['first\n\n  last\n', 'first\n\n  last\n'],
+  ];
+  for (const [source, expected] of cases) {
+    const template = document.createElement('template');
+    template.innerHTML = await highlightLibraryHtml(
+      `<pre data-language="unknown"><code>${source}</code></pre>`,
+      'https://example.com',
+    );
+    expect(template.content.querySelector('code')?.textContent).toBe(expected);
+  }
 });

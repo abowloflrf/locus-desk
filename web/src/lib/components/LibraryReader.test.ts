@@ -1,4 +1,6 @@
-import { mount, unmount } from 'svelte';
+import { mount, tick, unmount } from 'svelte';
+import { fromStore, writable } from 'svelte/store';
+import { highlightLibraryHtml } from '../library-content';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getLibraryContent } from '../api/library';
@@ -11,7 +13,14 @@ vi.mock('../api/library', () => ({
   getLibraryContent: vi.fn(),
 }));
 
+vi.mock('../library-content', async (original) => {
+  const module = await original<typeof import('../library-content')>();
+  return { ...module, highlightLibraryHtml: vi.fn(module.highlightLibraryHtml) };
+});
+
 beforeEach(() => {
+  vi.mocked(highlightLibraryHtml).mockReset();
+  vi.mocked(highlightLibraryHtml).mockImplementation(async (source) => source);
   window.localStorage.clear();
   vi.mocked(getLibraryContent).mockResolvedValue({
     contentVersion: 3,
@@ -24,11 +33,240 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
   window.localStorage.clear();
   document.body.replaceChildren();
 });
 
 describe('LibraryReader', () => {
+  it.each([
+    ['2026-09-03T00:00:00.742Z', 'Sep 3, 2026'],
+    [null, 'Aug 24, 2026'],
+  ])('uses the publication date or capture creation date (%s)', async (publishedAt, label) => {
+    const { component, target } = mountReader({ item: libraryItem({ publishedAt }) });
+    try {
+      await vi.waitFor(() => expect(target.textContent).toContain(label));
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it.each(['preview', 'full'] as const)(
+    'navigates and tracks headings within the %s scroll container',
+    async (mode) => {
+      vi.stubGlobal(
+        'matchMedia',
+        vi.fn((query: string) => ({
+          matches: query === '(prefers-reduced-motion: reduce)',
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        })),
+      );
+      vi.mocked(getLibraryContent).mockResolvedValue({
+        contentVersion: 3,
+        fetchedAt: '2026-08-24T03:00:00.000Z',
+        plainText: 'Article sections',
+        safeHtml:
+          '<h2>First section</h2><p>Introduction</p><h3>Details</h3><p>Details text</p><h2>Last section</h2>',
+      });
+      const onBack = vi.fn();
+      const { component, target } = mountReader({ mode, onBack });
+      const scrollTo = vi.fn();
+      target.scrollTo = scrollTo;
+      Object.defineProperties(target, {
+        clientHeight: { configurable: true, value: 800 },
+        scrollHeight: { configurable: true, value: 2400 },
+      });
+      try {
+        await vi.waitFor(() =>
+          expect(target.querySelectorAll('.toc-markers > span')).toHaveLength(3),
+        );
+        expect(document.querySelector('.toc-list')).toBeNull();
+        const headings = [
+          ...target.querySelectorAll<HTMLElement>('.reader-content h2, .reader-content h3'),
+        ];
+        headings.forEach((heading, index) => {
+          vi.spyOn(heading, 'getBoundingClientRect').mockImplementation(
+            () =>
+              ({
+                top: 200 + index * 700 - target.scrollTop,
+              }) as DOMRect,
+          );
+        });
+        target.scrollTop = 800;
+        target.dispatchEvent(new Event('scroll'));
+        await vi.waitFor(() =>
+          expect(
+            target.querySelector('.toc-markers .current')?.getAttribute('data-heading-id'),
+          ).toBe(headings[1]!.id),
+        );
+
+        const trigger = target.querySelector<HTMLButtonElement>(
+          'button[aria-label="Table of contents"]',
+        )!;
+        const previousFocus = document.activeElement;
+        const pointer = (type: string, pointerType = 'mouse') =>
+          Object.assign(new Event(type, { bubbles: true }), {
+            pointerType,
+            clientX: 0,
+            clientY: 0,
+          });
+        trigger.dispatchEvent(pointer('pointerenter', 'touch'));
+        await tick();
+        expect(trigger.getAttribute('aria-expanded')).toBe('false');
+        trigger.dispatchEvent(pointer('pointerenter'));
+        await vi.waitFor(() => expect(document.querySelector('.toc-list a')).not.toBeNull());
+        expect(document.activeElement).toBe(previousFocus);
+        const ruler = [...target.querySelectorAll<HTMLElement>('.toc-markers > span')];
+        ruler.forEach((marker, index) => {
+          vi.spyOn(marker, 'getBoundingClientRect').mockReturnValue({
+            top: 100 + index * 8,
+            height: 2,
+          } as DOMRect);
+        });
+        const hoverPanel = document.querySelector<HTMLElement>('[data-slot="popover-content"]')!;
+        vi.spyOn(hoverPanel, 'getBoundingClientRect').mockReturnValue({
+          top: 100,
+          bottom: 300,
+          height: 200,
+        } as DOMRect);
+        const lastLink = hoverPanel.querySelectorAll<HTMLAnchorElement>('a')[2]!;
+        vi.spyOn(lastLink, 'getBoundingClientRect').mockReturnValue({
+          top: 400,
+          bottom: 440,
+          height: 40,
+        } as DOMRect);
+        trigger.dispatchEvent(Object.assign(pointer('pointermove'), { clientY: 117 }));
+        await vi.waitFor(() => expect(lastLink.hasAttribute('data-preview-current')).toBe(true));
+        expect(ruler[2]!.classList.contains('previewed')).toBe(true);
+        expect(hoverPanel.scrollTop).toBeGreaterThan(0);
+        expect(hoverPanel.querySelector('a[aria-current="location"]')?.textContent).toBe('Details');
+        expect(scrollTo).not.toHaveBeenCalled();
+        expect(document.activeElement).toBe(previousFocus);
+        trigger.dispatchEvent(Object.assign(pointer('pointerdown'), { clientY: 117 }));
+        trigger.dispatchEvent(
+          new MouseEvent('click', { detail: 1, clientY: 117, bubbles: true, cancelable: true }),
+        );
+        await vi.waitFor(() => expect(document.activeElement).toBe(headings[2]));
+        expect(scrollTo).toHaveBeenLastCalledWith({ top: 1520, behavior: 'instant' });
+        await vi.waitFor(() => expect(document.querySelector('.toc-list')).toBeNull());
+        expect(target.querySelector('.previewed')).toBeNull();
+        trigger.click();
+        await vi.waitFor(() => expect(document.querySelector('.toc-list a')).not.toBeNull());
+        document
+          .querySelector('[data-slot="popover-content"]')!
+          .dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+          );
+        await vi.waitFor(() => expect(document.querySelector('.toc-list')).toBeNull());
+        await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
+        trigger.click();
+        await vi.waitFor(() =>
+          expect(document.querySelector('[data-slot="popover-content"] a')).not.toBeNull(),
+        );
+        const panel = document.querySelector<HTMLElement>('[data-slot="popover-content"]')!;
+        panel.querySelectorAll<HTMLAnchorElement>('a')[2]!.click();
+        await vi.waitFor(() => expect(document.activeElement).toBe(headings[2]));
+        expect(scrollTo).toHaveBeenLastCalledWith({ top: 1520, behavior: 'instant' });
+        expect(window.location.hash).toBe('');
+
+        await vi.waitFor(() =>
+          expect(document.querySelector('[data-slot="popover-content"]')).toBeNull(),
+        );
+        trigger.focus();
+        trigger.click();
+        await vi.waitFor(() => expect(trigger.getAttribute('aria-expanded')).toBe('true'));
+        await vi.waitFor(() =>
+          expect(document.activeElement?.closest('[data-slot="popover-content"]')).not.toBeNull(),
+        );
+        document.activeElement?.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+        );
+        await vi.waitFor(() => expect(trigger.getAttribute('aria-expanded')).toBe('false'));
+        expect(onBack).not.toHaveBeenCalled();
+        await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
+
+        trigger.click();
+        await vi.waitFor(() =>
+          expect(
+            document.querySelector(
+              '[data-slot="popover-content"] button[aria-label="Back to top"]',
+            ),
+          ).not.toBeNull(),
+        );
+        document
+          .querySelector<HTMLButtonElement>(
+            '[data-slot="popover-content"] button[aria-label="Back to top"]',
+          )!
+          .click();
+        expect(scrollTo).toHaveBeenLastCalledWith({ top: 0, behavior: 'instant' });
+        await vi.waitFor(() => expect(document.activeElement?.id).toBe('library-reader-title'));
+      } finally {
+        await unmount(component);
+      }
+    },
+  );
+
+  it('keeps the current article when an older highlight finishes later', async () => {
+    const oldHighlight = deferred<string>();
+    vi.mocked(highlightLibraryHtml).mockImplementation((source) =>
+      source.includes('Old code') ? oldHighlight.promise : Promise.resolve(source),
+    );
+    vi.mocked(getLibraryContent)
+      .mockResolvedValueOnce({
+        contentVersion: 3,
+        fetchedAt: '2026-08-24T03:00:00.000Z',
+        plainText: 'Old code',
+        safeHtml: '<pre data-language="js">Old code</pre>',
+      })
+      .mockResolvedValueOnce({
+        contentVersion: 4,
+        fetchedAt: '2026-08-24T03:00:00.000Z',
+        plainText: 'New code',
+        safeHtml: '<pre data-language="js">New code</pre>',
+      });
+    const item = writable(libraryItem());
+    const reactive = fromStore(item);
+    const component = mount(LibraryReader, {
+      target: document.body,
+      props: {
+        get item() {
+          return reactive.current;
+        },
+        onBack: vi.fn(),
+        onToggleRead: vi.fn(),
+        timeZone: 'UTC',
+      },
+    });
+    try {
+      await vi.waitFor(() =>
+        expect(document.querySelector('.reader-content')?.textContent).toBe('Old code'),
+      );
+      item.set(libraryItem({ uid: 'library-2', contentVersion: 4 }));
+      await vi.waitFor(() =>
+        expect(document.querySelector('.reader-content')?.textContent).toBe('New code'),
+      );
+      oldHighlight.resolve('<pre>Stale highlight</pre>');
+      await tick();
+      expect(document.querySelector('.reader-content')?.textContent).toBe('New code');
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it('keeps sanitized content readable when highlighting fails', async () => {
+    vi.mocked(highlightLibraryHtml).mockRejectedValue(new Error('Highlight failed'));
+    const { component, target } = mountReader();
+    try {
+      await vi.waitFor(() =>
+        expect(target.querySelector('.reader-content')?.textContent).toContain('A safe article.'),
+      );
+      expect(target.querySelector('.reader-content script')).toBeNull();
+    } finally {
+      await unmount(component);
+    }
+  });
+
   it('focuses the article, sanitizes backend HTML again, and isolates links', async () => {
     const { component, target } = mountReader();
 
@@ -40,6 +278,7 @@ describe('LibraryReader', () => {
       const content = target.querySelector<HTMLElement>('.reader-content')!;
       expect(content.textContent).toContain('A safe article.');
       expect(content.querySelector('script')).toBeNull();
+      expect(target.querySelector('[aria-label="Article navigation"]')).toBeNull();
       const link = content.querySelector<HTMLAnchorElement>('a')!;
       expect(link.href).toBe('https://example.com/next');
       expect(link.rel).toBe('noopener noreferrer');
@@ -256,6 +495,7 @@ describe('LibraryReader', () => {
 
 function mountReader(
   overrides: {
+    mode?: 'preview' | 'full';
     item?: LibraryItem;
     onBack?: () => void;
     onAcceptRefresh?: (item: LibraryItem) => void;
@@ -267,10 +507,11 @@ function mountReader(
   target: HTMLDivElement;
 } {
   const target = document.createElement('div');
-  target.className = 'workspace-column';
+  target.className = overrides.mode === 'preview' ? 'library-detail' : 'workspace-column';
   document.body.append(target);
   const component = mount(LibraryReader, {
     props: {
+      mode: overrides.mode,
       item: overrides.item ?? libraryItem(),
       onBack: overrides.onBack ?? vi.fn(),
       onAcceptRefresh: overrides.onAcceptRefresh,

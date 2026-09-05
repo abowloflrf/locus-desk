@@ -1,102 +1,102 @@
 /* Palette from Shiki's built-in vitesse-light theme; token scopes are resolved by Shiki. */
-.markdown-content {
+:is(.markdown-content, .reader-content) {
   --code-foreground: #393a34;
   --code-background: #ffffff;
 }
 
-.markdown-content .shiki-fg-005cc5 {
+:is(.markdown-content, .reader-content) .shiki-fg-005cc5 {
   color: #005cc5;
 }
-.markdown-content .shiki-fg-1c6b48 {
+:is(.markdown-content, .reader-content) .shiki-fg-1c6b48 {
   color: #1c6b48;
 }
-.markdown-content .shiki-fg-1e754f {
+:is(.markdown-content, .reader-content) .shiki-fg-1e754f {
   color: #1e754f;
 }
-.markdown-content .shiki-fg-22863a {
+:is(.markdown-content, .reader-content) .shiki-fg-22863a {
   color: #22863a;
 }
-.markdown-content .shiki-fg-2e808f {
+:is(.markdown-content, .reader-content) .shiki-fg-2e808f {
   color: #2e808f;
 }
-.markdown-content .shiki-fg-2e8f82 {
+:is(.markdown-content, .reader-content) .shiki-fg-2e8f82 {
   color: #2e8f82;
 }
-.markdown-content .shiki-fg-2f798a {
+:is(.markdown-content, .reader-content) .shiki-fg-2f798a {
   color: #2f798a;
 }
-.markdown-content .shiki-fg-393a34 {
+:is(.markdown-content, .reader-content) .shiki-fg-393a34 {
   color: #393a34;
 }
-.markdown-content .shiki-fg-393a3490 {
+:is(.markdown-content, .reader-content) .shiki-fg-393a3490 {
   color: #393a3490;
 }
-.markdown-content .shiki-fg-586069 {
+:is(.markdown-content, .reader-content) .shiki-fg-586069 {
   color: #586069;
 }
-.markdown-content .shiki-fg-59873a {
+:is(.markdown-content, .reader-content) .shiki-fg-59873a {
   color: #59873a;
 }
-.markdown-content .shiki-fg-5a6aa6 {
+:is(.markdown-content, .reader-content) .shiki-fg-5a6aa6 {
   color: #5a6aa6;
 }
-.markdown-content .shiki-fg-6f42c1 {
+:is(.markdown-content, .reader-content) .shiki-fg-6f42c1 {
   color: #6f42c1;
 }
-.markdown-content .shiki-fg-998418 {
+:is(.markdown-content, .reader-content) .shiki-fg-998418 {
   color: #998418;
 }
-.markdown-content .shiki-fg-99841877 {
+:is(.markdown-content, .reader-content) .shiki-fg-99841877 {
   color: #99841877;
 }
-.markdown-content .shiki-fg-999999 {
+:is(.markdown-content, .reader-content) .shiki-fg-999999 {
   color: #999999;
 }
-.markdown-content .shiki-fg-a0ada0 {
+:is(.markdown-content, .reader-content) .shiki-fg-a0ada0 {
   color: #a0ada0;
 }
-.markdown-content .shiki-fg-a65e2b {
+:is(.markdown-content, .reader-content) .shiki-fg-a65e2b {
   color: #a65e2b;
 }
-.markdown-content .shiki-fg-ab5959 {
+:is(.markdown-content, .reader-content) .shiki-fg-ab5959 {
   color: #ab5959;
 }
-.markdown-content .shiki-fg-ab5e3f {
+:is(.markdown-content, .reader-content) .shiki-fg-ab5e3f {
   color: #ab5e3f;
 }
-.markdown-content .shiki-fg-b05a78 {
+:is(.markdown-content, .reader-content) .shiki-fg-b05a78 {
   color: #b05a78;
 }
-.markdown-content .shiki-fg-b07d48 {
+:is(.markdown-content, .reader-content) .shiki-fg-b07d48 {
   color: #b07d48;
 }
-.markdown-content .shiki-fg-b31d28 {
+:is(.markdown-content, .reader-content) .shiki-fg-b31d28 {
   color: #b31d28;
 }
-.markdown-content .shiki-fg-b56959 {
+:is(.markdown-content, .reader-content) .shiki-fg-b56959 {
   color: #b56959;
 }
-.markdown-content .shiki-fg-b5695977 {
+:is(.markdown-content, .reader-content) .shiki-fg-b5695977 {
   color: #b5695977;
 }
-.markdown-content .shiki-fg-bda437 {
+:is(.markdown-content, .reader-content) .shiki-fg-bda437 {
   color: #bda437;
 }
-.markdown-content .shiki-fg-e36209 {
+:is(.markdown-content, .reader-content) .shiki-fg-e36209 {
   color: #e36209;
 }
-.markdown-content .shiki-fg-f6f8fa {
+:is(.markdown-content, .reader-content) .shiki-fg-f6f8fa {
   color: #f6f8fa;
 }
-.markdown-content .shiki-fg-fafbfc {
+:is(.markdown-content, .reader-content) .shiki-fg-fafbfc {
   color: #fafbfc;
 }
-.markdown-content .shiki-italic {
+:is(.markdown-content, .reader-content) .shiki-italic {
   font-style: italic;
 }
-.markdown-content .shiki-bold {
+:is(.markdown-content, .reader-content) .shiki-bold {
   font-weight: bold;
 }
-.markdown-content .shiki-underline {
+:is(.markdown-content, .reader-content) .shiki-underline {
   text-decoration: underline;
 }

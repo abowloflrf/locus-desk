@@ -1,4 +1,5 @@
 <script lang="ts">
+  import '../vitesse-light.css';
   import ArrowLeft from '@lucide/svelte/icons/arrow-left';
   import BookOpenCheck from '@lucide/svelte/icons/book-open-check';
   import ExternalLink from '@lucide/svelte/icons/external-link';
@@ -11,7 +12,11 @@
   import { errorMessage } from '../api/client';
   import { getLibraryContent } from '../api/library';
   import type { LibraryContentResponse, LibraryItem } from '../api/types';
-  import { safeLibrarySourceUrl, sanitizeLibraryHtml } from '../library-content';
+  import {
+    highlightLibraryHtml,
+    safeLibrarySourceUrl,
+    sanitizeLibraryHtml,
+  } from '../library-content';
   import {
     DEFAULT_READER_PREFERENCES,
     loadReaderPreferences,
@@ -19,7 +24,9 @@
     type ReaderPreferences,
   } from '../reader-preferences';
   import { formatNoteTimestamp } from '../utils/date';
+  import { createReaderOutline } from '../reader-outline';
   import ReaderPreferencesControl from './ReaderPreferences.svelte';
+  import ReaderTableOfContents from './ReaderTableOfContents.svelte';
   import StatusMessage from './StatusMessage.svelte';
   import { Button } from './ui/button';
   import * as Alert from './ui/alert';
@@ -62,11 +69,13 @@
   let readerRoot = $state<HTMLElement>();
   let readerHeading = $state<HTMLHeadingElement>();
   let readerToolbar = $state<HTMLElement>();
+  let readerArticle = $state<HTMLElement>();
+  const readerId = $props.id();
   let toolbarHidden = $state(false);
   let contentController: AbortController | null = null;
   let contentRequestId = 0;
   let requestedContentKey = '';
-  let readerScrollElement: HTMLElement | null = null;
+  let readerScrollElement = $state<HTMLElement | null>(null);
   let lastScrollTop = 0;
   let scrollDelta = 0;
   let keyboardInteraction = false;
@@ -78,6 +87,30 @@
   const sanitizedHtml = $derived(
     content ? sanitizeLibraryHtml(content.safeHtml, sourceUrl ?? item.originalUrl) : '',
   );
+  let highlighted = $state<{ source: string; html: string } | null>(null);
+  const readerHtml = $derived(
+    highlighted?.source === sanitizedHtml ? highlighted.html : sanitizedHtml,
+  );
+  const outline = $derived(createReaderOutline(readerHtml, readerId));
+  const showOutline = $derived(
+    !loading && !loadError && item.processingStatus === 'READY' && outline.headings.length > 1,
+  );
+
+  $effect(() => {
+    const source = sanitizedHtml;
+    let active = true;
+    void highlightLibraryHtml(source, sourceUrl ?? item.originalUrl)
+      .then((html) => {
+        if (active) highlighted = { source, html };
+      })
+      .catch(() => {
+        // Keep the sanitized article readable if highlighting fails.
+      });
+    return () => {
+      active = false;
+    };
+  });
+
   const plainText = $derived(content?.plainText.trim() ?? '');
 
   onMount(() => {
@@ -143,7 +176,9 @@
       mode === 'preview' ||
       event.defaultPrevented ||
       event.key !== 'Escape' ||
-      document.querySelector('dialog[open]')
+      document.querySelector(
+        'dialog[open], [data-slot="popover-content"], [data-slot="sheet-content"]',
+      )
     ) {
       return;
     }
@@ -210,8 +245,7 @@
   }
 
   function publishedLabel(): string | null {
-    if (!item.publishedAt) return null;
-    const date = new Date(item.publishedAt);
+    const date = new Date(item.publishedAt ?? item.createdAt);
     if (Number.isNaN(date.getTime())) return null;
     return new Intl.DateTimeFormat('en', {
       day: 'numeric',
@@ -332,130 +366,145 @@
     </div>
   </header>
 
-  <div class="reader-column">
-    <header class="reader-heading">
-      <p class="reader-source">{item.siteName || sourceHostname() || 'Saved article'}</p>
-      <h1 bind:this={readerHeading} id="library-reader-title" tabindex="-1">{displayTitle()}</h1>
-      {#if item.excerpt}
-        <aside aria-label="Article excerpt" class="reader-excerpt">
-          <p class="reader-excerpt-label">Article excerpt</p>
-          <p class="reader-excerpt-copy">{item.excerpt}</p>
-        </aside>
+  <div class="reader-layout" class:has-outline={showOutline}>
+    <div class="reader-column">
+      <header class="reader-heading">
+        <p class="reader-source">{item.siteName || sourceHostname() || 'Saved article'}</p>
+        <h1 bind:this={readerHeading} id="library-reader-title" tabindex="-1">{displayTitle()}</h1>
+        {#if item.excerpt}
+          <aside aria-label="Article excerpt" class="reader-excerpt">
+            <p class="reader-excerpt-label">Article excerpt</p>
+            <p class="reader-excerpt-copy">{item.excerpt}</p>
+          </aside>
+        {/if}
+        <p class="reader-byline">
+          {#if item.author}<span>{item.author}</span>{/if}
+          {#if publishedLabel()}<span>{publishedLabel()}</span>{/if}
+          {#if content?.fetchedAt}
+            <span>Saved {formatNoteTimestamp(content.fetchedAt, timeZone)}</span>
+          {/if}
+        </p>
+      </header>
+
+      {#if operationError}<StatusMessage tone="error">{operationError}</StatusMessage>{/if}
+      {#if item.refreshStatus === 'PENDING' && item.contentAvailable}
+        <Alert.Root>
+          <Spinner />
+          <Alert.Title>Refreshing saved article</Alert.Title>
+          <Alert.Description
+            >The current saved version remains available while this runs.</Alert.Description
+          >
+        </Alert.Root>
+      {:else if item.refreshStatus === 'FAILED' && item.contentAvailable}
+        <Alert.Root variant="destructive">
+          <TriangleAlert />
+          <Alert.Title>Refresh failed</Alert.Title>
+          <Alert.Description>
+            {item.refreshError || 'The source could not be refreshed. The saved version was kept.'}
+          </Alert.Description>
+        </Alert.Root>
+      {:else if item.refreshStatus === 'REVIEW' && item.contentAvailable}
+        <Alert.Root>
+          <TriangleAlert />
+          <Alert.Title>Shorter refresh needs review</Alert.Title>
+          <Alert.Description>
+            The refreshed text is much shorter than the saved version. The saved version is still
+            displayed.
+          </Alert.Description>
+          {#if onAcceptRefresh && onDiscardRefresh}
+            <div class="refresh-review-actions">
+              <Button
+                disabled={busy}
+                onclick={() => void onDiscardRefresh(item)}
+                size="sm"
+                variant="secondary">Keep saved version</Button
+              >
+              <Button
+                disabled={busy}
+                onclick={() => void onAcceptRefresh(item)}
+                size="sm"
+                variant="outline">Use refreshed version</Button
+              >
+            </div>
+          {/if}
+        </Alert.Root>
       {/if}
-      <p class="reader-byline">
-        {#if item.author}<span>{item.author}</span>{/if}
-        {#if publishedLabel()}<span>{publishedLabel()}</span>{/if}
-        {#if content?.fetchedAt}
-          <span>Saved {formatNoteTimestamp(content.fetchedAt, timeZone)}</span>
-        {/if}
-      </p>
-    </header>
+      <div aria-atomic="true" aria-live="polite" class="sr-only" role="status">
+        {actionStatus ?? ''}
+      </div>
+      <div aria-atomic="true" aria-live="polite" class="sr-only" role="status">
+        {loadStatus}
+      </div>
 
-    {#if operationError}<StatusMessage tone="error">{operationError}</StatusMessage>{/if}
-    {#if item.refreshStatus === 'PENDING' && item.contentAvailable}
-      <Alert.Root>
-        <Spinner />
-        <Alert.Title>Refreshing saved article</Alert.Title>
-        <Alert.Description
-          >The current saved version remains available while this runs.</Alert.Description
-        >
-      </Alert.Root>
-    {:else if item.refreshStatus === 'FAILED' && item.contentAvailable}
-      <Alert.Root variant="destructive">
-        <TriangleAlert />
-        <Alert.Title>Refresh failed</Alert.Title>
-        <Alert.Description>
-          {item.refreshError || 'The source could not be refreshed. The saved version was kept.'}
-        </Alert.Description>
-      </Alert.Root>
-    {:else if item.refreshStatus === 'REVIEW' && item.contentAvailable}
-      <Alert.Root>
-        <TriangleAlert />
-        <Alert.Title>Shorter refresh needs review</Alert.Title>
-        <Alert.Description>
-          The refreshed text is much shorter than the saved version. The saved version is still
-          displayed.
-        </Alert.Description>
-        {#if onAcceptRefresh && onDiscardRefresh}
-          <div class="refresh-review-actions">
-            <Button
-              disabled={busy}
-              onclick={() => void onDiscardRefresh(item)}
-              size="sm"
-              variant="secondary">Keep saved version</Button
-            >
-            <Button
-              disabled={busy}
-              onclick={() => void onAcceptRefresh(item)}
-              size="sm"
-              variant="outline">Use refreshed version</Button
-            >
-          </div>
-        {/if}
-      </Alert.Root>
-    {/if}
-    <div aria-atomic="true" aria-live="polite" class="sr-only" role="status">
-      {actionStatus ?? ''}
-    </div>
-    <div aria-atomic="true" aria-live="polite" class="sr-only" role="status">
-      {loadStatus}
-    </div>
-
-    {#if loading}
-      <div aria-live="polite" class="reader-state">
-        <Spinner />
-        <p>Opening saved article…</p>
-      </div>
-    {:else if item.processingStatus === 'PENDING'}
-      <div aria-live="polite" class="reader-state">
-        <Spinner />
-        <p>Preparing article…</p>
-      </div>
-    {:else if item.processingStatus === 'FAILED'}
-      <div class="reader-state reader-error">
-        <StatusMessage tone="error">
-          {item.lastError || 'Article capture failed.'}
-        </StatusMessage>
-        {#if onRetry}
-          <Button disabled={busy} onclick={() => void onRetry(item)} variant="secondary">
-            Retry
-          </Button>
-        {/if}
-      </div>
-    {:else if item.processingStatus === 'NOT_FETCHED'}
-      <div class="reader-state">
-        <p>Article not prepared.</p>
-        {#if onRetry}
-          <Button disabled={busy} onclick={() => void onRetry(item)} variant="secondary">
-            Prepare article
-          </Button>
-        {/if}
-      </div>
-    {:else if loadError}
-      <div class="reader-state reader-error">
-        <StatusMessage tone="error">{loadError}</StatusMessage>
-        <Button onclick={() => void loadContent()} variant="secondary">Try again</Button>
-      </div>
-    {:else if sanitizedHtml}
-      <article class="reader-content">{@html sanitizedHtml}</article>
-    {:else if plainText}
-      <article class="reader-content reader-plain-text">{plainText}</article>
-    {:else}
-      <Empty.Root class="reader-state">
-        <Empty.Header>
-          <Empty.Media variant="icon"><BookOpenCheck /></Empty.Media>
-          <Empty.Title>No readable text</Empty.Title>
-          <Empty.Description>This saved page did not include article text.</Empty.Description>
-        </Empty.Header>
-        {#if sourceUrl}
-          <Empty.Content>
-            <Button href={sourceUrl} rel="noopener noreferrer" target="_blank" variant="secondary">
-              Open source
-              <ExternalLink data-icon="inline-end" />
+      {#if loading}
+        <div aria-live="polite" class="reader-state">
+          <Spinner />
+          <p>Opening saved article…</p>
+        </div>
+      {:else if item.processingStatus === 'PENDING'}
+        <div aria-live="polite" class="reader-state">
+          <Spinner />
+          <p>Preparing article…</p>
+        </div>
+      {:else if item.processingStatus === 'FAILED'}
+        <div class="reader-state reader-error">
+          <StatusMessage tone="error">
+            {item.lastError || 'Article capture failed.'}
+          </StatusMessage>
+          {#if onRetry}
+            <Button disabled={busy} onclick={() => void onRetry(item)} variant="secondary">
+              Retry
             </Button>
-          </Empty.Content>
-        {/if}
-      </Empty.Root>
+          {/if}
+        </div>
+      {:else if item.processingStatus === 'NOT_FETCHED'}
+        <div class="reader-state">
+          <p>Article not prepared.</p>
+          {#if onRetry}
+            <Button disabled={busy} onclick={() => void onRetry(item)} variant="secondary">
+              Prepare article
+            </Button>
+          {/if}
+        </div>
+      {:else if loadError}
+        <div class="reader-state reader-error">
+          <StatusMessage tone="error">{loadError}</StatusMessage>
+          <Button onclick={() => void loadContent()} variant="secondary">Try again</Button>
+        </div>
+      {:else if sanitizedHtml}
+        <article bind:this={readerArticle} class="reader-content">{@html outline.html}</article>
+      {:else if plainText}
+        <article class="reader-content reader-plain-text">{plainText}</article>
+      {:else}
+        <Empty.Root class="reader-state">
+          <Empty.Header>
+            <Empty.Media variant="icon"><BookOpenCheck /></Empty.Media>
+            <Empty.Title>No readable text</Empty.Title>
+            <Empty.Description>This saved page did not include article text.</Empty.Description>
+          </Empty.Header>
+          {#if sourceUrl}
+            <Empty.Content>
+              <Button
+                href={sourceUrl}
+                rel="noopener noreferrer"
+                target="_blank"
+                variant="secondary"
+              >
+                Open source
+                <ExternalLink data-icon="inline-end" />
+              </Button>
+            </Empty.Content>
+          {/if}
+        </Empty.Root>
+      {/if}
+    </div>
+    {#if showOutline}
+      <ReaderTableOfContents
+        headings={outline.headings}
+        article={readerArticle}
+        scrollElement={readerScrollElement}
+        titleElement={readerHeading}
+      />
     {/if}
   </div>
 </section>
@@ -467,9 +516,10 @@
     --reader-font-size: 18px;
     --reader-line-height: 1.82;
     --reader-column-width: 800px;
+    --reader-gutter: 32px;
     width: 100%;
     min-height: 100%;
-    padding: 24px 32px 88px;
+    padding: 24px var(--reader-gutter) 88px;
     animation: reader-enter 180ms ease both;
   }
 
@@ -558,14 +608,34 @@
   }
 
   .reader-column {
+    min-width: 0;
     width: min(100%, var(--reader-column-width));
     margin-inline: auto;
     transition: width 180ms ease;
   }
 
+  .reader-layout.has-outline {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px;
+    gap: calc(var(--reader-gutter) + 8px);
+    margin-inline-end: calc(8px - var(--reader-gutter));
+  }
+
+  .reader-content :global(h2[id]),
+  .reader-content :global(h3[id]) {
+    scroll-margin-top: 128px;
+  }
+
+  .reader-content :global(h2:focus-visible),
+  .reader-content :global(h3:focus-visible) {
+    outline: 2px solid var(--ring);
+    outline-offset: 4px;
+  }
+
   .library-reader.preview {
+    --reader-gutter: 28px;
     min-height: 0;
-    padding: 20px 28px 64px;
+    padding: 20px var(--reader-gutter) 64px;
   }
 
   .library-reader.preview .reader-toolbar {
@@ -742,6 +812,14 @@
     line-height: 1.65;
   }
 
+  .reader-content :global(pre[data-language]::before) {
+    content: attr(data-language);
+    display: block;
+    margin-bottom: 8px;
+    color: var(--muted-foreground);
+    font-size: 11px;
+  }
+
   .reader-content :global(:not(pre) > code) {
     padding: 2px 4px;
     background: var(--muted);
@@ -799,6 +877,16 @@
   }
 
   @media (max-width: 767px) {
+    .reader-layout.has-outline {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 12px;
+      margin-inline-end: 0;
+    }
+
+    .has-outline .reader-column {
+      grid-row: 2;
+    }
+
     .library-reader {
       padding: calc(12px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right))
         calc(48px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
