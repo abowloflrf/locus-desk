@@ -47,43 +47,46 @@ afterEach(() => {
 });
 
 describe('NotesPage request ordering', () => {
-  it('keeps overflow tags reachable and shows the selected filter in the toolbar', async () => {
+  it('shows every tag inline and filters by the third tag without opening a menu', async () => {
+    const tags = ['dev', 'llm', 'visa'];
     vi.mocked(listNotes).mockResolvedValue(page([]));
-    vi.mocked(listTags).mockResolvedValue({ items: ['alpha', 'beta', 'gamma', 'delta'] });
+    vi.mocked(listTags).mockResolvedValue({ items: tags });
     const target = document.createElement('div');
     document.body.append(target);
     const component = mount(NotesPage, { props: { session }, target });
 
     try {
-      await vi.waitFor(() => expect(target.textContent).toContain('#alpha'));
-      expect(target.querySelector('.tag-toolbar')?.textContent).not.toContain('#delta');
-      target.querySelector<HTMLButtonElement>('[aria-label="All tags"]')!.click();
-      const option = await vi.waitFor(() => {
-        const entry = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(
-          (entry) => entry.textContent?.trim() === '#delta',
-        );
-        expect(entry).toBeDefined();
-        return entry!;
-      });
-      option.click();
+      const buttons = () => [...target.querySelectorAll<HTMLButtonElement>('.tag-filter button')];
+      await vi.waitFor(() =>
+        expect(buttons().map((button) => button.textContent?.trim())).toEqual([
+          'All',
+          '#dev',
+          '#llm',
+          '#visa',
+        ]),
+      );
+      buttons()[3].click();
       await vi.waitFor(() =>
         expect(listNotes).toHaveBeenLastCalledWith(
-          expect.objectContaining({ tag: 'delta', page: 1 }),
+          expect.objectContaining({ tag: 'visa', page: 1 }),
           expect.any(AbortSignal),
         ),
       );
-      await vi.waitFor(() =>
-        expect(target.querySelector('.tag-filter [data-state="on"]')?.textContent).toContain(
-          '#delta',
-        ),
-      );
-      target.querySelector<HTMLButtonElement>('.tag-filter [data-state="on"]')!.click();
+      expect(buttons()[3].dataset.state).toBe('on');
+      expect(buttons().map((button) => button.textContent?.trim())).toEqual([
+        'All',
+        '#dev',
+        '#llm',
+        '#visa',
+      ]);
+      buttons()[0].click();
       await vi.waitFor(() =>
         expect(listNotes).toHaveBeenLastCalledWith(
           expect.objectContaining({ tag: '' }),
           expect.any(AbortSignal),
         ),
       );
+      expect(buttons()[0].dataset.state).toBe('on');
     } finally {
       await unmount(component);
     }

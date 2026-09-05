@@ -8,15 +8,3 @@
 <div class="page tasks-page">
   <TaskBoard mode="all" {refreshToken} today={session.workspace.today} />
 </div>
-
-<style>
-  .tasks-page {
-    width: min(100%, 920px);
-    padding-top: 32px;
-  }
-  @media (max-width: 767px) {
-    .tasks-page {
-      padding-top: 16px;
-    }
-  }
-</style>

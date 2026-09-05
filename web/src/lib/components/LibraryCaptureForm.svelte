@@ -3,11 +3,10 @@
   import { tick } from 'svelte';
 
   import type { CreateLibraryItemRequest, LibraryItem } from '../api/types';
-  import StatusMessage from './StatusMessage.svelte';
   import { Button, buttonVariants } from './ui/button';
   import * as Field from './ui/field';
   import { Input } from './ui/input';
-  import * as Popover from './ui/popover';
+  import * as Dialog from './ui/dialog';
   import { Spinner } from './ui/spinner';
 
   let {
@@ -42,8 +41,6 @@
       await onCreate({ url: submittedUrl });
       url = '';
       open = false;
-      await tick();
-      triggerButton?.focus();
     } catch (cause) {
       error = cause instanceof Error && cause.message ? cause.message : 'Unable to save this link.';
     } finally {
@@ -56,12 +53,11 @@
     open = nextOpen;
     if (open) {
       error = null;
-      void tick().then(() => urlInput?.focus());
     }
   }
 
   function handleKeydown(event: KeyboardEvent): void {
-    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+    if (!event.isComposing && (event.ctrlKey || event.metaKey) && event.key === 'Enter') {
       event.preventDefault();
       form?.requestSubmit();
     }
@@ -77,26 +73,38 @@
   }
 </script>
 
-<Popover.Root bind:open onOpenChange={handleOpenChange}>
-  <Popover.Trigger
+<Dialog.Root {open} onOpenChange={handleOpenChange}>
+  <Dialog.Trigger
     bind:ref={triggerButton}
     aria-label="Add a link"
     class={buttonVariants({ size: 'icon', variant: 'default' })}
     title="Add link"
   >
     <Plus />
-  </Popover.Trigger>
-  <Popover.Content align="end" class="w-[min(24rem,calc(100vw-2rem))] p-4" sideOffset={8}>
-    <Popover.Header>
-      <Popover.Title>Save a link</Popover.Title>
-      <Popover.Description>Paste the article URL you want to keep.</Popover.Description>
-    </Popover.Header>
-    <form aria-busy={submitting} bind:this={form} class="mt-4" onsubmit={submit}>
-      <Field.Group>
+  </Dialog.Trigger>
+  <Dialog.Content
+    class="max-h-[calc(100dvh-2rem)] gap-4 overflow-y-auto overscroll-contain sm:max-w-xl"
+    aria-describedby={undefined}
+    showCloseButton={!submitting}
+    onOpenAutoFocus={(event) => {
+      event.preventDefault();
+      urlInput?.focus();
+    }}
+    onCloseAutoFocus={(event) => {
+      event.preventDefault();
+      triggerButton?.focus();
+    }}
+  >
+    <Dialog.Header class="pr-8">
+      <Dialog.Title>Save a link</Dialog.Title>
+    </Dialog.Header>
+    <form aria-busy={submitting} bind:this={form} onsubmit={submit}>
+      <Field.Group class="gap-4">
         <Field.Field data-invalid={Boolean(error)}>
-          <Field.Label for="library-url">URL</Field.Label>
+          <Field.Label class="sr-only" for="library-url">URL</Field.Label>
           <Input
             aria-invalid={Boolean(error)}
+            aria-describedby={error ? 'library-url-error' : undefined}
             autocomplete="url"
             bind:ref={urlInput}
             bind:value={url}
@@ -104,13 +112,12 @@
             id="library-url"
             inputmode="url"
             onkeydown={handleKeydown}
-            placeholder="https://example.com/article"
+            placeholder="https://example.com"
             required
             type="url"
           />
-          <Field.Description>Press Ctrl or Command + Enter to save.</Field.Description>
+          {#if error}<Field.Error id="library-url-error">{error}</Field.Error>{/if}
         </Field.Field>
-        {#if error}<StatusMessage tone="error">{error}</StatusMessage>{/if}
         <Field.Field class="justify-end" orientation="horizontal">
           <Button disabled={submitting || !url.trim()} type="submit">
             {#if submitting}<Spinner data-icon="inline-start" />{/if}
@@ -119,5 +126,5 @@
         </Field.Field>
       </Field.Group>
     </form>
-  </Popover.Content>
-</Popover.Root>
+  </Dialog.Content>
+</Dialog.Root>

@@ -4,7 +4,7 @@
   import Ellipsis from '@lucide/svelte/icons/ellipsis';
   import ListFilter from '@lucide/svelte/icons/list-filter';
   import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
-  import Search from '@lucide/svelte/icons/search';
+  import SearchField from '../components/SearchField.svelte';
   import Star from '@lucide/svelte/icons/star';
   import Trash2 from '@lucide/svelte/icons/trash-2';
   import { onMount, tick } from 'svelte';
@@ -720,26 +720,21 @@
 {:else}
   <div bind:this={pageElement} class:detail-open={Boolean(selectedUid)} class="library-page">
     <div class="library-primary">
-      <header class="library-page-header">
+      <header class="page-header">
         <h1 id="library-title">Library</h1>
         <LibraryCaptureForm onCreate={handleCreate} />
       </header>
 
       <section aria-labelledby="library-title" class="library-index">
         <div class="library-toolbar">
-          <label class="search-field library-search">
-            <Search class="pointer-events-none absolute left-3 size-4 text-muted-foreground" />
-            <span class="sr-only">Search links</span>
-            <Input
-              class="pl-9"
-              autocomplete="off"
-              bind:ref={searchInput}
-              oninput={handleSearch}
-              placeholder="Search links"
-              type="search"
-              value={query}
-            />
-          </label>
+          <SearchField
+            label="Search links"
+            placeholder="Search links"
+            value={query}
+            oninput={handleSearch}
+            bind:ref={searchInput}
+            fullWidth
+          />
         </div>
 
         <div class="library-filters">
@@ -832,10 +827,7 @@
 
         <div aria-busy={loading || loadingMore} class="library-results">
           {#if loading && items.length === 0}
-            <div
-              aria-live="polite"
-              class="loading-state large flex items-center justify-center gap-2"
-            >
+            <div aria-live="polite" class="loading-state flex items-center justify-center gap-2">
               <Spinner />
               Loading Library…
             </div>
@@ -877,6 +869,8 @@
             <ol aria-label="Library items" class="library-list">
               {#each items as item (item.uid)}
                 <li
+                  class="list-action-row"
+                  data-actions-open={actionMenuUid === item.uid}
                   class:busy={busyUids.has(item.uid)}
                   class:selected={selectedUid === item.uid}
                   data-focus-uid={item.uid}
@@ -900,13 +894,7 @@
                       />
                     </span>
                     <span class="item-copy">
-                      <span class="item-heading">
-                        <span class="item-title">{displayTitle(item)}</span>
-                        {#if !item.readAt}
-                          <span aria-hidden="true" class="unread-mark"></span>
-                          <span class="sr-only">Unread</span>
-                        {/if}
-                      </span>
+                      <span class="item-title">{displayTitle(item)}</span>
                       <span class="item-meta">
                         <span class="item-source"
                           >{item.siteName || hostname(item) || item.originalUrl}</span
@@ -929,8 +917,13 @@
                         {/if}
                       </span>
                     </span>
+                    {#if !item.readAt}
+                      <span class="unread-mark" title="Unread">
+                        <span class="sr-only">Unread</span>
+                      </span>
+                    {/if}
                   </button>
-                  <div class="item-actions">
+                  <div class="item-actions list-action-group">
                     <DropdownMenu.Root
                       onOpenChange={(open) => (actionMenuUid = open ? item.uid : null)}
                       open={actionMenuUid === item.uid}
@@ -1058,25 +1051,6 @@
     border-right: 1px solid var(--border);
   }
 
-  .library-page-header {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .library-page-header h1 {
-    margin: 0;
-    font-size: 18px;
-    font-weight: 680;
-    line-height: 1.2;
-    letter-spacing: -0.03em;
-  }
-
-  .library-index {
-    padding-top: 12px;
-  }
-
   .library-toolbar {
     display: flex;
     gap: 8px;
@@ -1099,18 +1073,6 @@
     white-space: nowrap;
     color: var(--muted-foreground);
     font-size: 12px;
-  }
-
-  @media (max-width: 767px), (pointer: coarse) {
-    .library-filters :global(button) {
-      min-height: 44px;
-      min-width: 44px;
-    }
-  }
-
-  .library-search {
-    min-width: 0;
-    flex: 1;
   }
 
   .library-list {
@@ -1162,7 +1124,7 @@
   .item-select {
     display: grid;
     min-width: 0;
-    grid-template-columns: 18px minmax(0, 1fr);
+    grid-template-columns: 18px minmax(0, 1fr) 5px;
     gap: 10px;
     align-items: center;
     padding: 8px 4px 8px 8px;
@@ -1201,13 +1163,6 @@
     gap: 4px;
   }
 
-  .item-heading {
-    display: flex;
-    min-width: 0;
-    gap: 7px;
-    align-items: center;
-  }
-
   .item-title,
   .item-source {
     overflow: hidden;
@@ -1225,7 +1180,6 @@
     -webkit-box-orient: vertical;
     overflow-wrap: anywhere;
     min-width: 0;
-    flex: 1;
     font-size: 13px;
     font-weight: 640;
     line-height: 1.35;
@@ -1258,7 +1212,6 @@
   .unread-mark {
     width: 5px;
     height: 5px;
-    flex: none;
     background: var(--primary);
     border-radius: 50%;
   }
@@ -1268,14 +1221,6 @@
     gap: 2px;
     align-items: center;
     padding-right: 4px;
-    opacity: 0;
-    transition: opacity 150ms ease;
-  }
-
-  .library-list li:hover .item-actions,
-  .library-list li:focus-within .item-actions,
-  .library-list li.selected .item-actions {
-    opacity: 1;
   }
 
   .library-detail {
@@ -1295,7 +1240,7 @@
   @media (max-width: 1199px) {
     .library-page {
       display: block;
-      width: min(100%, 940px);
+      width: min(100%, var(--page-width));
       padding: 20px 24px 32px;
       margin-inline: auto;
     }
@@ -1323,13 +1268,6 @@
 
     .item-actions {
       padding-right: 0;
-      opacity: 1;
-    }
-  }
-
-  @media (hover: none) {
-    .item-actions {
-      opacity: 1;
     }
   }
 </style>

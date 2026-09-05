@@ -376,7 +376,7 @@ describe('LibraryReader', () => {
     window.localStorage.setItem(
       READER_PREFERENCES_STORAGE_KEY,
       JSON.stringify({
-        fontPreset: 'atkinson',
+        fontPreset: 'sans',
         fontSize: 'large',
         lineHeight: 'spacious',
         width: 'wide',
@@ -386,7 +386,7 @@ describe('LibraryReader', () => {
 
     try {
       const reader = target.querySelector<HTMLElement>('.library-reader')!;
-      await vi.waitFor(() => expect(reader.dataset.readerFont).toBe('atkinson'));
+      await vi.waitFor(() => expect(reader.dataset.readerFont).toBe('sans'));
       expect(reader.dataset.readerSize).toBe('large');
       expect(reader.dataset.readerLineHeight).toBe('spacious');
       expect(reader.dataset.readerWidth).toBe('wide');
@@ -399,11 +399,15 @@ describe('LibraryReader', () => {
       );
       document.querySelector<HTMLButtonElement>('[aria-label="16 pixel text"]')!.click();
       document.querySelector<HTMLButtonElement>('[aria-label="Balanced article width"]')!.click();
+      document.querySelector<HTMLButtonElement>('[aria-label="System typeface"]')!.click();
+      await vi.waitFor(() => expect(reader.dataset.readerFont).toBe('system'));
+      document.querySelector<HTMLButtonElement>('[aria-label="Montserrat typeface"]')!.click();
+      await vi.waitFor(() => expect(reader.dataset.readerFont).toBe('sans'));
 
       await vi.waitFor(() => expect(reader.dataset.readerSize).toBe('small'));
       expect(reader.dataset.readerWidth).toBe('balanced');
       expect(JSON.parse(window.localStorage.getItem(READER_PREFERENCES_STORAGE_KEY)!)).toEqual({
-        fontPreset: 'atkinson',
+        fontPreset: 'sans',
         fontSize: 'small',
         lineHeight: 'spacious',
         width: 'balanced',

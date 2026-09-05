@@ -5,7 +5,7 @@
     base: 'h-9 pointer-coarse:h-11 rounded-md border border-input bg-transparent px-2.5 py-1 text-base transition-[color,box-shadow] file:h-7 file:text-sm file:font-medium focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 md:text-sm dark:bg-input/30 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 w-full min-w-0 outline-none file:inline-flex file:border-0 file:bg-transparent file:text-foreground placeholder:text-muted-foreground disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50',
     variants: {
       variant: {
-        default: 'shadow-xs',
+        default: 'shadow-none',
         flat: 'shadow-none',
         'task-title':
           'h-9 rounded-none border-0 border-b border-ring px-0 text-[15px] md:text-[15px] shadow-none focus-visible:ring-0 pointer-coarse:text-base',

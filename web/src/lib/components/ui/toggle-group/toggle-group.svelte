@@ -69,7 +69,7 @@ get along, so we shut typescript up by casting `value` to `never`.
   data-spacing={spacing}
   style={`--gap: ${spacing}`}
   class={cn(
-    'rounded-md data-[spacing=0]:data-[variant=outline]:shadow-xs group/toggle-group flex w-fit flex-row items-center gap-[--spacing(var(--gap))] data-vertical:flex-col data-vertical:items-stretch',
+    'rounded-md data-[spacing=0]:data-[variant=outline]:shadow-none group/toggle-group flex w-fit flex-row items-center gap-[--spacing(var(--gap))] data-vertical:flex-col data-vertical:items-stretch',
     className,
   )}
   {...restProps}
@@ -83,7 +83,6 @@ get along, so we shut typescript up by casting `value` to `never`.
     background: color-mix(in oklch, var(--popover), transparent 4%);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    box-shadow: 0 1px 2px color-mix(in oklch, var(--foreground), transparent 94%);
   }
 
   :global([data-slot='toggle-group'][data-variant='workspace']::before) {

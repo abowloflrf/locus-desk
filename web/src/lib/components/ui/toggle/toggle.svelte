@@ -6,7 +6,7 @@
     variants: {
       variant: {
         default: 'bg-transparent',
-        outline: 'border border-input bg-transparent shadow-xs hover:bg-muted',
+        outline: 'border border-input bg-transparent shadow-none hover:bg-muted',
         workspace: 'bg-transparent',
         priority:
           'bg-transparent data-[priority=high]:text-priority-high data-[priority=high]:hover:text-priority-high',

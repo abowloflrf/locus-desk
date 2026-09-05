@@ -11,6 +11,8 @@
     disabled = false,
     id,
     label = 'Markdown editor',
+    invalid = false,
+    describedBy,
     onCancel,
     onSave,
   }: {
@@ -18,6 +20,8 @@
     disabled?: boolean;
     id: string;
     label?: string;
+    invalid?: boolean;
+    describedBy?: string;
     onCancel: () => void;
     onSave: () => void;
   } = $props();
@@ -29,6 +33,13 @@
   let editableCompartment = $state.raw<CodeMirrorCompartment | null>(null);
   let editableExtension: ((editable: boolean) => CodeMirrorExtension) | null = null;
   let currentDisabled = false;
+
+  $effect(() => {
+    if (!view) return;
+    view.contentDOM.setAttribute('aria-invalid', String(invalid));
+    if (describedBy) view.contentDOM.setAttribute('aria-describedby', describedBy);
+    else view.contentDOM.removeAttribute('aria-describedby');
+  });
 
   onMount(() => {
     let destroyed = false;

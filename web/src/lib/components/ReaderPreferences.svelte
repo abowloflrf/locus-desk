@@ -81,7 +81,7 @@
           {#each READER_FONT_PRESETS as option}
             <ToggleGroup.Item
               aria-label={`${option.label} typeface`}
-              class="flex-1"
+              class="flex-auto px-2"
               data-font-option={option.value}
               value={option.value}
             >
@@ -188,8 +188,8 @@
     font-family: 'IBM Plex Sans Variable', sans-serif;
   }
 
-  :global([data-font-option='atkinson'] .font-preview) {
-    font-family: 'Atkinson Hyperlegible Next Variable', sans-serif;
+  :global([data-font-option='sans'] .font-preview) {
+    font-family: var(--font-sans);
   }
 
   :global([data-font-option='system'] .font-preview) {

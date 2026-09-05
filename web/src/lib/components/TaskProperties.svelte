@@ -3,7 +3,7 @@
   import CalendarOff from '@lucide/svelte/icons/calendar-off';
   import CalendarDays from '@lucide/svelte/icons/calendar-days';
   import CalendarRange from '@lucide/svelte/icons/calendar-range';
-  import Ellipsis from '@lucide/svelte/icons/ellipsis';
+  import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
   import Flag from '@lucide/svelte/icons/flag';
   import Sun from '@lucide/svelte/icons/sun';
   import Sunrise from '@lucide/svelte/icons/sunrise';
@@ -18,6 +18,7 @@
   import * as ToggleGroup from './ui/toggle-group';
   import { Separator } from './ui/separator';
   import { Spinner } from './ui/spinner';
+  import * as Field from './ui/field';
 
   let {
     today,
@@ -97,14 +98,16 @@
         size="icon-sm"
         variant="ghost"
       >
-        <Ellipsis />
+        <SlidersHorizontal />
       </Button>
     {/snippet}
   </Popover.Trigger>
   <Popover.Content
     align="end"
-    class="task-properties w-[min(304px,calc(100vw-24px))] gap-3 rounded-xl p-3"
+    class="task-properties max-h-[var(--bits-popover-content-available-height)] w-[min(304px,calc(100vw-2rem))] overflow-y-auto overscroll-contain"
     aria-label="Task properties"
+    data-calendar-open={calendarOpen}
+    collisionPadding={4}
   >
     {#if calendarOpen}
       <Button
@@ -127,7 +130,7 @@
         value={dueDate ? parseDate(dueDate) : undefined}
         placeholder={parseDate(dueDate || today)}
         onValueChange={(date) => setDate(date?.toString() ?? null)}
-        class="p-0"
+        class="mx-auto w-fit p-0"
       />
     {:else}
       <p class="property-label">Target date</p>
@@ -208,7 +211,7 @@
       </ToggleGroup.Root>
     {/if}
     {#if saving}<span class="property-status" role="status"><Spinner /> Saving…</span>{/if}
-    {#if error}<p class="property-error" role="alert">{error}</p>{/if}
+    {#if error}<Field.Error>{error}</Field.Error>{/if}
   </Popover.Content>
 </Popover.Root>
 
@@ -229,11 +232,6 @@
     align-items: center;
     gap: 8px;
     color: var(--muted-foreground);
-    font-size: 12px;
-  }
-  .property-error {
-    margin: 0;
-    color: var(--destructive);
     font-size: 12px;
   }
 </style>

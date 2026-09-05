@@ -6,7 +6,6 @@
   import { errorMessage } from '../api/client';
   import { targetDateLabel } from '../utils/task-date';
   import TaskProperties from './TaskProperties.svelte';
-  import { Button } from './ui/button';
   import * as Field from './ui/field';
   import * as InputGroup from './ui/input-group';
   import { Spinner } from './ui/spinner';
@@ -62,7 +61,7 @@
   }
 </script>
 
-<form class="task-create" class:task-create-todo={mode === 'todo'} onsubmit={submit}>
+<form class="task-create" onsubmit={submit}>
   <Field.Field class="gap-2" data-invalid={Boolean(error)}>
     <Field.Label class="sr-only" for={`new-task-${mode}`}>Task title</Field.Label>
     <InputGroup.Root variant="task">
@@ -95,8 +94,10 @@
           onChange={changeProperties}
         />
         {#if title.trim() || formBusy}
-          <Button type="submit" size="sm" disabled={formBusy}
-            >{#if formBusy}<Spinner />{:else}Add{/if}</Button
+          <InputGroup.Button type="submit" size="sm" variant="default" disabled={formBusy}
+            >{#if formBusy}<Spinner data-icon="inline-start" />{/if}{formBusy
+              ? 'Adding…'
+              : 'Add'}</InputGroup.Button
           >
         {/if}
       </InputGroup.Addon>
@@ -118,10 +119,7 @@
 
 <style>
   .task-create {
-    margin-bottom: 24px;
-  }
-  .task-create-todo {
-    margin-bottom: 16px;
+    margin-bottom: 12px;
   }
   .creation-metadata {
     display: flex;
@@ -142,11 +140,5 @@
     width: 12px;
     height: 12px;
     fill: currentColor;
-  }
-  @media (max-width: 767px) {
-    .task-create :global(button) {
-      min-height: 44px;
-      min-width: 44px;
-    }
   }
 </style>

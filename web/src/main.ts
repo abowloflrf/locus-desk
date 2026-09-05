@@ -1,8 +1,7 @@
 import { mount } from 'svelte';
 
-import '@fontsource-variable/atkinson-hyperlegible-mono/wght.css';
-import '@fontsource-variable/atkinson-hyperlegible-next/wght.css';
-import '@fontsource-variable/atkinson-hyperlegible-next/wght-italic.css';
+import '@fontsource-variable/ibm-plex-sans/wght.css';
+import '@fontsource-variable/ibm-plex-sans/wght-italic.css';
 import '@fontsource-variable/montserrat/wght.css';
 import '@fontsource-variable/montserrat/wght-italic.css';
 import '@fontsource/ibm-plex-mono/400.css';

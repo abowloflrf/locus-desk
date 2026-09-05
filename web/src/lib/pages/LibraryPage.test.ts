@@ -296,7 +296,10 @@ describe('LibraryPage', () => {
       excerpt: 'This summary belongs in the preview.',
       processingStatus: 'READY',
     });
-    const pending = item('pending', 'Pending article', { processingStatus: 'PENDING' });
+    const pending = item('pending', 'Pending article', {
+      processingStatus: 'PENDING',
+      readAt: '2026-08-24T02:00:00.000Z',
+    });
     vi.mocked(listLibraryItems).mockResolvedValue(page([ready, pending]));
     const { component, target } = mountPage();
 
@@ -310,7 +313,9 @@ describe('LibraryPage', () => {
 
       expect(readyRow.textContent).not.toContain('This summary belongs in the preview.');
       expect(readyRow.querySelector('.processing-state')).toBeNull();
-      expect(readyRow.querySelector('.unread-mark')).not.toBeNull();
+      expect(readyRow.querySelector('.unread-mark')?.getAttribute('title')).toBe('Unread');
+      expect(readyRow.querySelector('.item-meta')?.textContent).not.toContain('Unread');
+      expect(pendingRow.textContent).not.toContain('Unread');
       expect(pendingRow.textContent).toContain('Processing');
 
       const favicon = readyRow.querySelector<HTMLImageElement>('.item-favicon img')!;

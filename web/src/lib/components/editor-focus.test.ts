@@ -109,6 +109,49 @@ describe('inline editor focus', () => {
     }
   });
 
+  it('associates a failed save with the memo editor and preserves focus when retrying', async () => {
+    const onSave = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Unable to save offline.'))
+      .mockResolvedValueOnce(undefined);
+    const target = document.createElement('div');
+    document.body.append(target);
+    const component = mount(NoteItem, {
+      target,
+      props: { busy: false, note, onDelete: vi.fn(), onSave, timeZone: 'UTC' },
+    });
+    try {
+      (await openAction(target, 'More memo actions', 'Edit memo')).click();
+      const editor = await vi.waitFor(() => {
+        const node = target.querySelector<HTMLElement>('.cm-content');
+        expect(node).not.toBeNull();
+        return node!;
+      });
+      const save = () =>
+        editor.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            bubbles: true,
+            cancelable: true,
+            key: 'Enter',
+            ctrlKey: true,
+          }),
+        );
+      save();
+      await vi.waitFor(() => expect(editor.getAttribute('aria-invalid')).toBe('true'));
+      const error = document.getElementById(editor.getAttribute('aria-describedby')!);
+      expect(error?.getAttribute('role')).toBe('alert');
+      expect(error?.textContent).toContain('Unable to save offline.');
+      expect(editor.textContent).toContain(note.content);
+      expect(document.activeElement).toBe(editor);
+      save();
+      await vi.waitFor(() => expect(target.querySelector('.cm-content')).toBeNull());
+      expect(onSave).toHaveBeenCalledTimes(2);
+      expect(document.activeElement?.getAttribute('aria-label')).toBe('More memo actions');
+    } finally {
+      await unmount(component);
+    }
+  });
+
   it('passes the original Markdown string when saving a note', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     const target = document.createElement('div');

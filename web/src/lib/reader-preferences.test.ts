@@ -11,11 +11,11 @@ describe('reader preferences', () => {
   it('loads valid preferences and repairs invalid values', () => {
     const storage = {
       getItem: () =>
-        JSON.stringify({ fontPreset: 'atkinson', fontSize: 'huge', lineHeight: 'spacious' }),
+        JSON.stringify({ fontPreset: 'sans', fontSize: 'huge', lineHeight: 'spacious' }),
     };
 
     expect(loadReaderPreferences(storage)).toEqual({
-      fontPreset: 'atkinson',
+      fontPreset: 'sans',
       fontSize: DEFAULT_READER_PREFERENCES.fontSize,
       lineHeight: 'spacious',
       width: DEFAULT_READER_PREFERENCES.width,
@@ -30,7 +30,7 @@ describe('reader preferences', () => {
   it('persists preferences under the versioned browser key', () => {
     const values = new Map<string, string>();
     const preferences = {
-      fontPreset: 'system',
+      fontPreset: 'sans',
       fontSize: 'large',
       lineHeight: 'compact',
       width: 'wide',
@@ -40,5 +40,8 @@ describe('reader preferences', () => {
       saveReaderPreferences({ setItem: (key, value) => values.set(key, value) }, preferences),
     ).toBe(true);
     expect(JSON.parse(values.get(READER_PREFERENCES_STORAGE_KEY)!)).toEqual(preferences);
+    expect(loadReaderPreferences({ getItem: (key) => values.get(key) ?? null })).toEqual(
+      preferences,
+    );
   });
 });

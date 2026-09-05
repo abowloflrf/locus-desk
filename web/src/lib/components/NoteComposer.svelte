@@ -78,7 +78,7 @@
           class="composer-submit ml-auto"
           disabled={busy || !content.trim()}
           onclick={() => void submit()}
-          size="xs"
+          size="sm"
           variant="default"
         >
           {#if busy}<Spinner data-icon="inline-start" />{/if}

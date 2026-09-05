@@ -2,7 +2,7 @@ export const READER_PREFERENCES_STORAGE_KEY = 'locus.reader.preferences.v1';
 
 export const READER_FONT_PRESETS = [
   { label: 'Plex', value: 'plex' },
-  { label: 'Atkinson', value: 'atkinson' },
+  { label: 'Montserrat', value: 'sans' },
   { label: 'System', value: 'system' },
 ] as const;
 

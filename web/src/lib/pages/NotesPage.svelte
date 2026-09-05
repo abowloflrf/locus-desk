@@ -1,7 +1,5 @@
 <script lang="ts">
-  import ChevronDown from '@lucide/svelte/icons/chevron-down';
-  import * as DropdownMenu from '../components/ui/dropdown-menu';
-  import Search from '@lucide/svelte/icons/search';
+  import SearchField from '../components/SearchField.svelte';
   import { onMount } from 'svelte';
 
   import { errorMessage } from '../api/client';
@@ -13,8 +11,6 @@
   import StatusMessage from '../components/StatusMessage.svelte';
   import { Button } from '../components/ui/button';
   import * as Empty from '../components/ui/empty';
-  import { Input } from '../components/ui/input';
-  import * as Kbd from '../components/ui/kbd';
   import { Spinner } from '../components/ui/spinner';
   import * as ToggleGroup from '../components/ui/toggle-group';
   import { captureListFocus, restoreListFocus, type ListFocusSnapshot } from '../utils/focus';
@@ -25,11 +21,6 @@
   let tags = $state<string[]>([]);
   let query = $state('');
   let selectedTag = $state('');
-  let visibleTags = $derived(
-    selectedTag && !tags.slice(0, 2).includes(selectedTag)
-      ? [tags[0], selectedTag].filter(Boolean)
-      : tags.slice(0, 2),
-  );
   let page = $state(1);
   let total = $state(0);
   let loading = $state(true);
@@ -312,21 +303,14 @@
 <div bind:this={pageElement} class="page notes-page">
   <header class="page-header notes-header">
     <h1>Memos</h1>
-    <label class="search-field">
-      <Search class="pointer-events-none absolute left-3 size-4 text-muted-foreground" />
-      <span class="sr-only">Search memos</span>
-      <Input
-        class="pl-9 pr-12"
-        autocomplete="off"
-        bind:ref={searchInput}
-        oninput={handleSearch}
-        placeholder="Search memos"
-        type="search"
-        value={query}
-        variant="flat"
-      />
-      <Kbd.Root class="pointer-events-none absolute right-3">⌘K</Kbd.Root>
-    </label>
+    <SearchField
+      label="Search memos"
+      placeholder="Search memos"
+      value={query}
+      oninput={handleSearch}
+      bind:ref={searchInput}
+      shortcut="⌘K"
+    />
   </header>
 
   <NoteComposer onCreate={handleCreate} />
@@ -343,42 +327,12 @@
         type="single"
       >
         <ToggleGroup.Item value="">All</ToggleGroup.Item>
-        {#each visibleTags as tag}
+        {#each tags as tag (tag)}
           <ToggleGroup.Item class="min-w-0" value={tag} title={`#${tag}`}>
             <span class="truncate font-mono"><span class="mr-0.5">#</span>{tag}</span>
           </ToggleGroup.Item>
         {/each}
       </ToggleGroup.Root>
-      {#if tags.length > 2}
-        <DropdownMenu.Root>
-          <DropdownMenu.Trigger>
-            {#snippet child({ props })}
-              <Button {...props} aria-label="All tags" size="sm" variant="ghost">
-                Tags <ChevronDown data-icon="inline-end" />
-              </Button>
-            {/snippet}
-          </DropdownMenu.Trigger>
-          <DropdownMenu.Content align="end" class="max-h-72 w-56 overflow-y-auto">
-            <DropdownMenu.Group>
-              <DropdownMenu.Label>Filter by tag</DropdownMenu.Label>
-              <DropdownMenu.RadioGroup
-                value={selectedTag}
-                onValueChange={(value) => {
-                  selectedTag = value;
-                  handleTagFilterChange();
-                }}
-              >
-                <DropdownMenu.RadioItem value="">All memos</DropdownMenu.RadioItem>
-                {#each tags as tag}
-                  <DropdownMenu.RadioItem value={tag}>
-                    <span class="truncate font-mono"><span class="mr-0.5">#</span>{tag}</span>
-                  </DropdownMenu.RadioItem>
-                {/each}
-              </DropdownMenu.RadioGroup>
-            </DropdownMenu.Group>
-          </DropdownMenu.Content>
-        </DropdownMenu.Root>
-      {/if}
     </div>
   {/if}
 
@@ -390,7 +344,7 @@
     >{/if}
 
   {#if loading && notes.length === 0}
-    <div aria-live="polite" class="loading-state large flex items-center justify-center gap-2">
+    <div aria-live="polite" class="loading-state flex items-center justify-center gap-2">
       <Spinner />
       Loading memos…
     </div>
@@ -455,38 +409,19 @@
 />
 
 <style>
-  .notes-page {
-    width: min(100%, 920px);
-  }
-
   .tag-toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
     margin-bottom: 8px;
     min-width: 0;
   }
 
   .tag-toolbar :global(.tag-filter) {
-    flex: 1;
-    overflow: hidden;
+    width: 100%;
+    flex-wrap: wrap;
   }
 
   .tag-toolbar :global([data-slot='toggle-group-item']) {
     font-family: var(--font-mono);
-    flex-shrink: 1;
-    max-width: 160px;
-  }
-
-  .tag-toolbar :global([data-slot='toggle-group-item']:first-child) {
     flex-shrink: 0;
-  }
-
-  @media (max-width: 767px), (pointer: coarse) {
-    .tag-toolbar :global(button) {
-      min-height: 44px;
-      min-width: 44px;
-    }
+    max-width: min(160px, 100%);
   }
 </style>

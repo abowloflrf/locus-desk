@@ -1,6 +1,7 @@
 <script lang="ts">
   import * as AlertDialog from '$lib/components/ui/alert-dialog';
   import { Spinner } from '$lib/components/ui/spinner';
+  import * as Field from '$lib/components/ui/field';
 
   let {
     open,
@@ -53,7 +54,7 @@
       <AlertDialog.Title>{title}</AlertDialog.Title>
       <AlertDialog.Description>{message}</AlertDialog.Description>
       {#if error}
-        <p aria-live="assertive" class="text-sm text-destructive" role="alert">{error}</p>
+        <Field.Error aria-live="assertive">{error}</Field.Error>
       {/if}
     </AlertDialog.Header>
     <AlertDialog.Footer>

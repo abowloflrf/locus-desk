@@ -1,0 +1,191 @@
+@layer components {
+  .prose-content {
+    min-width: 0;
+    color: var(--foreground);
+    overflow-wrap: anywhere;
+    font-size: 15px;
+    line-height: 24px;
+  }
+
+  .prose-content > :first-child {
+    margin-top: 0;
+  }
+
+  .prose-content > :last-child {
+    margin-bottom: 0;
+  }
+
+  .prose-content h1,
+  .prose-content h2,
+  .prose-content h3,
+  .prose-content h4 {
+    margin: 1.3em 0 0.45em;
+    line-height: 1.35;
+  }
+
+  .prose-content h1 {
+    font-size: 21px;
+  }
+
+  .prose-content h2 {
+    font-size: 18px;
+  }
+
+  .prose-content h3,
+  .prose-content h4 {
+    font-size: 16px;
+  }
+
+  .prose-content p,
+  .prose-content ul,
+  .prose-content ol,
+  .prose-content blockquote,
+  .prose-content pre,
+  .prose-content figure {
+    margin: 0 0 var(--prose-block-gap, 0.7em);
+  }
+
+  .prose-content ul,
+  .prose-content ol {
+    padding-left: 1.55em;
+  }
+
+  .prose-content ol {
+    list-style: decimal outside;
+  }
+
+  .prose-content ul {
+    list-style: disc outside;
+  }
+
+  .prose-content ul ul {
+    list-style-type: circle;
+  }
+
+  .prose-content ul ul ul {
+    list-style-type: square;
+  }
+
+  .prose-content li > ul,
+  .prose-content li > ol {
+    margin-block: 4px;
+  }
+
+  .prose-content li + li {
+    margin-top: 0.16em;
+  }
+
+  .prose-content li:has(> input[type='checkbox']) {
+    list-style: none;
+  }
+
+  .prose-content input[type='checkbox'] {
+    width: 15px;
+    height: 15px;
+    min-height: 0;
+    margin: 0 7px 0 0;
+    accent-color: var(--primary);
+    vertical-align: -2px;
+  }
+
+  .prose-content blockquote {
+    padding-left: 16px;
+    color: var(--muted-foreground);
+    border-left: 2px solid var(--primary);
+  }
+
+  .prose-content code {
+    padding: 0.12em 0.34em;
+    background: var(--muted);
+    border-radius: 4px;
+    font-family: var(--prose-font-mono, var(--font-mono));
+    font-size: 0.86em;
+  }
+
+  .prose-content pre {
+    max-width: 100%;
+    padding: 12px 16px;
+    overflow-x: auto;
+    color: var(--code-foreground);
+    background: var(--code-background);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    font-family: var(--prose-font-mono, var(--font-mono));
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  .prose-content pre > span {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--muted-foreground);
+    font-family: var(--prose-font-mono, var(--font-mono));
+    font-size: 11px;
+    line-height: 16px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    user-select: none;
+  }
+
+  .prose-content pre code {
+    font-size: inherit;
+    padding: 0;
+    background: transparent;
+  }
+
+  .prose-content a {
+    color: var(--primary);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklch, var(--primary), transparent 55%);
+    text-underline-offset: 2px;
+  }
+
+  .prose-content table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+    margin-block: 12px;
+    font-size: 13px;
+  }
+
+  .prose-content th,
+  .prose-content td {
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .prose-content th {
+    background: var(--muted);
+    font-weight: 600;
+  }
+
+  .prose-content h5,
+  .prose-content h6 {
+    margin-block: 1em 0.4em;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .prose-content hr {
+    margin: 1.4em 0;
+    border: 0;
+    border-top: 1px solid var(--border);
+  }
+
+  @media (max-width: 767px) {
+    .prose-content {
+      font-size: 16px;
+    }
+  }
+
+  .prose-content img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 0 auto 1.4em;
+    border-radius: var(--radius-md);
+  }
+}

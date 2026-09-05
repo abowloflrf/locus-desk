@@ -472,9 +472,11 @@
           <Button onclick={() => void loadContent()} variant="secondary">Try again</Button>
         </div>
       {:else if sanitizedHtml}
-        <article bind:this={readerArticle} class="reader-content">{@html outline.html}</article>
+        <article bind:this={readerArticle} class="reader-content prose-content">
+          {@html outline.html}
+        </article>
       {:else if plainText}
-        <article class="reader-content reader-plain-text">{plainText}</article>
+        <article class="reader-content prose-content reader-plain-text">{plainText}</article>
       {:else}
         <Empty.Root class="reader-state">
           <Empty.Header>
@@ -513,6 +515,8 @@
   .library-reader {
     --reader-font-sans: var(--font-sans);
     --reader-font-mono: var(--font-mono);
+    --prose-font-mono: var(--reader-font-mono);
+    --prose-block-gap: 1.45em;
     --reader-font-size: 18px;
     --reader-line-height: 1.82;
     --reader-column-width: 800px;
@@ -523,11 +527,8 @@
     animation: reader-enter 180ms ease both;
   }
 
-  .library-reader[data-reader-font='atkinson'] {
-    --reader-font-sans:
-      'Atkinson Hyperlegible Next Variable', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei',
-      sans-serif;
-    --reader-font-mono: 'Atkinson Hyperlegible Mono Variable', ui-monospace, monospace;
+  .library-reader[data-reader-font='plex'] {
+    --reader-font-sans: 'IBM Plex Sans Variable', 'Noto Sans SC', sans-serif;
   }
 
   .library-reader[data-reader-font='system'] {
@@ -752,16 +753,6 @@
     white-space: pre-wrap;
   }
 
-  .reader-content :global(p),
-  .reader-content :global(blockquote),
-  .reader-content :global(pre),
-  .reader-content :global(ul),
-  .reader-content :global(ol),
-  .reader-content :global(table),
-  .reader-content :global(figure) {
-    margin: 0 0 1.45em;
-  }
-
   .reader-content :global(h1),
   .reader-content :global(h2),
   .reader-content :global(h3),
@@ -787,27 +778,7 @@
     font-size: 21px;
   }
 
-  .reader-content :global(a) {
-    color: var(--primary);
-    text-decoration: underline;
-    text-decoration-thickness: 1px;
-    text-underline-offset: 3px;
-  }
-
-  .reader-content :global(blockquote) {
-    padding-left: 20px;
-    color: var(--muted-foreground);
-    border-left: 2px solid var(--primary);
-    font-size: 1.02em;
-  }
-
   .reader-content :global(pre) {
-    max-width: 100%;
-    padding: 16px;
-    overflow: auto;
-    background: var(--muted);
-    border-radius: var(--radius-md);
-    font-family: var(--reader-font-mono);
     font-size: 13px;
     line-height: 1.65;
   }
@@ -820,53 +791,10 @@
     font-size: 11px;
   }
 
-  .reader-content :global(:not(pre) > code) {
-    padding: 2px 4px;
-    background: var(--muted);
-    border-radius: 4px;
-    font-family: var(--reader-font-mono);
-    font-size: 0.82em;
-  }
-
-  .reader-content :global(table) {
-    display: block;
-    width: 100%;
-    max-width: 100%;
-    overflow-x: auto;
-    border-collapse: collapse;
-    font-family: var(--reader-font-sans);
-    font-size: 13px;
-    line-height: 1.55;
-  }
-
-  .reader-content :global(th),
-  .reader-content :global(td) {
-    padding: 8px 10px;
-    border-bottom: 1px solid var(--border);
-    text-align: left;
-    vertical-align: top;
-  }
-
-  .reader-content :global(hr) {
-    width: 64px;
-    margin: 44px auto;
-    border: 0;
-    border-top: 1px solid var(--border);
-  }
-
   .reader-content :global(figcaption) {
     color: var(--muted-foreground);
     font-family: var(--reader-font-sans);
     font-size: 12px;
-  }
-
-  .reader-content :global(img) {
-    display: block;
-    width: auto;
-    max-width: 100%;
-    height: auto;
-    margin: 0 auto 1.45em;
-    border-radius: var(--radius-md);
   }
 
   @keyframes reader-enter {
@@ -928,7 +856,6 @@
     }
 
     .reader-content :global(pre) {
-      padding: 14px;
       font-size: 12px;
     }
   }

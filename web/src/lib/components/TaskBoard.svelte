@@ -12,7 +12,6 @@
   import { Button } from './ui/button';
   import * as Empty from './ui/empty';
   import { Spinner } from './ui/spinner';
-  import ListTodo from '@lucide/svelte/icons/list-todo';
   import ChevronDown from '@lucide/svelte/icons/chevron-down';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
 
@@ -269,8 +268,8 @@
   class="task-board"
 >
   {#if mode === 'all'}
-    <header class="task-header">
-      <h1><ListTodo /> Tasks</h1>
+    <header class="page-header">
+      <h1>Tasks</h1>
     </header>
   {/if}
 
@@ -289,7 +288,7 @@
       Loading tasks…
     </div>
   {:else if loadError}
-    <Empty.Root class="compact py-10">
+    <Empty.Root>
       <Empty.Header>
         <Empty.Title>Unable to load tasks</Empty.Title>
         <Empty.Description>{loadError}</Empty.Description>
@@ -299,7 +298,7 @@
       </Empty.Content>
     </Empty.Root>
   {:else if tasks.length === 0}
-    <Empty.Root class="compact py-10">
+    <Empty.Root>
       <Empty.Header>
         <Empty.Title>{mode === 'todo' ? 'No open tasks' : 'No tasks in this view'}</Empty.Title>
         <Empty.Description
@@ -375,27 +374,6 @@
   .todo-task-board {
     min-height: 0;
   }
-  .task-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    margin-bottom: 24px;
-  }
-  .task-header h1 {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    margin: 0;
-    font-size: 24px;
-    font-weight: 650;
-    line-height: 36px;
-  }
-  .task-header h1 :global(svg) {
-    width: 24px;
-    height: 24px;
-    stroke-width: 1.5;
-  }
   .task-list {
     display: grid;
     gap: 4px;
@@ -434,14 +412,5 @@
     width: 16px;
     height: 16px;
     color: var(--muted-foreground);
-  }
-  @media (max-width: 767px) {
-    .task-header {
-      margin-bottom: 16px;
-    }
-    .task-header h1 {
-      font-size: 20px;
-      gap: 12px;
-    }
   }
 </style>

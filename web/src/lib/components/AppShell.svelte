@@ -133,7 +133,7 @@
   >
   {#if notice}
     <Alert.Root
-      class="global-notice fixed top-[calc(1rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-90 flex w-auto max-w-[min(27.5rem,calc(100vw-2rem))] items-center gap-4 shadow-md"
+      class="global-notice fixed top-[calc(1rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-90 flex w-auto max-w-[min(27.5rem,calc(100vw-2rem))] items-center gap-4 shadow-none"
       hidden={(compact && todoOpen) || immersive}
       inert={(compact && todoOpen) || immersive ? true : undefined}
       variant="destructive"

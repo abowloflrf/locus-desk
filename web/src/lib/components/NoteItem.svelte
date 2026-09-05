@@ -14,6 +14,7 @@
   import MarkdownContent from './MarkdownContent.svelte';
   import { Badge } from './ui/badge';
   import { Button } from './ui/button';
+  import * as Field from './ui/field';
   import * as Dialog from './ui/dialog';
   import * as DropdownMenu from './ui/dropdown-menu';
   import { Spinner } from './ui/spinner';
@@ -120,7 +121,8 @@
 <article
   class:editing
   class:note-pinned={note.pinned}
-  class="note-item"
+  class="note-item list-action-row"
+  data-actions-open={actionsOpen}
   data-focus-uid={note.uid}
   tabindex="-1"
 >
@@ -134,14 +136,14 @@
           disabled={busy}
           id={`edit-note-${note.uid}`}
           label="Edit memo"
+          invalid={Boolean(editError)}
+          describedBy={editError ? `edit-note-error-${note.uid}` : undefined}
           onCancel={() => void closeEditor()}
           onSave={() => void save()}
           bind:value={draft}
         />
         {#if editError}
-          <p aria-live="assertive" class="form-error" id={`edit-note-error-${note.uid}`}>
-            {editError}
-          </p>
+          <Field.Error class="mt-2" id={`edit-note-error-${note.uid}`}>{editError}</Field.Error>
         {/if}
         <div class="inline-form-actions">
           <Button disabled={busy} onclick={() => void closeEditor()} variant="secondary"
@@ -198,7 +200,7 @@
     {/if}
   </div>
   {#if !editing}
-    <div aria-label="Memo actions" class="note-actions">
+    <div aria-label="Memo actions" class="note-actions list-action-group">
       <DropdownMenu.Root onOpenChange={(open) => (actionsOpen = open)} open={actionsOpen}>
         <DropdownMenu.Trigger disabled={busy}>
           {#snippet child({ props })}
@@ -387,18 +389,6 @@
     right: 8px;
     display: flex;
     gap: 1px;
-    opacity: 1;
-    pointer-events: auto;
-    transition:
-      opacity 140ms ease,
-      transform 140ms ease;
-  }
-
-  .note-item:hover .note-actions,
-  .note-item:focus-within .note-actions {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translateY(0);
   }
 
   .note-tags {
@@ -427,14 +417,6 @@
     .note-body :global(.memo-expand) {
       min-height: 44px;
       min-width: 44px;
-    }
-  }
-
-  @media (max-width: 767px), (hover: none) {
-    .note-actions {
-      opacity: 1;
-      pointer-events: auto;
-      transform: none;
     }
   }
 </style>

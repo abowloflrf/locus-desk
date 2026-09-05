@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Search from '@lucide/svelte/icons/search';
+  import SearchField from '../components/SearchField.svelte';
   import { onMount } from 'svelte';
 
   import { errorMessage } from '../api/client';
@@ -10,7 +10,6 @@
   import StatusMessage from '../components/StatusMessage.svelte';
   import { Button } from '../components/ui/button';
   import * as Empty from '../components/ui/empty';
-  import { Input } from '../components/ui/input';
   import { Spinner } from '../components/ui/spinner';
   import { captureListFocus, restoreListFocus, type ListFocusSnapshot } from '../utils/focus';
 
@@ -211,17 +210,12 @@
     <div>
       <h1>Archive</h1>
     </div>
-    <label class="search-field compact-search">
-      <Search class="pointer-events-none absolute left-3 size-4 text-muted-foreground" />
-      <span class="sr-only">Search archived memos</span>
-      <Input
-        class="pl-9"
-        oninput={handleSearch}
-        placeholder="Search archive"
-        type="search"
-        value={query}
-      />
-    </label>
+    <SearchField
+      label="Search archived memos"
+      placeholder="Search archive"
+      value={query}
+      oninput={handleSearch}
+    />
   </header>
 
   {#if operationError}<StatusMessage tone="error">{operationError}</StatusMessage>{/if}
@@ -234,7 +228,7 @@
   </div>
 
   {#if loading && notes.length === 0}
-    <div aria-live="polite" class="loading-state large flex items-center justify-center gap-2">
+    <div aria-live="polite" class="loading-state flex items-center justify-center gap-2">
       <Spinner />
       Loading archive…
     </div>

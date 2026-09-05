@@ -128,13 +128,6 @@
     border: 0;
   }
 
-  .form-error {
-    margin: 8px 0 0;
-    color: var(--destructive);
-    font-size: 12px;
-    line-height: 18px;
-  }
-
   .inline-form-actions {
     display: flex;
     gap: 8px;

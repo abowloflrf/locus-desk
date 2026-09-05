@@ -156,7 +156,8 @@
 <article
   bind:this={rowElement}
   onfocusout={saveOnLeave}
-  class="task-row"
+  class="task-row list-action-row"
+  data-actions-open={propertiesOpen || detailsOpen}
   class:task-row-todo={mode === 'todo'}
   class:task-done={task.status === 'DONE'}
   class:task-selected={editing || propertiesOpen || detailsOpen}
@@ -221,13 +222,13 @@
             size="icon-sm"
             class={task.description
               ? 'task-details-trigger'
-              : 'task-details-trigger task-details-empty'}><FileText /></Button
+              : 'task-details-trigger list-action-group'}><FileText /></Button
           >
         {/snippet}
       </Popover.Trigger>
       <Popover.Content
         align="end"
-        class="w-[min(352px,calc(100vw-24px))] rounded-xl"
+        class="w-[min(352px,calc(100vw-2rem))]"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           detailsButton?.focus();
@@ -242,6 +243,8 @@
                 bind:value={description}
                 disabled={busy || detailsSaving}
                 rows={4}
+                aria-invalid={Boolean(detailsError)}
+                aria-describedby={detailsError ? `task-details-error-${task.uid}` : undefined}
                 class="max-h-[40dvh]"
                 onkeydown={(event) => {
                   if (
@@ -255,7 +258,9 @@
                 }}
                 placeholder="Add a note…"
               />
-              {#if detailsError}<Field.Error role="alert">{detailsError}</Field.Error>{/if}
+              {#if detailsError}<Field.Error id={`task-details-error-${task.uid}`}
+                  >{detailsError}</Field.Error
+                >{/if}
             </Field.Field>
             <div class="details-actions">
               <Button
@@ -268,7 +273,7 @@
               >
               <div class="flex gap-2">
                 <Button
-                  variant="ghost"
+                  variant="secondary"
                   disabled={busy}
                   onclick={() => {
                     description = task.description;
@@ -291,7 +296,7 @@
         >{dateLabel}</span
       >{/if}
   </div>
-  <div class="task-options">
+  <div class="task-options list-action-group">
     <TaskProperties
       {today}
       dueDate={task.dueDate}
@@ -385,13 +390,6 @@
     justify-content: space-between;
     gap: 12px;
   }
-  .task-row :global(.task-details-empty) {
-    opacity: 0;
-  }
-  .task-row:hover :global(.task-details-empty),
-  .task-row:focus-within :global(.task-details-empty) {
-    opacity: 1;
-  }
   .task-row-todo {
     gap: 4px;
     min-height: 48px;
@@ -451,18 +449,6 @@
     .task-date {
       grid-column: 2;
       grid-row: 2;
-    }
-    .task-row :global(.task-details-empty) {
-      opacity: 1;
-    }
-    .task-row :global(button[data-slot='button']) {
-      min-width: 44px;
-      min-height: 44px;
-    }
-  }
-  @media (hover: none) {
-    .task-row :global(.task-details-empty) {
-      opacity: 1;
     }
   }
 </style>

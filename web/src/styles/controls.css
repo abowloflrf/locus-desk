@@ -1,0 +1,46 @@
+@layer utilities {
+  @media (max-width: 767px), (pointer: coarse) {
+    :root :is([data-slot='button'], [data-slot='toggle-group-item'], [data-slot='toggle']) {
+      min-height: 44px;
+      min-width: 44px;
+    }
+
+    :root :is([data-slot='input'], [data-slot='input-group-control']) {
+      min-height: 44px;
+    }
+
+    :root [data-slot='input-group'] {
+      min-height: 44px;
+      height: auto;
+    }
+
+    :root
+      :is(
+        [data-slot='dropdown-menu-item'],
+        [data-slot='dropdown-menu-checkbox-item'],
+        [data-slot='dropdown-menu-radio-item'],
+        [data-slot='dropdown-menu-sub-trigger']
+      ) {
+      min-height: 44px;
+    }
+
+    :root [data-slot='calendar'] {
+      --cell-size: 44px;
+    }
+
+    :root .task-properties[data-calendar-open='true'] {
+      width: min(352px, calc(100vw - 8px));
+      padding-inline: clamp(2px, calc((100vw - 316px) / 2), 16px);
+    }
+
+    :root [data-slot='checkbox']::after {
+      top: 50%;
+      left: 50%;
+      right: auto;
+      bottom: auto;
+      width: 44px;
+      height: 44px;
+      transform: translate(-50%, -50%);
+    }
+  }
+}

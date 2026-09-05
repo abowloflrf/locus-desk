@@ -4,6 +4,8 @@
 @import './styles/base.css';
 @import './styles/layout.css';
 @import './styles/states.css';
+@import './styles/prose.css';
+@import './styles/controls.css';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -42,6 +44,7 @@
   --sidebar-border: oklch(0.9 0 0);
   --sidebar-ring: oklch(0.35 0 0);
   --radius: 0.75rem;
+  --page-width: 920px;
 }
 
 @theme inline {
