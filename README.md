@@ -161,6 +161,32 @@ Run `./target/release/locus-desk --help` for the command summary and `./target/r
 
 ## Docker
 
+### Published image
+
+GitHub Actions builds the Linux amd64 image and publishes it to
+`ghcr.io/abowloflrf/locus-desk`. Pushes to `main` update `latest`; every published build also
+has a `sha-<full-commit>` tag. Git tags matching `v*` publish a matching image tag. Pull requests
+build the image without publishing it. Formatting, type checks, and tests remain available
+through the local `make check` and `make test` commands.
+
+```bash
+export APP_ADMIN_USERNAME=admin
+export APP_ADMIN_PASSWORD='replace-with-a-strong-password'
+docker pull ghcr.io/abowloflrf/locus-desk:latest
+docker run --detach --name locus-desk \
+  --publish 127.0.0.1:7310:7310 \
+  --volume locus-data:/data \
+  --env APP_ADMIN_USERNAME \
+  --env APP_ADMIN_PASSWORD \
+  --restart unless-stopped \
+  ghcr.io/abowloflrf/locus-desk:latest
+```
+
+Open `http://127.0.0.1:7310`. For HTTPS through a reverse proxy, also pass
+`--env APP_COOKIE_SECURE=true` when creating the container.
+
+### Build locally
+
 ```bash
 export APP_ADMIN_USERNAME=admin
 export APP_ADMIN_PASSWORD='replace-with-a-strong-password'
