@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install dev fmt check test build docker-build docker-up docker-down
+.PHONY: help install dev fmt check test build web-build docker-build docker-up docker-down
 
 help:
 	@echo "Locus Desk development commands"
@@ -30,13 +30,15 @@ check:
 	cd web && pnpm format:check
 	cd web && pnpm check
 
-test:
+test: web-build
 	cargo test --all-targets --locked
 	cd web && pnpm test
 
-build:
-	cd web && pnpm build
+build: web-build
 	cargo build --release --locked
+
+web-build:
+	cd web && pnpm build
 
 docker-build:
 	docker build --network=host --build-arg LOCUS_GIT_COMMIT="$$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)" --tag locus-desk:local .

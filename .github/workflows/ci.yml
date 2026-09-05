@@ -42,10 +42,5 @@ jobs:
           cargo clippy --all-targets --all-features --locked -- -D warnings
           pnpm --dir web check
 
-      - name: Test
-        run: |
-          cargo test --all-targets --locked
-          pnpm --dir web test
-
-      - name: Build production artifact
-        run: make build
+      - name: Test and build production artifact
+        run: make test build
