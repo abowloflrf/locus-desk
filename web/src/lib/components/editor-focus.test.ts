@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Note, Task } from '../api/types';
 import NoteItem from './NoteItem.svelte';
+import MarkdownEditor from './MarkdownEditor.svelte';
 import TaskRow from './TaskRow.svelte';
 
 const note: Note = {
@@ -36,6 +37,42 @@ afterEach(() => {
 });
 
 describe('inline editor focus', () => {
+  it('updates compact code block lines as Markdown changes without styling prose', async () => {
+    const target = document.createElement('div');
+    document.body.append(target);
+    const component = mount(MarkdownEditor, {
+      target,
+      props: { value: 'Prose', id: 'code-style-editor', onCancel: vi.fn(), onSave: vi.fn() },
+    });
+    try {
+      const view = await vi.waitFor(() => {
+        const editor = target.querySelector<HTMLElement>('.cm-editor');
+        expect(editor).not.toBeNull();
+        return EditorView.findFromDOM(editor!)!;
+      });
+      view.dispatch({
+        changes: {
+          from: 0,
+          to: view.state.doc.length,
+          insert: 'Prose\n\n```\ncode\n\n```\n\nMore prose',
+        },
+      });
+      expect(target.querySelectorAll('.cm-memo-code-line')).toHaveLength(4);
+      expect(target.querySelector('.cm-line')?.classList.contains('cm-memo-code-line')).toBe(false);
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: '    indented code' },
+      });
+      expect(target.querySelectorAll('.cm-memo-code-line')).toHaveLength(1);
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: 'Prose with `inline code`' },
+      });
+      expect(target.querySelectorAll('.cm-memo-code-line')).toHaveLength(0);
+      expect(target.querySelector('.cm-memo-code')).not.toBeNull();
+    } finally {
+      await unmount(component);
+    }
+  });
+
   it('moves focus into and back out of the note editor', async () => {
     const target = document.createElement('div');
     document.body.append(target);

@@ -163,6 +163,29 @@
     class:layout-todo={current === 'home' && workspaceLayout === 'todo'}
     class="workspace-stage"
   >
+    {#if current === 'home' && !compact}
+      <header class="workspace-toolbar">
+        <span>Workspace</span>
+        <ToggleGroup.Root
+          aria-label="Workspace layout"
+          bind:value={workspaceLayout}
+          class="shrink-0"
+          size="sm"
+          type="single"
+          variant="outline"
+        >
+          <ToggleGroup.Item aria-label="Show Memos only" title="Memos only" value="notes">
+            <PanelLeft />
+          </ToggleGroup.Item>
+          <ToggleGroup.Item aria-label="Show Memos and Todo" title="Memos and Todo" value="split">
+            <Columns2 />
+          </ToggleGroup.Item>
+          <ToggleGroup.Item aria-label="Show Todo only" title="Todo only" value="todo">
+            <ListChecks />
+          </ToggleGroup.Item>
+        </ToggleGroup.Root>
+      </header>
+    {/if}
     <div
       class="workspace-column"
       inert={(compact && todoOpen) ||
@@ -232,25 +255,6 @@
           <TaskBoard mode="todo" {refreshToken} today={session.workspace.today} />
         </div>
       </aside>
-
-      <ToggleGroup.Root
-        aria-label="Workspace layout"
-        bind:value={workspaceLayout}
-        class="absolute bottom-[18px] left-1/2 z-30 col-span-full hidden -translate-x-1/2 min-[1200px]:flex"
-        size="lg"
-        type="single"
-        variant="workspace"
-      >
-        <ToggleGroup.Item aria-label="Show Memos only" title="Memos only" value="notes">
-          <PanelLeft />
-        </ToggleGroup.Item>
-        <ToggleGroup.Item aria-label="Show Memos and Todo" title="Memos and Todo" value="split">
-          <Columns2 />
-        </ToggleGroup.Item>
-        <ToggleGroup.Item aria-label="Show Todo only" title="Todo only" value="todo">
-          <ListChecks />
-        </ToggleGroup.Item>
-      </ToggleGroup.Root>
     {/if}
   </div>
 </div>
@@ -277,9 +281,8 @@
     display: grid;
     height: 100%;
     min-height: 0;
-    grid-template-columns: 224px minmax(0, 1fr);
+    grid-template-columns: 200px minmax(0, 1fr);
     overflow: hidden;
-    transition: grid-template-columns 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
   }
 
   .app-shell.sidebar-collapsed {
@@ -314,6 +317,18 @@
     overflow: hidden;
   }
 
+  .workspace-toolbar {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 8px 24px;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
   .workspace-column {
     min-width: 0;
     min-height: 0;
@@ -332,7 +347,8 @@
   }
 
   .workspace-main:focus-visible {
-    outline: none;
+    outline: 2px solid var(--ring);
+    outline-offset: -2px;
   }
 
   .compact-topbar {
@@ -353,7 +369,7 @@
     min-width: 0;
     height: 100%;
     flex-direction: column;
-    padding: 28px 16px 76px;
+    padding: 20px 16px 32px;
     overflow-x: hidden;
     overflow-y: auto;
     background: var(--card);
@@ -368,8 +384,8 @@
 
   @media (min-width: 1200px) {
     .workspace-stage.has-workspace-layout {
+      grid-template-rows: auto minmax(0, 1fr);
       grid-template-columns: calc(100% - 320px) 320px;
-      transition: grid-template-columns 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
     }
 
     .workspace-stage.layout-notes {
@@ -388,7 +404,6 @@
       transition:
         opacity 160ms ease,
         transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
-        padding 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
         border-color 160ms ease,
         visibility 0ms step-start;
     }
@@ -404,7 +419,6 @@
       transition:
         opacity 140ms ease,
         transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
-        padding 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
         border-color 160ms ease,
         visibility 200ms step-end;
     }

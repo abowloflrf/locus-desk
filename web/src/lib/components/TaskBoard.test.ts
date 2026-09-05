@@ -19,7 +19,7 @@ afterEach(() => {
 });
 
 describe('TaskBoard focus and filtering', () => {
-  it('loads every open Todo task and keeps each summary to its title and first detail line', async () => {
+  it('loads every open Todo task with its schedule and first detail line', async () => {
     const alpha = task('alpha', 'Alpha');
     const timed = { ...task('timed', 'Timed'), dueTime: '16:00' };
     const undated = {
@@ -44,8 +44,8 @@ describe('TaskBoard focus and filtering', () => {
       expect(
         target.querySelector('[data-focus-uid="priority"] [aria-label="Priority task"]'),
       ).toBeNull();
-      expect(target.querySelector('[data-focus-uid="alpha"]')?.textContent).not.toContain('Today');
-      expect(target.querySelector('[data-focus-uid="timed"]')?.textContent).not.toContain('16:00');
+      expect(target.querySelector('[data-focus-uid="alpha"]')?.textContent).toContain('Today');
+      expect(target.querySelector('[data-focus-uid="timed"]')?.textContent).toContain('16:00');
       expect(target.querySelector('[data-focus-uid="undated"]')?.textContent).toContain(
         'First detail line',
       );

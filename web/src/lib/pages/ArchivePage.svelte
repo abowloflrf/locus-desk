@@ -209,9 +209,7 @@
 <div bind:this={pageElement} class="page archive-page">
   <header class="page-header">
     <div>
-      <p class="eyebrow">Memos</p>
       <h1>Archive</h1>
-      <p class="page-description">Memos kept out of the active timeline.</p>
     </div>
     <label class="search-field compact-search">
       <Search class="pointer-events-none absolute left-3 size-4 text-muted-foreground" />

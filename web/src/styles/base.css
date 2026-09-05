@@ -24,7 +24,7 @@
     color: var(--foreground);
     background: var(--background);
     font-size: 14px;
-    line-height: 1.55;
+    line-height: 1.5;
   }
 
   #app {
@@ -83,6 +83,17 @@
   ::selection {
     color: var(--foreground);
     background: var(--accent);
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+    scroll-margin-top: 64px;
+  }
+
+  time {
+    font-variant-numeric: tabular-nums;
   }
 
   h1,

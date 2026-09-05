@@ -44,17 +44,56 @@
     }
 
     async function createEditor(): Promise<void> {
-      const [core, markdownModule, state, language, highlight] = await Promise.all([
+      const [core, markdownModule, state, language, highlight, editorView] = await Promise.all([
         import('codemirror'),
         import('@codemirror/lang-markdown'),
         import('@codemirror/state'),
         import('@codemirror/language'),
         import('@lezer/highlight'),
+        import('@codemirror/view'),
       ]);
       if (destroyed || !host) return;
 
       const { EditorView, basicSetup } = core;
       const compartment = new state.Compartment();
+      const codeLine = editorView.Decoration.line({ class: 'cm-memo-code-line' });
+      const codeLines = editorView.ViewPlugin.fromClass(
+        class {
+          decorations: import('@codemirror/view').DecorationSet;
+
+          constructor(view: CodeMirrorEditorView) {
+            this.decorations = this.collect(view);
+          }
+
+          collect(view: CodeMirrorEditorView) {
+            const lines = new Set<number>();
+            language.syntaxTree(view.state).iterate({
+              enter(node) {
+                if (node.name !== 'FencedCode' && node.name !== 'CodeBlock') return;
+                const first = view.state.doc.lineAt(node.from).number;
+                const last = view.state.doc.lineAt(node.to).number;
+                for (let number = first; number <= last; number++) {
+                  lines.add(view.state.doc.line(number).from);
+                }
+                return false;
+              },
+            });
+            return editorView.Decoration.set(
+              [...lines].sort((a, b) => a - b).map((from) => codeLine.range(from)),
+            );
+          }
+
+          update(update: import('@codemirror/view').ViewUpdate) {
+            if (
+              update.docChanged ||
+              language.syntaxTree(update.startState) !== language.syntaxTree(update.state)
+            ) {
+              this.decorations = this.collect(update.view);
+            }
+          }
+        },
+        { decorations: (plugin) => plugin.decorations },
+      );
       const markdownHighlighting = language.HighlightStyle.define([
         { tag: highlight.tags.heading, color: 'var(--foreground)', fontWeight: '680' },
         { tag: highlight.tags.strong, color: 'var(--foreground)', fontWeight: '700' },
@@ -69,7 +108,12 @@
           color: 'var(--muted-foreground)',
         },
         { tag: highlight.tags.quote, color: 'var(--muted-foreground)' },
-        { tag: highlight.tags.monospace, color: 'var(--foreground)' },
+        {
+          tag: highlight.tags.monospace,
+          color: 'var(--foreground)',
+          fontFamily: 'var(--font-mono)',
+          class: 'cm-memo-code',
+        },
       ]);
       const editorTheme = EditorView.theme({
         '&': {
@@ -82,7 +126,7 @@
           minHeight: '120px',
           maxHeight: 'min(420px, 56vh)',
           overflow: 'auto',
-          fontFamily: 'var(--font-mono)',
+          fontFamily: 'var(--font-sans)',
           lineHeight: '24px',
           scrollbarColor: 'var(--border) transparent',
         },
@@ -92,6 +136,13 @@
           caretColor: 'var(--foreground)',
         },
         '.cm-line': { padding: '0 6px' },
+        '.cm-memo-code': { fontSize: '0.86em' },
+        '.cm-memo-code-line': {
+          fontFamily: 'var(--font-mono)',
+          fontSize: '0.86em',
+          lineHeight: '1.55',
+        },
+        '.cm-memo-code-line .cm-memo-code': { fontSize: 'inherit' },
         '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--primary)' },
         '.cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection': {
           backgroundColor: 'color-mix(in oklch, var(--primary), transparent 82%)',
@@ -145,6 +196,7 @@
           keyboardHandlers,
           basicSetup,
           markdownModule.markdown(),
+          codeLines,
           language.syntaxHighlighting(markdownHighlighting),
           EditorView.lineWrapping,
           EditorView.contentAttributes.of({

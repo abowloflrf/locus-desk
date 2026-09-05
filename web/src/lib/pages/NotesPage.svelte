@@ -1,4 +1,6 @@
 <script lang="ts">
+  import ChevronDown from '@lucide/svelte/icons/chevron-down';
+  import * as DropdownMenu from '../components/ui/dropdown-menu';
   import Search from '@lucide/svelte/icons/search';
   import { onMount } from 'svelte';
 
@@ -23,6 +25,11 @@
   let tags = $state<string[]>([]);
   let query = $state('');
   let selectedTag = $state('');
+  let visibleTags = $derived(
+    selectedTag && !tags.slice(0, 2).includes(selectedTag)
+      ? [tags[0], selectedTag].filter(Boolean)
+      : tags.slice(0, 2),
+  );
   let page = $state(1);
   let total = $state(0);
   let loading = $state(true);
@@ -304,7 +311,7 @@
 
 <div bind:this={pageElement} class="page notes-page">
   <header class="page-header notes-header">
-    <h1 class="sr-only">Memos</h1>
+    <h1>Memos</h1>
     <label class="search-field">
       <Search class="pointer-events-none absolute left-3 size-4 text-muted-foreground" />
       <span class="sr-only">Search memos</span>
@@ -325,31 +332,54 @@
   <NoteComposer onCreate={handleCreate} />
 
   {#if tags.length > 0}
-    <ToggleGroup.Root
-      aria-label="Filter by tag"
-      bind:value={selectedTag}
-      class="tag-filter mb-[17px] max-w-full flex-wrap pb-1"
-      onValueChange={handleTagFilterChange}
-      size="xs"
-      spacing={1}
-      type="single"
-      variant="outline"
-    >
-      <ToggleGroup.Item
-        class="data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:font-semibold data-[state=on]:text-primary-foreground data-[state=on]:shadow-none"
-        value=""
+    <div class="tag-toolbar">
+      <ToggleGroup.Root
+        aria-label="Filter by tag"
+        bind:value={selectedTag}
+        class="tag-filter min-w-0"
+        onValueChange={handleTagFilterChange}
+        size="sm"
+        spacing={1}
+        type="single"
       >
-        <span class="font-mono text-[11px] leading-none">All</span>
-      </ToggleGroup.Item>
-      {#each tags as tag}
-        <ToggleGroup.Item
-          class="data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:font-semibold data-[state=on]:text-primary-foreground data-[state=on]:shadow-none"
-          value={tag}
-        >
-          <span class="font-mono text-[11px] leading-none">#{tag}</span>
-        </ToggleGroup.Item>
-      {/each}
-    </ToggleGroup.Root>
+        <ToggleGroup.Item value="">All</ToggleGroup.Item>
+        {#each visibleTags as tag}
+          <ToggleGroup.Item class="min-w-0" value={tag} title={`#${tag}`}>
+            <span class="truncate font-mono"><span class="mr-0.5">#</span>{tag}</span>
+          </ToggleGroup.Item>
+        {/each}
+      </ToggleGroup.Root>
+      {#if tags.length > 2}
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger>
+            {#snippet child({ props })}
+              <Button {...props} aria-label="All tags" size="sm" variant="ghost">
+                Tags <ChevronDown data-icon="inline-end" />
+              </Button>
+            {/snippet}
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Content align="end" class="max-h-72 w-56 overflow-y-auto">
+            <DropdownMenu.Group>
+              <DropdownMenu.Label>Filter by tag</DropdownMenu.Label>
+              <DropdownMenu.RadioGroup
+                value={selectedTag}
+                onValueChange={(value) => {
+                  selectedTag = value;
+                  handleTagFilterChange();
+                }}
+              >
+                <DropdownMenu.RadioItem value="">All memos</DropdownMenu.RadioItem>
+                {#each tags as tag}
+                  <DropdownMenu.RadioItem value={tag}>
+                    <span class="truncate font-mono"><span class="mr-0.5">#</span>{tag}</span>
+                  </DropdownMenu.RadioItem>
+                {/each}
+              </DropdownMenu.RadioGroup>
+            </DropdownMenu.Group>
+          </DropdownMenu.Content>
+        </DropdownMenu.Root>
+      {/if}
+    </div>
   {/if}
 
   {#if operationError}<StatusMessage tone="error">{operationError}</StatusMessage>{/if}
@@ -429,66 +459,34 @@
     width: min(100%, 920px);
   }
 
-  .notes-header {
+  .tag-toolbar {
+    display: flex;
     align-items: center;
-    justify-content: flex-end;
-    margin-bottom: 28px;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+    min-width: 0;
   }
 
-  .notes-header :global(.search-field) {
-    min-height: 42px;
-    background: color-mix(in oklch, var(--card), transparent 10%);
-    border-color: transparent;
-    border-radius: var(--radius-md);
+  .tag-toolbar :global(.tag-filter) {
+    flex: 1;
+    overflow: hidden;
   }
 
-  .notes-header :global(.search-field:focus-within) {
-    border-color: transparent;
+  .tag-toolbar :global([data-slot='toggle-group-item']) {
+    font-family: var(--font-mono);
+    flex-shrink: 1;
+    max-width: 160px;
   }
 
-  @media (max-width: 767px) {
-    .notes-header {
-      grid-template-columns: minmax(0, 1fr);
-      align-items: start;
-      margin-bottom: 20px;
-    }
+  .tag-toolbar :global([data-slot='toggle-group-item']:first-child) {
+    flex-shrink: 0;
+  }
 
-    .notes-header :global(.search-field) {
-      width: 100%;
-      max-width: none;
-    }
-
-    :global(.tag-filter [data-slot='toggle-group-item']) {
-      position: relative;
-      isolation: isolate;
-      height: 44px;
+  @media (max-width: 767px), (pointer: coarse) {
+    .tag-toolbar :global(button) {
+      min-height: 44px;
       min-width: 44px;
-      padding-inline: 10px;
-      background: transparent;
-      border-color: transparent;
-      box-shadow: none;
-    }
-
-    :global(.tag-filter [data-slot='toggle-group-item']::before) {
-      position: absolute;
-      inset: 10px 0;
-      z-index: 0;
-      pointer-events: none;
-      background: var(--background);
-      border: 1px solid var(--input);
-      border-radius: var(--radius-md);
-      box-shadow: 0 1px 2px color-mix(in oklch, var(--foreground), transparent 94%);
-      content: '';
-    }
-
-    :global(.tag-filter [data-slot='toggle-group-item'] > span) {
-      position: relative;
-      z-index: 1;
-    }
-
-    :global(.tag-filter [data-slot='toggle-group-item'][data-state='on']::before) {
-      background: var(--primary);
-      border-color: var(--primary);
     }
   }
 </style>

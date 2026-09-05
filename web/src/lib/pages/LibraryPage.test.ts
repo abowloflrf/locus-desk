@@ -85,6 +85,116 @@ afterEach(() => {
 });
 
 describe('LibraryPage', () => {
+  it('combines quick views with tag and archive filters and resets them', async () => {
+    const { component, target } = mountPage();
+    try {
+      await vi.waitFor(() => expect(listLibraryItems).toHaveBeenCalledOnce());
+      const viewButton = (name: string) =>
+        [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Library view"] button')].find(
+          (button) => button.textContent?.trim() === name,
+        )!;
+      viewButton('Unread').click();
+      await vi.waitFor(() =>
+        expect(listLibraryItems).toHaveBeenLastCalledWith(
+          expect.objectContaining({ read: false, starred: undefined, page: 1 }),
+          expect.any(AbortSignal),
+        ),
+      );
+      viewButton('Starred').click();
+      await vi.waitFor(() =>
+        expect(listLibraryItems).toHaveBeenLastCalledWith(
+          expect.objectContaining({ starred: true, read: undefined }),
+          expect.any(AbortSignal),
+        ),
+      );
+      target.querySelector<HTMLButtonElement>('[aria-label="Filter Library"]')!.click();
+      const tagInput = await vi.waitFor(() => {
+        const input = document.querySelector<HTMLInputElement>('#library-tag-filter');
+        expect(input).not.toBeNull();
+        return input!;
+      });
+      [...document.querySelectorAll<HTMLButtonElement>('[data-slot="toggle-group-item"]')]
+        .find((button) => button.textContent?.trim() === 'Archived')!
+        .click();
+      tagInput.value = '#Research';
+      tagInput.dispatchEvent(new Event('input', { bubbles: true }));
+      await tick();
+      tagInput.closest('form')!.requestSubmit();
+      await vi.waitFor(() =>
+        expect(listLibraryItems).toHaveBeenLastCalledWith(
+          expect.objectContaining({ starred: true, tag: 'research', status: 'ARCHIVED', page: 1 }),
+          expect.any(AbortSignal),
+        ),
+      );
+      expect(target.querySelector('.active-filter-label')?.textContent).toContain('#research');
+      const reset = await vi.waitFor(() => {
+        const button = [...target.querySelectorAll<HTMLButtonElement>('button')].find(
+          (button) => button.textContent?.trim() === 'Reset filters',
+        );
+        expect(button).toBeDefined();
+        return button!;
+      });
+      reset.click();
+      await vi.waitFor(() =>
+        expect(listLibraryItems).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            status: 'ACTIVE',
+            tag: undefined,
+            starred: undefined,
+            read: undefined,
+          }),
+          expect.any(AbortSignal),
+        ),
+      );
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it('keeps a starred item on failure and removes it after unstar succeeds', async () => {
+    let starred = true;
+    const alpha = item('alpha', 'Alpha', { starred: true });
+    vi.mocked(listLibraryItems).mockImplementation(async (params) =>
+      page(!params?.starred || starred ? [alpha] : []),
+    );
+    vi.mocked(updateLibraryItem)
+      .mockRejectedValueOnce(new Error('Connection lost'))
+      .mockImplementationOnce(async () => {
+        starred = false;
+        return { ...alpha, starred: false };
+      });
+    const { component, target } = mountPage();
+    try {
+      await vi.waitFor(() => expect(target.textContent).toContain('Alpha'));
+      [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Library view"] button')]
+        .find((button) => button.textContent?.trim() === 'Starred')!
+        .click();
+      await vi.waitFor(() => expect(listLibraryItems).toHaveBeenCalledTimes(2));
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        await vi.waitFor(() =>
+          expect(target.querySelector('[aria-label="Actions for Alpha"]')).not.toBeNull(),
+        );
+        target.querySelector<HTMLButtonElement>('[aria-label="Actions for Alpha"]')!.click();
+        const unstar = await vi.waitFor(() => {
+          const action = document.querySelector<HTMLElement>('[aria-label="Unstar Alpha"]');
+          expect(action).not.toBeNull();
+          return action!;
+        });
+        unstar.click();
+        if (attempt === 0) {
+          await vi.waitFor(() => expect(target.textContent).toContain('Connection lost'));
+          expect(target.querySelector('[data-library-select="alpha"]')).not.toBeNull();
+        }
+      }
+      await vi.waitFor(() =>
+        expect(target.querySelector('[data-library-select="alpha"]')).toBeNull(),
+      );
+      expect(updateLibraryItem).toHaveBeenCalledTimes(2);
+    } finally {
+      await unmount(component);
+    }
+  });
+
   it('keeps a deduplicated create at one row and one total item', async () => {
     const existing = item('alpha', 'Alpha');
     vi.mocked(listLibraryItems).mockResolvedValue(page([existing]));
@@ -155,15 +265,20 @@ describe('LibraryPage', () => {
       await Promise.resolve();
       expect(target.textContent).not.toContain('Stale result');
 
-      target.querySelector<HTMLButtonElement>('[aria-label="Status: Active"]')!.click();
+      target.querySelector<HTMLButtonElement>('[aria-label="Filter Library"]')!.click();
       const archivedOption = await vi.waitFor(() => {
         const option = [
-          ...document.body.querySelectorAll<HTMLElement>('[role="menuitemradio"]'),
+          ...document.body.querySelectorAll<HTMLElement>('[data-slot="toggle-group-item"]'),
         ].find((entry) => entry.textContent?.trim() === 'Archived');
         expect(option).not.toBeUndefined();
         return option!;
       });
       archivedOption.click();
+      await tick();
+      document
+        .querySelector<HTMLFormElement>('#library-tag-filter')!
+        .closest('form')!
+        .requestSubmit();
       await tick();
       expect(target.textContent).not.toContain('Fresh result');
       expect(target.querySelector('.library-results')?.getAttribute('aria-busy')).toBe('true');

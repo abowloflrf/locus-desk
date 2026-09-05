@@ -1,7 +1,6 @@
 <script lang="ts">
   import Archive from '@lucide/svelte/icons/archive';
   import BookOpenCheck from '@lucide/svelte/icons/book-open-check';
-  import ChevronDown from '@lucide/svelte/icons/chevron-down';
   import Ellipsis from '@lucide/svelte/icons/ellipsis';
   import ListFilter from '@lucide/svelte/icons/list-filter';
   import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
@@ -34,6 +33,9 @@
   import StatusMessage from '../components/StatusMessage.svelte';
   import { Button } from '../components/ui/button';
   import * as DropdownMenu from '../components/ui/dropdown-menu';
+  import * as Popover from '../components/ui/popover';
+  import * as Field from '../components/ui/field';
+  import * as ToggleGroup from '../components/ui/toggle-group';
   import * as Empty from '../components/ui/empty';
   import { Input } from '../components/ui/input';
   import { Spinner } from '../components/ui/spinner';
@@ -51,6 +53,15 @@
   let items = $state<LibraryItem[]>([]);
   let query = $state('');
   let status = $state<LibraryItemStatus>('ACTIVE');
+  type LibraryView = 'all' | 'unread' | 'starred';
+  let view = $state<LibraryView>('all');
+  let tag = $state('');
+  let filterOpen = $state(false);
+  let draftTag = $state('');
+  let draftStatus = $state<LibraryItemStatus>('ACTIVE');
+  let filterLabel = $derived(
+    [status === 'ARCHIVED' ? 'Archived' : '', tag ? `#${tag}` : ''].filter(Boolean).join(' · '),
+  );
   let page = $state(1);
   let total = $state(0);
   let loading = $state(true);
@@ -130,7 +141,15 @@
 
     try {
       const response = await listLibraryItems(
-        { page: nextPage, pageSize: 30, q: query, status },
+        {
+          page: nextPage,
+          pageSize: 30,
+          q: query,
+          status,
+          tag: tag || undefined,
+          read: view === 'unread' ? false : undefined,
+          starred: view === 'starred' ? true : undefined,
+        },
         listController.signal,
       );
       if (id !== requestId) return;
@@ -167,7 +186,7 @@
     try {
       const item = await createLibraryItem(payload);
       const alreadyVisible = items.some((entry) => entry.uid === item.uid);
-      if (status === 'ACTIVE' && matchesQuery(item)) {
+      if (matchesFilters(item) && matchesQuery(item)) {
         items = [item, ...items.filter((entry) => entry.uid !== item.uid)];
         if (!alreadyVisible) total += 1;
       }
@@ -196,11 +215,45 @@
     }, 250);
   }
 
-  function selectStatus(next: LibraryItemStatus): void {
-    if (status === next) return;
-    status = next;
+  function refreshFilters(): void {
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = null;
+    void closeDetail(false);
     clearVisibleResults();
     void loadItems(true);
+  }
+
+  function selectView(next: string): void {
+    if (!next || next === view) return;
+    view = next as LibraryView;
+    refreshFilters();
+  }
+
+  function applyFilters(event: SubmitEvent): void {
+    event.preventDefault();
+    status = draftStatus;
+    tag = draftTag.trim().replace(/^#/, '').toLocaleLowerCase();
+    filterOpen = false;
+    refreshFilters();
+  }
+
+  function clearFilters(): void {
+    status = 'ACTIVE';
+    view = 'all';
+    tag = '';
+    query = '';
+    filterOpen = false;
+    if (searchInput) searchInput.value = '';
+    refreshFilters();
+  }
+
+  function matchesFilters(item: LibraryItem): boolean {
+    return (
+      item.status === status &&
+      (view !== 'unread' || !item.readAt) &&
+      (view !== 'starred' || item.starred) &&
+      (!tag || item.tags.includes(tag))
+    );
   }
 
   function clearVisibleResults(): void {
@@ -474,10 +527,12 @@
         nextStatus === 'ARCHIVED' ? 'Library item archived.' : 'Library item restored.';
       void loadItems(true);
     } catch (cause) {
-      const restored = [...items];
-      restored.splice(Math.max(0, index), 0, item);
-      items = restored;
-      total += 1;
+      if (matchesFilters(item) && !items.some((entry) => entry.uid === item.uid)) {
+        const restored = [...items];
+        restored.splice(Math.max(0, index), 0, item);
+        items = restored;
+        total += 1;
+      }
       operationError = errorMessage(
         cause,
         nextStatus === 'ARCHIVED'
@@ -537,6 +592,9 @@
     optimistic: LibraryItem,
     successMessage: string,
   ): Promise<void> {
+    if (busyUids.has(item.uid)) return;
+    const focusSnapshot = captureListFocus(pageElement, item.uid);
+    invalidateListRequest();
     replaceItem(optimistic);
     markBusy(item.uid, true);
     operationError = null;
@@ -545,6 +603,14 @@
       const updated = await updateLibraryItem(item.uid, payload);
       replaceItem(updated);
       actionStatus = successMessage;
+      if (!matchesFilters(updated)) {
+        const wasVisible = items.some((entry) => entry.uid === updated.uid);
+        items = items.filter((entry) => entry.uid !== updated.uid);
+        if (wasVisible) total = Math.max(0, total - 1);
+        if (!readerItem && selectedUid === updated.uid) await closeDetail(false);
+        if (wasVisible && !readerItem) await restoreListFocus(pageElement, focusSnapshot);
+        void loadItems(true);
+      }
     } catch (cause) {
       replaceItem(item);
       operationError = errorMessage(cause, 'Unable to update this Library item.');
@@ -674,36 +740,84 @@
               value={query}
             />
           </label>
-          <DropdownMenu.Root>
-            <DropdownMenu.Trigger>
+        </div>
+
+        <div class="library-filters">
+          <ToggleGroup.Root
+            aria-label="Library view"
+            type="single"
+            value={view}
+            onValueChange={selectView}
+            size="sm"
+            spacing={1}
+          >
+            <ToggleGroup.Item value="all">All</ToggleGroup.Item>
+            <ToggleGroup.Item value="unread">Unread</ToggleGroup.Item>
+            <ToggleGroup.Item value="starred">Starred</ToggleGroup.Item>
+          </ToggleGroup.Root>
+          <Popover.Root
+            bind:open={filterOpen}
+            onOpenChange={(open) => {
+              if (open) {
+                draftTag = tag;
+                draftStatus = status;
+              }
+            }}
+          >
+            <Popover.Trigger>
               {#snippet child({ props })}
                 <Button
                   {...props}
-                  aria-label={`Status: ${status === 'ACTIVE' ? 'Active' : 'Archived'}`}
-                  class="status-filter"
-                  variant="outline"
+                  aria-label={filterLabel ? `Filters: ${filterLabel}` : 'Filter Library'}
+                  title={filterLabel || 'Filters'}
+                  size="icon-sm"
+                  variant={filterLabel ? 'secondary' : 'ghost'}
                 >
-                  <ListFilter data-icon="inline-start" />
-                  {status === 'ACTIVE' ? 'Active' : 'Archived'}
-                  <ChevronDown data-icon="inline-end" />
+                  <ListFilter />
                 </Button>
               {/snippet}
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Content align="end" class="w-40">
-              <DropdownMenu.Group>
-                <DropdownMenu.Label>Status</DropdownMenu.Label>
-                <DropdownMenu.RadioGroup value={status}>
-                  <DropdownMenu.RadioItem onclick={() => selectStatus('ACTIVE')} value="ACTIVE">
-                    Active
-                  </DropdownMenu.RadioItem>
-                  <DropdownMenu.RadioItem onclick={() => selectStatus('ARCHIVED')} value="ARCHIVED">
-                    Archived
-                  </DropdownMenu.RadioItem>
-                </DropdownMenu.RadioGroup>
-              </DropdownMenu.Group>
-            </DropdownMenu.Content>
-          </DropdownMenu.Root>
+            </Popover.Trigger>
+            <Popover.Content align="end" class="w-[min(20rem,calc(100vw-2rem))]">
+              <Popover.Header><Popover.Title>Filters</Popover.Title></Popover.Header>
+              <form onsubmit={applyFilters} class="mt-3">
+                <Field.Group>
+                  <Field.Field>
+                    <Field.Label id="library-status-label">Status</Field.Label>
+                    <ToggleGroup.Root
+                      aria-labelledby="library-status-label"
+                      type="single"
+                      value={draftStatus}
+                      onValueChange={(value) => {
+                        if (value) draftStatus = value as LibraryItemStatus;
+                      }}
+                      size="sm"
+                      variant="outline"
+                    >
+                      <ToggleGroup.Item value="ACTIVE">Active</ToggleGroup.Item>
+                      <ToggleGroup.Item value="ARCHIVED">Archived</ToggleGroup.Item>
+                    </ToggleGroup.Root>
+                  </Field.Field>
+                  <Field.Field>
+                    <Field.Label for="library-tag-filter">Tag</Field.Label>
+                    <Input
+                      id="library-tag-filter"
+                      bind:value={draftTag}
+                      placeholder="Any tag"
+                      autocomplete="off"
+                    />
+                  </Field.Field>
+                  <Field.Field orientation="horizontal" class="justify-end">
+                    <Button onclick={clearFilters} size="sm" variant="ghost">Reset</Button>
+                    <Button type="submit" size="sm">Apply</Button>
+                  </Field.Field>
+                </Field.Group>
+              </form>
+            </Popover.Content>
+          </Popover.Root>
         </div>
+        {#if filterLabel}
+          <p class="active-filter-label" title={filterLabel}>{filterLabel}</p>
+        {/if}
 
         <span aria-live="polite" class="sr-only" data-library-count
           >{`${total} ${
@@ -739,30 +853,23 @@
             <Empty.Root>
               <Empty.Header>
                 <Empty.Title>
-                  {query
+                  {query || tag || view !== 'all'
                     ? 'No saved items found'
                     : status === 'ARCHIVED'
                       ? 'No archived items'
                       : 'Save your first link'}
                 </Empty.Title>
                 <Empty.Description>
-                  {query
-                    ? 'Try another keyword.'
+                  {query || tag || view !== 'all'
+                    ? 'Try another keyword or filter.'
                     : status === 'ARCHIVED'
                       ? 'Archived links will remain available here.'
                       : 'Use Add link to save an article URL.'}
                 </Empty.Description>
               </Empty.Header>
-              {#if query}
+              {#if query || tag || view !== 'all' || status === 'ARCHIVED'}
                 <Empty.Content>
-                  <Button
-                    onclick={() => {
-                      query = '';
-                      if (searchInput) searchInput.value = '';
-                      void loadItems(true);
-                    }}
-                    variant="secondary">Clear search</Button
-                  >
+                  <Button onclick={clearFilters} variant="secondary">Reset filters</Button>
                 </Empty.Content>
               {/if}
             </Empty.Root>
@@ -942,32 +1049,32 @@
     display: grid;
     width: 100%;
     min-height: 100%;
-    grid-template-columns: minmax(360px, 440px) minmax(0, 1fr);
+    grid-template-columns: minmax(320px, 384px) minmax(0, 1fr);
   }
 
   .library-primary {
     min-width: 0;
-    padding: 28px 20px 72px 28px;
+    padding: 20px 16px 32px 24px;
     border-right: 1px solid var(--border);
   }
 
   .library-page-header {
     display: flex;
-    gap: 20px;
+    gap: 12px;
     align-items: center;
     justify-content: space-between;
   }
 
   .library-page-header h1 {
     margin: 0;
-    font-size: 23px;
+    font-size: 18px;
     font-weight: 680;
     line-height: 1.2;
     letter-spacing: -0.03em;
   }
 
   .library-index {
-    padding-top: 20px;
+    padding-top: 12px;
   }
 
   .library-toolbar {
@@ -975,6 +1082,30 @@
     gap: 8px;
     align-items: center;
     margin-bottom: 12px;
+  }
+
+  .library-filters {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .active-filter-label {
+    margin: 0 0 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--muted-foreground);
+    font-size: 12px;
+  }
+
+  @media (max-width: 767px), (pointer: coarse) {
+    .library-filters :global(button) {
+      min-height: 44px;
+      min-width: 44px;
+    }
   }
 
   .library-search {
@@ -1034,7 +1165,7 @@
     grid-template-columns: 18px minmax(0, 1fr);
     gap: 10px;
     align-items: center;
-    padding: 12px 4px 12px 12px;
+    padding: 8px 4px 8px 8px;
     color: inherit;
     background: transparent;
     border: 0;
@@ -1083,15 +1214,19 @@
     text-overflow: ellipsis;
   }
 
-  .item-title,
   .item-source {
     white-space: nowrap;
   }
 
   .item-title {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow-wrap: anywhere;
     min-width: 0;
     flex: 1;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 640;
     line-height: 1.35;
     letter-spacing: -0.01em;
@@ -1108,7 +1243,7 @@
     align-items: center;
     color: var(--muted-foreground);
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: 12px;
     white-space: nowrap;
   }
 
@@ -1161,7 +1296,7 @@
     .library-page {
       display: block;
       width: min(100%, 940px);
-      padding: 32px 36px 72px;
+      padding: 20px 24px 32px;
       margin-inline: auto;
     }
 
@@ -1178,7 +1313,7 @@
   @media (max-width: 767px) {
     .library-page {
       width: 100%;
-      padding: 24px 16px 54px;
+      padding: 16px 16px 24px;
     }
 
     .item-select {

@@ -47,6 +47,48 @@ afterEach(() => {
 });
 
 describe('NotesPage request ordering', () => {
+  it('keeps overflow tags reachable and shows the selected filter in the toolbar', async () => {
+    vi.mocked(listNotes).mockResolvedValue(page([]));
+    vi.mocked(listTags).mockResolvedValue({ items: ['alpha', 'beta', 'gamma', 'delta'] });
+    const target = document.createElement('div');
+    document.body.append(target);
+    const component = mount(NotesPage, { props: { session }, target });
+
+    try {
+      await vi.waitFor(() => expect(target.textContent).toContain('#alpha'));
+      expect(target.querySelector('.tag-toolbar')?.textContent).not.toContain('#delta');
+      target.querySelector<HTMLButtonElement>('[aria-label="All tags"]')!.click();
+      const option = await vi.waitFor(() => {
+        const entry = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(
+          (entry) => entry.textContent?.trim() === '#delta',
+        );
+        expect(entry).toBeDefined();
+        return entry!;
+      });
+      option.click();
+      await vi.waitFor(() =>
+        expect(listNotes).toHaveBeenLastCalledWith(
+          expect.objectContaining({ tag: 'delta', page: 1 }),
+          expect.any(AbortSignal),
+        ),
+      );
+      await vi.waitFor(() =>
+        expect(target.querySelector('.tag-filter [data-state="on"]')?.textContent).toContain(
+          '#delta',
+        ),
+      );
+      target.querySelector<HTMLButtonElement>('.tag-filter [data-state="on"]')!.click();
+      await vi.waitFor(() =>
+        expect(listNotes).toHaveBeenLastCalledWith(
+          expect.objectContaining({ tag: '' }),
+          expect.any(AbortSignal),
+        ),
+      );
+    } finally {
+      await unmount(component);
+    }
+  });
+
   it('invalidates an in-flight list as soon as the search changes', async () => {
     let resolveStale: ((response: ListNotesResponse) => void) | undefined;
     const stale = new Promise<ListNotesResponse>((resolve) => {

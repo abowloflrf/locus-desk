@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Pin from '@lucide/svelte/icons/pin';
   import type { Note } from '../api/types';
   import { groupNotesByMonth, sortNotesByCreatedAt } from '../utils/date';
   import NoteItem from './NoteItem.svelte';
@@ -39,7 +40,9 @@
 <div class="note-timeline">
   {#if pinnedNotes.length > 0}
     <section class="note-day pinned-notes" aria-labelledby={`pinned-${mode}`}>
-      <h2 id={`pinned-${mode}`}>Pinned</h2>
+      <h2 class="pinned-heading" id={`pinned-${mode}`}>
+        <Pin size={14} aria-hidden="true" />Pinned
+      </h2>
       <div class="note-day-list">
         {#each pinnedNotes as note (note.uid)}
           <NoteItem
@@ -88,7 +91,7 @@
   }
 
   .note-day > h2 {
-    padding: 18px 2px 10px;
+    padding: 16px 0 8px;
     margin: 0;
     color: var(--muted-foreground);
     font-size: 12px;
@@ -96,10 +99,17 @@
     letter-spacing: 0.015em;
   }
 
+  .note-day > .pinned-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--foreground);
+  }
+
   .note-day-list {
     display: grid;
-    gap: 9px;
-    padding-bottom: 12px;
+    gap: 8px;
+    padding-bottom: 4px;
   }
 
   @keyframes content-enter {

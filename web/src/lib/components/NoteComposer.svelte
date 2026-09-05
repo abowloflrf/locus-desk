@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import * as Field from '$lib/components/ui/field';
   import * as InputGroup from '$lib/components/ui/input-group';
   import { Spinner } from '$lib/components/ui/spinner';
+  import { cn } from '$lib/utils';
 
   import { errorMessage } from '../api/client';
   import type { Note } from '../api/types';
@@ -11,6 +13,7 @@
   let content = $state('');
   let busy = $state(false);
   let error = $state<string | null>(null);
+  let showActions = $derived(Boolean(content) || busy || Boolean(error));
   let textarea = $state<HTMLTextAreaElement | null>(null);
 
   async function submit(): Promise<void> {
@@ -28,12 +31,13 @@
     try {
       await onCreate(submittedContent);
       if (content === submittedContent) content = '';
-      resizeTextarea();
-      textarea?.focus();
     } catch (cause) {
       error = errorMessage(cause, 'Unable to save the memo.');
     } finally {
       busy = false;
+      await tick();
+      textarea?.focus();
+      resizeTextarea();
     }
   }
 
@@ -47,7 +51,7 @@
   function resizeTextarea(): void {
     if (!textarea) return;
     textarea.style.height = 'auto';
-    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 72), 280)}px`;
+    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 44), 280)}px`;
   }
 </script>
 
@@ -60,16 +64,16 @@
         aria-describedby={error ? 'composer-error' : undefined}
         aria-invalid={error ? 'true' : undefined}
         bind:ref={textarea}
-        class="min-h-[72px] max-h-[280px] transition-[height] duration-150"
+        class="min-h-11 max-h-[280px] transition-[height] duration-150"
         bind:value={content}
         disabled={busy}
         id="note-composer-input"
         oninput={resizeTextarea}
         onkeydown={handleKeydown}
         placeholder="Write a quick memo…"
-        rows={3}
+        rows={1}
       />
-      <InputGroup.Addon align="block-end">
+      <InputGroup.Addon align="block-end" class={cn(!showActions && 'hidden')}>
         <InputGroup.Button
           class="composer-submit ml-auto"
           disabled={busy || !content.trim()}

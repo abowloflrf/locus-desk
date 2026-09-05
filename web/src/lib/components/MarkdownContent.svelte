@@ -1,8 +1,25 @@
 <script lang="ts">
-  import { renderMarkdown } from '../markdown';
+  import '../vitesse-light.css';
+  import { renderMarkdown, renderHighlightedMarkdown } from '../markdown';
 
   let { content }: { content: string } = $props();
-  let html = $derived(renderMarkdown(content));
+  let highlighted = $state<{ source: string; html: string } | null>(null);
+  let html = $derived(highlighted?.source === content ? highlighted.html : renderMarkdown(content));
+
+  $effect(() => {
+    const source = content;
+    let active = true;
+    void renderHighlightedMarkdown(source)
+      .then((html) => {
+        if (active) highlighted = { source, html };
+      })
+      .catch(() => {
+        // The synchronous rendering remains readable if highlighting fails.
+      });
+    return () => {
+      active = false;
+    };
+  });
 </script>
 
 <div class="markdown-content">{@html html}</div>
@@ -58,12 +75,32 @@
     padding-left: 1.55em;
   }
 
+  .markdown-content :global(ol) {
+    list-style: decimal outside;
+  }
+
+  .markdown-content :global(ul) {
+    list-style: disc outside;
+  }
+
+  .markdown-content :global(ul ul) {
+    list-style-type: circle;
+  }
+
+  .markdown-content :global(ul ul ul) {
+    list-style-type: square;
+  }
+
+  .markdown-content :global(li > ul),
+  .markdown-content :global(li > ol) {
+    margin-block: 4px;
+  }
+
   .markdown-content :global(li + li) {
     margin-top: 0.16em;
   }
 
-  .markdown-content :global(ul:has(> li > input[type='checkbox'])) {
-    padding-left: 0;
+  .markdown-content :global(li:has(> input[type='checkbox'])) {
     list-style: none;
   }
 
@@ -95,8 +132,8 @@
     padding: 13px 15px;
     overflow-x: auto;
     scrollbar-width: none;
-    color: var(--foreground);
-    background: var(--muted);
+    color: var(--code-foreground);
+    background: var(--code-background);
     border: 1px solid var(--border);
     border-radius: 8px;
     line-height: 1.55;
@@ -104,6 +141,18 @@
 
   .markdown-content :global(pre::-webkit-scrollbar) {
     display: none;
+  }
+
+  .markdown-content :global(pre > span) {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--muted-foreground);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 16px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    user-select: none;
   }
 
   .markdown-content :global(pre code) {
@@ -116,6 +165,35 @@
     text-decoration: underline;
     text-decoration-color: color-mix(in oklch, var(--primary), transparent 55%);
     text-underline-offset: 2px;
+  }
+
+  .markdown-content :global(table) {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+    margin-block: 12px;
+    font-size: 13px;
+  }
+
+  .markdown-content :global(th),
+  .markdown-content :global(td) {
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .markdown-content :global(th) {
+    background: var(--muted);
+    font-weight: 600;
+  }
+
+  .markdown-content :global(h5),
+  .markdown-content :global(h6) {
+    margin-block: 1em 0.4em;
+    font-size: 14px;
+    font-weight: 600;
   }
 
   .markdown-content :global(hr) {

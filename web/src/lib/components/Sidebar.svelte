@@ -14,7 +14,6 @@
   import type { ProtectedRoute } from '../routes';
   import { Button } from './ui/button';
   import * as Kbd from './ui/kbd';
-  import { Separator } from './ui/separator';
 
   let {
     current,
@@ -45,8 +44,8 @@
   }> = [
     { icon: LayoutDashboard, label: 'Workspace', route: 'home' },
     { icon: FileText, label: 'Memos', route: 'notes' },
-    { icon: BookOpen, label: 'Library', route: 'library' },
     { icon: ListTodo, label: 'Tasks', route: 'tasks' },
+    { icon: BookOpen, label: 'Library', route: 'library' },
     { icon: Archive, label: 'Archive', route: 'archive' },
   ];
 
@@ -91,6 +90,18 @@
     </Button>
   </div>
 
+  <Button
+    aria-label="Search memos"
+    class="sidebar-search w-full justify-start max-[1199px]:justify-center max-[767px]:hidden"
+    onclick={focusSearch}
+    title="Search memos"
+    variant="ghost"
+  >
+    <Search aria-hidden="true" />
+    <span class="sidebar-search-label max-[1199px]:hidden">Search</span>
+    <Kbd.Root class="sidebar-search-kbd ml-auto max-[1199px]:hidden">⌘K</Kbd.Root>
+  </Button>
+
   <nav class="primary-nav">
     {#each primaryItems as item}
       {#if !mobile || (item.route !== 'home' && item.route !== 'archive')}
@@ -103,26 +114,12 @@
           onclick={(event) => openRoute(event, item.route)}
           title={item.label}
         >
-          <NavIcon />
+          <NavIcon aria-hidden="true" />
           <span>{item.label}</span>
         </a>
       {/if}
     {/each}
   </nav>
-
-  <Separator class="sidebar-divider" />
-
-  <Button
-    aria-label="Search memos"
-    class="h-auto w-full justify-start gap-[11px] px-[10px] py-2 text-muted-foreground max-[1199px]:justify-center max-[1199px]:px-0 max-[767px]:hidden"
-    onclick={focusSearch}
-    title="Search memos"
-    variant="ghost"
-  >
-    <Search />
-    <span class="sidebar-search-label max-[1199px]:hidden">Search</span>
-    <Kbd.Root class="sidebar-search-kbd ml-auto max-[1199px]:hidden">⌘K</Kbd.Root>
-  </Button>
 
   <div class="sidebar-footer">
     <div class="sidebar-user">
@@ -156,10 +153,10 @@
     height: 100vh;
     height: 100dvh;
     flex-direction: column;
-    padding: 28px 18px 20px;
+    padding: 12px;
     overflow-y: auto;
-    background: var(--card);
-    border-right: 1px solid var(--border);
+    background: var(--sidebar);
+    border-right: 0;
     scrollbar-width: none;
   }
 
@@ -170,20 +167,23 @@
   .brand {
     display: flex;
     min-height: 40px;
-    gap: 11px;
+    gap: 8px;
     align-items: center;
-    padding: 0 8px;
-    font-size: 17px;
+    padding: 0;
+    font-size: 13px;
     font-weight: 680;
     letter-spacing: -0.02em;
+    white-space: nowrap;
   }
 
   .sidebar-header {
     display: flex;
-    gap: 8px;
+    gap: 4px;
+    min-height: 36px;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 35px;
+    padding-left: 8px;
+    margin-bottom: 16px;
   }
 
   .sidebar :global(.sidebar-toggle) {
@@ -192,8 +192,8 @@
 
   .brand-mark {
     display: grid;
-    width: 32px;
-    height: 32px;
+    width: 24px;
+    height: 24px;
     flex: none;
     color: var(--card);
     background: var(--primary);
@@ -204,17 +204,18 @@
 
   .primary-nav {
     display: grid;
-    gap: 3px;
+    gap: 4px;
   }
 
   .nav-item {
     position: relative;
     display: flex;
     width: 100%;
-    min-height: 38px;
-    gap: 11px;
+    min-height: 36px;
+    gap: 8px;
     align-items: center;
-    padding: 8px 10px;
+    padding: 8px;
+    line-height: 20px;
     color: var(--muted-foreground);
     background: transparent;
     border: 0;
@@ -238,34 +239,40 @@
     font-weight: 620;
   }
 
-  .nav-item.active::before {
-    position: absolute;
-    top: 10px;
-    bottom: 10px;
-    left: 0;
-    width: 2px;
-    background: var(--primary);
-    border-radius: 2px;
-    content: '';
+  .nav-item :global(svg) {
+    width: 16px;
+    height: 16px;
+    flex: none;
+    stroke-width: 1.75;
   }
 
-  .sidebar :global(.sidebar-divider) {
-    margin: 20px 10px;
+  .sidebar :global(.sidebar-search) {
+    height: 36px;
+    min-height: 36px;
+    gap: 8px;
+    padding: 8px;
+    margin-bottom: 12px;
+    color: var(--muted-foreground);
+    font-size: 13px;
+    font-weight: 400;
+  }
+
+  .sidebar :global(.sidebar-search svg) {
+    stroke-width: 1.75;
   }
 
   .sidebar-footer {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 16px 2px 0;
+    padding: 16px 0 0;
     margin-top: auto;
-    border-top: 1px solid var(--border);
   }
 
   .sidebar-user {
     display: flex;
     min-width: 0;
-    gap: 9px;
+    gap: 8px;
     align-items: center;
   }
 
@@ -289,13 +296,14 @@
   }
 
   .sidebar.collapsed {
-    padding: 20px 9px 16px;
+    padding: 12px 10px;
   }
 
   .sidebar.collapsed .sidebar-header {
     flex-direction: column;
-    gap: 10px;
-    margin-bottom: 25px;
+    gap: 4px;
+    padding-left: 0;
+    margin-bottom: 12px;
   }
 
   .sidebar.collapsed .brand {
@@ -317,18 +325,14 @@
     padding-inline: 0;
   }
 
-  .sidebar.collapsed :global(.sidebar-divider) {
-    margin-inline: 4px;
-  }
-
   .sidebar.collapsed .sidebar-footer {
     justify-content: center;
   }
 
   .user-avatar {
     display: grid;
-    width: 30px;
-    height: 30px;
+    width: 24px;
+    height: 24px;
     flex: none;
     color: var(--primary);
     background: var(--accent);
@@ -340,16 +344,18 @@
 
   @media (max-width: 1199px) {
     .sidebar {
-      padding: 20px 9px 16px;
+      padding: 12px 10px;
     }
 
     .brand {
       justify-content: center;
       padding: 0;
-      margin-bottom: 29px;
+      margin-bottom: 0;
     }
 
     .sidebar-header {
+      padding-left: 0;
+      margin-bottom: 16px;
       justify-content: center;
     }
 
@@ -368,16 +374,20 @@
       padding-inline: 0;
     }
 
-    .sidebar :global(.sidebar-divider) {
-      margin-inline: 4px;
-    }
-
     .sidebar-footer {
       justify-content: center;
     }
   }
 
+  @media (pointer: coarse) and (min-width: 768px) {
+    .nav-item,
+    .sidebar :global(.sidebar-search) {
+      min-height: 44px;
+    }
+  }
+
   @media (max-width: 767px) {
+    .sidebar.collapsed,
     .sidebar {
       position: fixed;
       top: auto;
@@ -395,35 +405,11 @@
         var(--mobile-navigation-safe-space, max(8px, env(safe-area-inset-bottom)))
         calc(12px + env(safe-area-inset-left));
       overflow: visible;
-      background: transparent;
-      border: 0;
-    }
-
-    .sidebar::after {
-      position: absolute;
-      right: 0;
-      bottom: 0;
-      left: 0;
-      z-index: 1;
-      height: calc(
-        var(--mobile-navigation-safe-space, max(8px, env(safe-area-inset-bottom))) + 24px
-      );
-      background: linear-gradient(
-        to bottom,
-        transparent,
-        color-mix(in oklab, var(--background) 88%, transparent) 52%,
-        var(--background)
-      );
-      -webkit-backdrop-filter: blur(12px);
-      backdrop-filter: blur(12px);
-      -webkit-mask-image: linear-gradient(to bottom, transparent, black 34%);
-      mask-image: linear-gradient(to bottom, transparent, black 34%);
-      content: '';
-      pointer-events: none;
+      background: var(--sidebar);
+      border-top: 1px solid var(--border);
     }
 
     .sidebar-header,
-    .sidebar :global(.sidebar-divider),
     .sidebar-footer {
       display: none;
     }
@@ -438,23 +424,22 @@
       padding: 5px;
       margin-inline: auto;
       overflow: hidden;
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 18px;
-      box-shadow: 0 8px 20px color-mix(in oklab, var(--foreground) 8%, transparent);
+      background: var(--sidebar);
+      border: 0;
+      border-radius: 0;
     }
 
     .primary-nav .nav-item {
       display: flex;
       min-height: 52px;
       flex-direction: column;
-      gap: 3px;
+      gap: 4px;
       padding: 6px 3px 5px;
       color: var(--muted-foreground);
       background: transparent;
       border: 0;
-      border-radius: 13px;
-      font-size: 10px;
+      border-radius: 8px;
+      font-size: 12px;
       font-weight: 520;
       line-height: 1;
       transition:
@@ -485,10 +470,6 @@
       color: var(--foreground);
       background: var(--muted);
       font-weight: 620;
-    }
-
-    .primary-nav .nav-item.active::before {
-      display: none;
     }
 
     .primary-nav .nav-item:active {

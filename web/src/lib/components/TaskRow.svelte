@@ -385,17 +385,12 @@
             type="button">{task.title}</button
           >
         </h3>
-        {#if mode === 'all' && task.priority === 1 && task.status === 'TODO'}
-          <span aria-label="Priority task" class="priority-mark" title="Priority">
-            <Flag class="size-3" />
-            {#if mode === 'all'}<span>Priority</span>{/if}
-          </span>
+
+        {#if task.status === 'TODO' && dateLabel}
+          <span class:overdue={isTaskOverdue(task, today)} class="task-date">{dateLabel}</span>
         {/if}
       </div>
       {#if task.status === 'TODO' && descriptionPreview}<p>{descriptionPreview}</p>{/if}
-      {#if task.status === 'TODO' && mode === 'all' && dateLabel}
-        <span class:overdue={isTaskOverdue(task, today)} class="task-date">{dateLabel}</span>
-      {/if}
     </div>
     <div aria-label={`Actions for ${task.title}`} class="row-actions">
       <DropdownMenu.Root onOpenChange={(open) => (actionsOpen = open)} open={actionsOpen}>
@@ -455,9 +450,9 @@
     position: relative;
     display: grid;
     grid-template-columns: 32px minmax(0, 1fr) auto;
-    gap: 7px;
+    gap: 8px;
     align-items: start;
-    padding: 11px 0;
+    padding: 8px 0;
     border-bottom: 1px solid var(--border);
   }
 
@@ -475,6 +470,7 @@
     min-width: 0;
     gap: 8px;
     align-items: baseline;
+    flex-wrap: wrap;
   }
 
   .task-title-line h3 {
@@ -508,16 +504,6 @@
 
   .task-title-button:disabled {
     cursor: default;
-  }
-
-  .priority-mark {
-    display: inline-flex;
-    flex: none;
-    gap: 3px;
-    align-items: center;
-    color: var(--primary);
-    font-size: 10px;
-    font-weight: 620;
   }
 
   .task-copy p {
@@ -559,10 +545,11 @@
   }
 
   .task-date {
-    display: block;
-    margin-top: 4px;
+    flex: none;
     color: var(--muted-foreground);
-    font-size: 11px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 20px;
   }
 
   .task-date.overdue {
@@ -653,8 +640,8 @@
   }
 
   .task-row-full {
-    grid-template-columns: 32px minmax(0, 1fr) 76px;
-    padding: 16px 4px;
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    padding: 8px 0;
   }
 
   .task-row-full .task-title-line h3 {

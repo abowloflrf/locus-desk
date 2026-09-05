@@ -8,7 +8,7 @@ afterEach(() => {
 });
 
 describe('Todo task creation', () => {
-  it('keeps the quick form to one line and leaves the due date optional', async () => {
+  it('reveals Add after typing and leaves the due date optional', async () => {
     const onCreate = vi.fn().mockResolvedValue(undefined);
     const target = document.createElement('div');
     document.body.append(target);
@@ -24,7 +24,12 @@ describe('Todo task creation', () => {
       const input = target.querySelector<HTMLInputElement>('input:not([type="date"])')!;
       input.value = 'Plan tomorrow';
       input.dispatchEvent(new Event('input', { bubbles: true }));
-      target.querySelector<HTMLFormElement>('form')!.requestSubmit();
+      const add = await vi.waitFor(() => {
+        const button = target.querySelector<HTMLButtonElement>('button[type="submit"]');
+        expect(button).not.toBeNull();
+        return button!;
+      });
+      add.click();
 
       await vi.waitFor(() => expect(onCreate).toHaveBeenCalledOnce());
       const payload = onCreate.mock.calls[0][0];
@@ -35,6 +40,7 @@ describe('Todo task creation', () => {
       });
       expect(payload).not.toHaveProperty('dueDate');
       expect(payload).not.toHaveProperty('dueTime');
+      await vi.waitFor(() => expect(document.activeElement).toBe(input));
     } finally {
       await unmount(component);
     }
@@ -59,6 +65,9 @@ describe('Todo task creation', () => {
       const dateInput = target.querySelector<HTMLInputElement>('[aria-label="Due date"]')!;
       dateInput.value = '2026-08-25';
       dateInput.dispatchEvent(new Event('input', { bubbles: true }));
+      await vi.waitFor(() =>
+        expect(target.querySelector('.selected-date')?.textContent).toBe('2026-08-25'),
+      );
 
       target.querySelector<HTMLButtonElement>('[aria-label="Set priority"]')!.click();
       await vi.waitFor(() => expect(document.body.querySelector('[role="menu"]')).not.toBeNull());

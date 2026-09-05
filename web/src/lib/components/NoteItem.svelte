@@ -14,6 +14,7 @@
   import MarkdownContent from './MarkdownContent.svelte';
   import { Badge } from './ui/badge';
   import { Button } from './ui/button';
+  import * as Dialog from './ui/dialog';
   import * as DropdownMenu from './ui/dropdown-menu';
   import { Spinner } from './ui/spinner';
 
@@ -40,6 +41,29 @@
     onDelete: (note: Note) => void;
     onTag?: (tag: string) => void;
   } = $props();
+
+  const previewHeight = 240;
+  let readerOpen = $state(false);
+  let readerContent = $state<HTMLDivElement | null>(null);
+  let readerButton = $state<HTMLButtonElement | null>(null);
+  let overflowing = $state(false);
+
+  function measurePreview(node: HTMLElement) {
+    const measure = () => {
+      overflowing = node.scrollHeight > previewHeight + 1;
+    };
+    const frame = requestAnimationFrame(measure);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(node);
+    window.addEventListener('resize', measure);
+    return {
+      destroy() {
+        cancelAnimationFrame(frame);
+        observer?.disconnect();
+        window.removeEventListener('resize', measure);
+      },
+    };
+  }
 
   let editing = $state(false);
   let actionsOpen = $state(false);
@@ -100,7 +124,9 @@
   data-focus-uid={note.uid}
   tabindex="-1"
 >
-  <time datetime={note.createdAt}>{formatNoteTimestamp(note.createdAt, timeZone)}</time>
+  <div class="note-meta">
+    <time datetime={note.createdAt}>{formatNoteTimestamp(note.createdAt, timeZone)}</time>
+  </div>
   <div class="note-body">
     {#if editing}
       <div class="note-edit-form">
@@ -128,7 +154,31 @@
         </div>
       </div>
     {:else}
-      <MarkdownContent content={note.content} />
+      <div
+        class="note-preview"
+        class:collapsed={overflowing}
+        id={`memo-content-${note.uid}`}
+        style:--preview-height={`${previewHeight}px`}
+        onfocusin={() => {
+          if (overflowing) readerOpen = true;
+        }}
+      >
+        <div use:measurePreview>
+          <MarkdownContent content={note.content} />
+        </div>
+      </div>
+      {#if overflowing}
+        <div class="memo-more">
+          <Button
+            class="memo-expand"
+            bind:ref={readerButton}
+            variant="ghost"
+            size="sm"
+            aria-haspopup="dialog"
+            onclick={() => (readerOpen = true)}>More</Button
+          >
+        </div>
+      {/if}
       {#if note.tags.length > 0}
         <div aria-label="Tags" class="note-tags">
           {#each note.tags as tag}
@@ -221,6 +271,34 @@
   {/if}
 </article>
 
+<Dialog.Root bind:open={readerOpen}>
+  <Dialog.Content
+    class="memo-dialog flex max-h-[calc(100dvh-2rem)] flex-col gap-4 overflow-hidden sm:max-w-[min(56rem,calc(100%-2rem))]"
+    onOpenAutoFocus={(event) => {
+      event.preventDefault();
+      readerContent?.focus();
+    }}
+    onCloseAutoFocus={(event) => {
+      event.preventDefault();
+      readerButton?.focus();
+    }}
+  >
+    <Dialog.Header class="shrink-0 pr-8 text-left">
+      <Dialog.Title class="sr-only">Memo</Dialog.Title>
+      <Dialog.Description>{formatNoteTimestamp(note.createdAt, timeZone)}</Dialog.Description>
+    </Dialog.Header>
+    <div
+      class="memo-reader min-h-0 overflow-y-auto overscroll-contain pr-2"
+      bind:this={readerContent}
+      tabindex="-1"
+      role="region"
+      aria-label="Full memo content"
+    >
+      <MarkdownContent content={note.content} />
+    </div>
+  </Dialog.Content>
+</Dialog.Root>
+
 <style>
   .note-item {
     position: relative;
@@ -228,44 +306,65 @@
     grid-template-columns: minmax(0, 1fr);
     gap: 2px;
     align-items: start;
-    padding: 14px 14px 15px;
+    padding: 12px;
     overflow: visible;
-    background: color-mix(in oklch, var(--card), var(--background) 16%);
+    background: var(--card);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     transition:
       opacity 150ms ease,
-      border-color 150ms ease,
-      box-shadow 150ms ease;
+      border-color 150ms ease;
   }
 
-  .note-item:hover,
   .note-item:focus-visible,
   .note-item:has(:focus-visible) {
-    border-color: color-mix(in oklch, var(--primary), var(--border) 64%);
-    box-shadow: var(--shadow-sm);
+    outline: 2px solid var(--ring);
+    outline-offset: 4px;
   }
 
   .note-item.editing,
   .note-item.editing:hover,
   .note-item.editing:focus-visible,
   .note-item.editing:has(:focus-visible) {
-    border-color: color-mix(in oklch, var(--primary), var(--border) 48%);
-    box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary), transparent 88%);
+    background: var(--background);
+    border-color: var(--ring);
   }
 
-  .note-item.note-pinned::before {
+  .note-pinned::before {
     position: absolute;
     top: 14px;
-    left: 0;
+    left: 5px;
     width: 3px;
-    height: 24px;
-    background: var(--primary);
-    border-radius: 0 2px 2px 0;
+    height: 16px;
+    background: var(--foreground);
+    border-radius: 2px;
     content: '';
+    pointer-events: none;
   }
 
-  .note-item > time {
+  .note-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-height: 20px;
+    padding-right: 36px;
+    margin-bottom: 4px;
+  }
+
+  .memo-more {
+    display: flex;
+    justify-content: center;
+    margin-top: 8px;
+  }
+
+  .note-preview.collapsed {
+    max-height: var(--preview-height);
+    overflow: hidden;
+    mask-image: linear-gradient(to bottom, black calc(100% - 48px), transparent);
+  }
+
+  .note-meta time {
     display: inline-flex;
     width: max-content;
     grid-column: 1;
@@ -274,7 +373,6 @@
     font-family: var(--font-mono);
     font-size: 11px;
     line-height: 20px;
-    opacity: 0.76;
   }
 
   .note-body {
@@ -289,9 +387,8 @@
     right: 8px;
     display: flex;
     gap: 1px;
-    opacity: 0;
-    pointer-events: none;
-    transform: translateY(-4px);
+    opacity: 1;
+    pointer-events: auto;
     transition:
       opacity 140ms ease,
       transform 140ms ease;
@@ -307,8 +404,8 @@
   .note-tags {
     display: flex;
     flex-wrap: wrap;
-    gap: 5px;
-    margin-top: 12px;
+    gap: 4px;
+    margin-top: 8px;
   }
 
   .note-edit-form .inline-form-actions {
@@ -318,11 +415,18 @@
   @media (max-width: 767px) {
     .note-item {
       gap: 3px;
-      padding: 12px 13px 14px;
+      padding: 12px;
     }
 
-    .note-item > time {
+    .note-meta time {
       line-height: 20px;
+    }
+  }
+
+  @media (max-width: 767px), (pointer: coarse) {
+    .note-body :global(.memo-expand) {
+      min-height: 44px;
+      min-width: 44px;
     }
   }
 

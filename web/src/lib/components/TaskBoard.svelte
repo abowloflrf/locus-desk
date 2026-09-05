@@ -264,20 +264,24 @@
   class="task-board"
 >
   {#if mode === 'all'}
-    <ToggleGroup.Root
-      aria-label="Task status"
-      class="mb-4 w-fit max-[767px]:w-full"
-      onValueChange={(value) => selectStatusFilter(value as 'ALL' | TaskStatus)}
-      type="single"
-      value={statusFilter}
-      variant="outline"
-    >
-      {#each ['ALL', 'TODO', 'DONE'] as filter}
-        <ToggleGroup.Item class="max-[767px]:flex-1" value={filter}>
-          {filter === 'ALL' ? 'All' : filter === 'TODO' ? 'Open' : 'Completed'}
-        </ToggleGroup.Item>
-      {/each}
-    </ToggleGroup.Root>
+    <header class="page-header task-header">
+      <h1>Tasks</h1>
+      <ToggleGroup.Root
+        aria-label="Task status"
+        class="shrink-0"
+        size="sm"
+        onValueChange={(value) => selectStatusFilter(value as 'ALL' | TaskStatus)}
+        type="single"
+        value={statusFilter}
+        variant="outline"
+      >
+        {#each ['ALL', 'TODO', 'DONE'] as filter}
+          <ToggleGroup.Item class="max-[767px]:flex-1" value={filter}>
+            {filter === 'ALL' ? 'All' : filter === 'TODO' ? 'Open' : 'Completed'}
+          </ToggleGroup.Item>
+        {/each}
+      </ToggleGroup.Root>
+    </header>
   {/if}
 
   <TaskCreateForm busy={creating} {mode} onCreate={handleCreate} />
@@ -397,7 +401,7 @@
   }
 
   .task-section {
-    margin-bottom: 20px;
+    margin-bottom: 16px;
     animation: content-enter 180ms ease both;
   }
 
@@ -405,28 +409,16 @@
     display: flex;
     gap: 7px;
     align-items: center;
-    padding: 0 0 9px;
+    padding: 0 0 4px;
     margin-bottom: 0;
     color: var(--foreground);
     font-size: 12px;
     font-weight: 650;
   }
 
-  .task-section > h2::before {
-    width: 3px;
-    height: 16px;
-    background: var(--primary);
-    border-radius: 2px;
-    content: '';
-  }
-
   .task-section > h2 span {
     color: var(--muted-foreground);
     font-weight: 500;
-  }
-
-  .completed-section > h2::before {
-    background: var(--border);
   }
 
   .completed-section > h2 {

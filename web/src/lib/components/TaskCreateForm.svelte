@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { tick } from 'svelte';
+  import { Spinner } from './ui/spinner';
   import Calendar from '@lucide/svelte/icons/calendar';
   import Ellipsis from '@lucide/svelte/icons/ellipsis';
   import Flag from '@lucide/svelte/icons/flag';
@@ -32,8 +34,17 @@
   let detailsOpen = $state(false);
   let priorityOpen = $state(false);
   let moreButton = $state<HTMLButtonElement | null>(null);
+  let titleInput = $state<HTMLInputElement | null>(null);
+  let formElement = $state<HTMLFormElement | null>(null);
   let formBusy = $derived(busy || submitting);
-  let quickActionsVisible = $derived(compactFocused || priorityOpen);
+  let quickActionsVisible = $derived(
+    compactFocused ||
+      priorityOpen ||
+      Boolean(title.trim()) ||
+      Boolean(dueDate) ||
+      priority === 1 ||
+      detailsOpen,
+  );
 
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
@@ -68,6 +79,8 @@
       error = errorMessage(cause, 'Unable to add the task.');
     } finally {
       submitting = false;
+      await tick();
+      titleInput?.focus();
     }
   }
 
@@ -79,6 +92,16 @@
   }
 
   function handleKeydown(event: KeyboardEvent): void {
+    if (
+      (event.ctrlKey || event.metaKey) &&
+      event.key === 'Enter' &&
+      event.target instanceof Node &&
+      formElement?.contains(event.target)
+    ) {
+      event.preventDefault();
+      formElement.requestSubmit();
+      return;
+    }
     if (event.key !== 'Escape') return;
     if (!detailsOpen) return;
     event.preventDefault();
@@ -95,6 +118,7 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <form
+  bind:this={formElement}
   class:has-advanced={mode === 'all' && detailsOpen}
   class="task-create task-create-compact"
   onfocusin={() => (compactFocused = true)}
@@ -110,6 +134,7 @@
     <Input
       class="border-0 bg-transparent shadow-none focus-visible:ring-0"
       autocomplete="off"
+      bind:ref={titleInput}
       disabled={formBusy}
       id={`new-task-${mode}`}
       maxlength={500}
@@ -118,18 +143,14 @@
     />
   </Field.Field>
 
-  <div
-    aria-hidden={!quickActionsVisible}
-    class:wide={mode === 'all'}
-    class:visible={quickActionsVisible}
-    class="quick-actions"
-  >
+  <div aria-hidden={!quickActionsVisible} class:visible={quickActionsVisible} class="quick-actions">
     <label
       class:active={Boolean(dueDate)}
       class="quick-action date-action"
       title={dueDate ? `Due ${dueDate}` : 'Set due date'}
     >
       <Calendar />
+      {#if dueDate}<span class="selected-date">{dueDate}</span>{/if}
       <Input
         class="absolute inset-0 min-h-0 cursor-pointer p-0 opacity-0"
         aria-label="Due date"
@@ -185,6 +206,12 @@
         <Ellipsis />
       </Button>
     {/if}
+    {#if title.trim() || formBusy}
+      <Button class="task-submit ml-auto" type="submit" disabled={formBusy} size="sm">
+        {#if formBusy}<Spinner data-icon="inline-start" />{/if}
+        {formBusy ? 'Adding…' : 'Add'}
+      </Button>
+    {/if}
   </div>
 
   {#if mode === 'all' && detailsOpen}
@@ -219,7 +246,7 @@
 
 <style>
   .task-create {
-    margin-bottom: 24px;
+    margin-bottom: 16px;
   }
 
   .task-add-icon {
@@ -229,11 +256,11 @@
   .task-create-compact {
     position: relative;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
     gap: 4px;
     align-items: center;
     padding: 5px 6px 5px 10px;
-    margin-bottom: 18px;
+    margin-bottom: 12px;
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -248,37 +275,33 @@
   }
 
   .quick-actions {
-    display: flex;
-    width: 0;
+    display: none;
+    grid-column: 1 / -1;
     align-items: center;
-    gap: 2px;
-    opacity: 0;
-    overflow: visible;
-    pointer-events: none;
-    transform: translateX(4px);
-    visibility: hidden;
-    transition:
-      width 150ms ease,
-      opacity 120ms ease,
-      transform 150ms ease,
-      visibility 120ms step-end;
+    flex-wrap: wrap;
+    gap: 4px;
   }
 
   .quick-actions.visible {
-    width: 66px;
-    opacity: 1;
-    pointer-events: auto;
-    transform: translateX(0);
-    visibility: visible;
-    transition:
-      width 150ms ease,
-      opacity 120ms ease 30ms,
-      transform 150ms ease,
-      visibility 0ms step-start;
+    display: flex;
   }
 
-  .quick-actions.visible.wide {
-    width: 100px;
+  .selected-date {
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+
+  .date-action.active {
+    display: inline-flex;
+    width: auto;
+    gap: 4px;
+    padding-inline: 8px;
+  }
+
+  .date-action :global(svg) {
+    width: 16px;
+    height: 16px;
+    flex: none;
   }
 
   .quick-action {
@@ -301,7 +324,11 @@
   .quick-action:focus-within {
     color: var(--foreground);
     background: var(--muted);
-    outline: 0;
+  }
+
+  .quick-action:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
   }
 
   .quick-action.active {
@@ -335,12 +362,9 @@
       padding: 5px 6px 5px 10px;
     }
 
-    .quick-actions.visible {
-      width: 90px;
-    }
-
-    .quick-actions.visible.wide {
-      width: 136px;
+    .quick-actions :global(button) {
+      min-height: 44px;
+      min-width: 44px;
     }
 
     .quick-action {

@@ -6,7 +6,6 @@ import type { SessionInfo } from '../api/types';
 import AppShell from './AppShell.svelte';
 import shellSource from './AppShell.svelte?raw';
 import sidebarSource from './Sidebar.svelte?raw';
-import toggleGroupSource from './ui/toggle-group/toggle-group.svelte?raw';
 
 vi.mock('../api/tasks', () => ({
   createTask: vi.fn(),
@@ -294,10 +293,7 @@ describe('AppShell modal boundaries', () => {
       )!;
       const todoOnly = switcher.querySelector<HTMLButtonElement>('[aria-label="Show Todo only"]')!;
 
-      expect(switcher.classList).toContain('absolute');
-      expect(toggleGroupSource).not.toMatch(
-        /\[data-variant='workspace'\]\)\s*\{[^}]*position:\s*relative/s,
-      );
+      expect(switcher.closest('header')).not.toBeNull();
       expect(split.getAttribute('data-state')).toBe('on');
       expect(inertState(notes)).toBe(false);
       expect(inertState(todo)).toBe(false);

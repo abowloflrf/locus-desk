@@ -1,16 +1,51 @@
 import DOMPurify from 'dompurify';
-import { marked } from 'marked';
+import { Marked, Renderer } from 'marked';
+import { highlightCode, isSyntaxClass } from './code-highlight';
+
+export async function renderHighlightedMarkdown(source: string): Promise<string> {
+  const parser = new Marked();
+  const highlights = new Map<string, string>();
+  const jobs: Promise<void>[] = [];
+  parser.walkTokens(parser.lexer(source), (token) => {
+    if (token.type === 'code') {
+      jobs.push(
+        highlightCode(token.text, token.lang ?? '').then((html) => {
+          if (html !== null) highlights.set(`${token.lang ?? ''}\0${token.text}`, html);
+        }),
+      );
+    }
+  });
+  await Promise.all(jobs);
+  return renderMarkdown(source, highlights);
+}
 
 const SAFE_LINK_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
 
-export function renderMarkdown(source: string): string {
-  const rendered = marked.parse(source, {
+export function renderMarkdown(source: string, highlights = new Map<string, string>()): string {
+  const markdown = new Marked({
+    renderer: {
+      code(token) {
+        const highlighted = highlights.get(`${token.lang ?? ''}\0${token.text}`) ?? null;
+        const block =
+          highlighted === null
+            ? new Renderer().code(token)
+            : `<pre><code>${highlighted}\n</code></pre>`;
+        const language = token.lang?.trim().split(/\s+/, 1)[0];
+        if (!language) return block;
+        const label = document.createElement('span');
+        label.textContent = language;
+        return block.replace('<pre>', `<pre>${label.outerHTML}`);
+      },
+    },
+  });
+
+  const rendered = markdown.parse(source, {
     async: false,
-    breaks: false,
+    breaks: true,
     gfm: true,
   });
   const clean = DOMPurify.sanitize(rendered, {
-    ALLOWED_ATTR: ['checked', 'disabled', 'href', 'start', 'title', 'type'],
+    ALLOWED_ATTR: ['class', 'checked', 'disabled', 'href', 'start', 'title', 'type'],
     ALLOWED_TAGS: [
       'a',
       'blockquote',
@@ -31,6 +66,7 @@ export function renderMarkdown(source: string): string {
       'p',
       'pre',
       'strong',
+      'span',
       'table',
       'tbody',
       'td',
@@ -46,6 +82,15 @@ export function renderMarkdown(source: string): string {
 
   const template = document.createElement('template');
   template.innerHTML = clean;
+
+  // Keep only syntax token classes inside code, never user-supplied application classes.
+  for (const element of template.content.querySelectorAll('[class]')) {
+    const classes = element.matches('pre code span')
+      ? [...element.classList].filter(isSyntaxClass)
+      : [];
+    if (classes.length) element.setAttribute('class', classes.join(' '));
+    else element.removeAttribute('class');
+  }
 
   for (const anchor of template.content.querySelectorAll('a')) {
     const href = anchor.getAttribute('href');
