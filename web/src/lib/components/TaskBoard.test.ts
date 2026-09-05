@@ -1,8 +1,7 @@
 import { mount, tick, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-
 import { createTask, deleteTask, listTasks, updateTask } from '../api/tasks';
-import type { Task, TaskStatus } from '../api/types';
+import type { Task } from '../api/types';
 import TaskBoard from './TaskBoard.svelte';
 
 vi.mock('../api/tasks', () => ({
@@ -11,408 +10,273 @@ vi.mock('../api/tasks', () => ({
   listTasks: vi.fn(),
   updateTask: vi.fn(),
 }));
-
 afterEach(() => {
   vi.clearAllMocks();
-  vi.unstubAllGlobals();
   document.body.replaceChildren();
 });
 
-describe('TaskBoard focus and filtering', () => {
-  it('loads every open Todo task with its schedule and first detail line', async () => {
-    const alpha = task('alpha', 'Alpha');
-    const timed = { ...task('timed', 'Timed'), dueTime: '16:00' };
-    const undated = {
-      ...task('undated', 'Undated'),
-      description: 'First detail line\nHidden detail line',
-      dueDate: null,
-    };
-    const priority = { ...task('priority', 'Priority item'), dueDate: null, priority: 1 as const };
-    vi.mocked(listTasks).mockResolvedValue({ items: [alpha, timed, undated, priority] });
-    const target = document.createElement('div');
-    document.body.append(target);
-    const component = mount(TaskBoard, {
-      props: { mode: 'todo', today: '2026-08-23' },
-      target,
-    });
-
-    try {
-      await vi.waitFor(() => expect(target.textContent).toContain('Alpha'));
-      expect(listTasks).toHaveBeenCalledWith({ status: 'TODO' }, expect.any(AbortSignal));
-      expect(target.querySelector('#regular-todo')?.textContent).toContain('3');
-      expect(target.querySelector('#priority-todo')?.textContent).toContain('1');
-      expect(
-        target.querySelector('[data-focus-uid="priority"] [aria-label="Priority task"]'),
-      ).toBeNull();
-      expect(target.querySelector('[data-focus-uid="alpha"]')?.textContent).toContain('Today');
-      expect(target.querySelector('[data-focus-uid="timed"]')?.textContent).toContain('16:00');
-      expect(target.querySelector('[data-focus-uid="undated"]')?.textContent).toContain(
-        'First detail line',
-      );
-      expect(target.querySelector('[data-focus-uid="undated"]')?.textContent).not.toContain(
-        'Hidden detail line',
-      );
-      expect(target.querySelector('[data-focus-uid="alpha"]')?.classList).toContain(
-        'task-row-compact',
-      );
-
-      const more = target.querySelector<HTMLButtonElement>(
-        '[aria-label="More actions for Alpha"]',
-      )!;
-      expect(more.getAttribute('aria-expanded')).toBe('false');
-      more.click();
-      await tick();
-      expect(more.getAttribute('aria-expanded')).toBe('true');
-    } finally {
-      await unmount(component);
-    }
+function task(uid: string, overrides: Partial<Task> = {}): Task {
+  return {
+    uid,
+    title: uid,
+    description: '',
+    dueDate: '2026-09-05',
+    dueTime: null,
+    priority: 0,
+    status: 'TODO',
+    sortKey: 1,
+    completedAt: null,
+    createdAt: '2026-09-05T10:00:00Z',
+    updatedAt: '2026-09-05T10:00:00Z',
+    ...overrides,
+  };
+}
+async function setup(items: Task[], mode: 'todo' | 'all' = 'all') {
+  vi.mocked(listTasks).mockResolvedValue({ items });
+  const target = document.createElement('div');
+  document.body.append(target);
+  const component = mount(TaskBoard, { target, props: { mode, today: '2026-09-05' } });
+  await vi.waitFor(() => expect(target.querySelector('[data-focus-uid]')).not.toBeNull());
+  return { target, component };
+}
+function button(label: string, root: ParentNode = document.body) {
+  const result = root.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`);
+  expect(result, label).not.toBeNull();
+  return result!;
+}
+async function textButton(text: string) {
+  return vi.waitFor(() => {
+    const result = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(
+      (b) => b.textContent?.trim() === text || b.getAttribute('aria-label') === text,
+    );
+    expect(result, text).toBeDefined();
+    return result!;
   });
+}
+async function editTitle(target: HTMLElement, uid: string, value: string) {
+  button(`Edit ${uid}`, target).click();
+  await tick();
+  const input = target.querySelector<HTMLInputElement>(`#task-title-${uid}`)!;
+  input.value = value;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await tick();
+  return input;
+}
 
-  it('sends only one create request for synchronous duplicate submissions', async () => {
-    const pending = deferred<Task>();
-    vi.mocked(listTasks).mockResolvedValue({ items: [] });
-    vi.mocked(createTask).mockReturnValue(pending.promise);
-    const target = document.createElement('div');
-    document.body.append(target);
-    const component = mount(TaskBoard, {
-      props: { mode: 'all', today: '2026-08-23' },
-      target,
-    });
-
-    try {
-      const title = target.querySelector<HTMLInputElement>('#new-task-all')!;
-      title.value = 'Only once';
-      title.dispatchEvent(new Event('input', { bubbles: true }));
-      const form = target.querySelector<HTMLFormElement>('.task-create')!;
-
-      form.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }));
-      form.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }));
-
-      expect(createTask).toHaveBeenCalledOnce();
-      await tick();
-      expect(title.disabled).toBe(true);
-      pending.resolve(task('created', 'Only once'));
-      await vi.waitFor(() => expect(title.value).toBe(''));
-    } finally {
-      await unmount(component);
-    }
-  });
-
-  it('keeps focus on a task moved between groups and announces the change', async () => {
-    const alpha = task('alpha', 'Alpha');
-    const beta = task('beta', 'Beta');
-    vi.mocked(listTasks).mockResolvedValue({ items: [alpha, beta] });
-    vi.mocked(updateTask).mockResolvedValue({ ...alpha, status: 'DONE' });
-    const target = document.createElement('div');
-    document.body.append(target);
-    const component = mount(TaskBoard, {
-      props: { mode: 'all', today: '2026-08-23' },
-      target,
-    });
-
-    try {
-      const toggle = await vi.waitFor(() => {
-        const button = target.querySelector<HTMLButtonElement>('[aria-label="Complete Alpha"]');
-        expect(button).not.toBeNull();
-        return button!;
-      });
-      toggle.focus();
-      toggle.click();
-
-      await vi.waitFor(() =>
-        expect(document.activeElement?.outerHTML).toContain('aria-label="Restore Alpha"'),
-      );
-      expect(
-        document.activeElement?.closest('[data-focus-uid]')?.getAttribute('data-focus-uid'),
-      ).toBe('alpha');
-      await vi.waitFor(() =>
-        expect(target.querySelector('[data-action-status]')?.textContent).toContain(
-          'Task completed: Alpha.',
-        ),
-      );
-    } finally {
-      await unmount(component);
-    }
-  });
-
-  it('keeps an edited Todo task visible when its due date changes', async () => {
-    const alpha = task('alpha', 'Alpha');
-    const beta = task('beta', 'Beta');
-    vi.mocked(listTasks).mockResolvedValue({ items: [alpha, beta] });
-    vi.mocked(updateTask).mockResolvedValue({ ...alpha, dueDate: '2026-08-24' });
-    const target = document.createElement('div');
-    document.body.append(target);
-    const component = mount(TaskBoard, {
-      props: { mode: 'todo', today: '2026-08-23' },
-      target,
-    });
-
-    try {
-      const edit = await vi.waitFor(() => {
-        const button = target.querySelector<HTMLButtonElement>('[aria-label="Edit Alpha"]');
-        expect(button).not.toBeNull();
-        return button!;
-      });
-      expect(target.querySelector('#regular-todo')?.textContent).toContain('Regular');
-      edit.click();
-      const dueDateTrigger = await vi.waitFor(() => {
-        const button = target.querySelector<HTMLButtonElement>(
-          '[data-focus-uid="alpha"] [aria-label^="Due date "]',
-        );
-        expect(button).not.toBeNull();
-        return button!;
-      });
-      expect(target.querySelector('[data-focus-uid="alpha"] input[type="date"]')).toBeNull();
-      expect(target.querySelector('[data-focus-uid="alpha"] input[type="time"]')).toBeNull();
-      const editSurface = target.querySelector<HTMLElement>(
-        '[data-focus-uid="alpha"] .task-edit-copy[data-slot="input-group"]',
-      );
-      expect(editSurface?.querySelector('textarea')).not.toBeNull();
-      expect(dueDateTrigger.closest('[data-slot="input-group"]')).toBe(editSurface);
-      const highPriority = target.querySelector<HTMLButtonElement>(
-        '[data-focus-uid="alpha"] [aria-label="High priority"]',
-      )!;
-      expect(highPriority.textContent?.trim()).toBe('');
-      expect(highPriority.closest('[data-slot="input-group"]')).toBe(editSurface);
-      highPriority.click();
-      dueDateTrigger.click();
-      const august24 = await vi.waitFor(() => {
-        const button = document.body.querySelector<HTMLButtonElement>(
-          '[data-bits-day][data-value="2026-08-24"]',
-        );
-        expect(button).not.toBeNull();
-        return button!;
-      });
-      august24.click();
-      await vi.waitFor(() =>
-        expect(
-          target.querySelector('[data-focus-uid="alpha"] [aria-label="Due date 2026-08-24"]'),
-        ).not.toBeNull(),
-      );
-      target
-        .querySelector<HTMLFormElement>('[data-focus-uid="alpha"] .task-edit-form')
-        ?.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }));
-
-      await vi.waitFor(() => expect(updateTask).toHaveBeenCalledOnce());
-      expect(target.querySelector('[data-focus-uid="alpha"]')).not.toBeNull();
-      expect(updateTask).toHaveBeenCalledWith(
-        'alpha',
-        expect.objectContaining({ dueTime: null, priority: 1 }),
-      );
-      await vi.waitFor(() =>
-        expect(target.querySelector('[data-action-status]')?.textContent).toContain(
-          'Task saved: Alpha.',
-        ),
-      );
-    } finally {
-      await unmount(component);
-    }
-  });
-
-  it('removes a completed task from Todo and focuses its neighbor', async () => {
-    const alpha = task('alpha', 'Alpha');
-    const beta = task('beta', 'Beta');
-    vi.mocked(listTasks).mockResolvedValue({ items: [alpha, beta] });
-    vi.mocked(updateTask).mockResolvedValue({
-      ...alpha,
-      completedAt: '2026-08-23T12:00:00.000Z',
-      status: 'DONE',
-    });
-    const target = document.createElement('div');
-    document.body.append(target);
-    const component = mount(TaskBoard, {
-      props: { mode: 'todo', today: '2026-08-23' },
-      target,
-    });
-
-    try {
-      const complete = await vi.waitFor(() => {
-        const button = target.querySelector<HTMLButtonElement>('[aria-label="Complete Alpha"]');
-        expect(button).not.toBeNull();
-        return button!;
-      });
-      complete.focus();
-      complete.click();
-
-      await vi.waitFor(() =>
-        expect(
-          document.activeElement?.closest('[data-focus-uid]')?.getAttribute('data-focus-uid'),
-        ).toBe('beta'),
-      );
-      expect(target.querySelector('[data-focus-uid="alpha"]')).toBeNull();
-      expect(target.querySelector('[data-action-status]')?.textContent).toContain(
-        'Task completed and removed from Todo: Alpha.',
-      );
-    } finally {
-      await unmount(component);
-    }
-  });
-
-  it('focuses the adjacent task and announces a successful delete', async () => {
-    installDialogPolyfill();
-    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
-      callback(0);
-      return 1;
-    });
-    const alpha = task('alpha', 'Alpha');
-    const beta = task('beta', 'Beta');
-    vi.mocked(listTasks).mockResolvedValue({ items: [alpha, beta] });
-    vi.mocked(deleteTask).mockResolvedValue();
-    const target = document.createElement('div');
-    document.body.append(target);
-    const component = mount(TaskBoard, {
-      props: { mode: 'all', today: '2026-08-23' },
-      target,
-    });
-
-    try {
-      const more = await vi.waitFor(() => {
-        const button = target.querySelector<HTMLButtonElement>(
-          '[aria-label="More actions for Alpha"]',
-        );
-        expect(button).not.toBeNull();
-        return button!;
-      });
-      more.click();
-      const deleteButton = await vi.waitFor(() => {
-        const button = document.body.querySelector<HTMLButtonElement>(
-          '[aria-label="Delete Alpha"]',
-        );
-        expect(button).not.toBeNull();
-        return button!;
-      });
-      deleteButton.focus();
-      deleteButton.click();
-      await vi.waitFor(() =>
-        expect(document.body.querySelector('[data-slot="alert-dialog-content"]')).not.toBeNull(),
-      );
-      document.body.querySelector<HTMLButtonElement>('[data-slot="alert-dialog-action"]')?.click();
-
-      await vi.waitFor(() =>
-        expect(
-          document.activeElement?.closest('[data-focus-uid]')?.getAttribute('data-focus-uid'),
-        ).toBe('beta'),
-      );
-      expect(target.querySelector('[data-action-status]')?.textContent).toContain(
-        'Task deleted: Alpha.',
-      );
-    } finally {
-      await unmount(component);
-      uninstallDialogPolyfill();
-    }
-  });
-
-  it('clears stale rows and marks the board busy when the status filter changes', async () => {
-    const openTask = task('open', 'Open task');
-    const completedTask = task('done', 'Completed task', 'DONE');
-    const pending = deferred<{ items: Task[] }>();
-    vi.mocked(listTasks)
-      .mockResolvedValueOnce({ items: [openTask] })
-      .mockReturnValueOnce(pending.promise);
-    const target = document.createElement('div');
-    document.body.append(target);
-    const component = mount(TaskBoard, {
-      props: { mode: 'all', today: '2026-08-23' },
-      target,
-    });
-
-    try {
-      await vi.waitFor(() => expect(target.textContent).toContain('Open task'));
-      const completedFilter = [...target.querySelectorAll<HTMLButtonElement>('button')].find(
-        (button) => button.textContent?.trim() === 'Completed',
-      )!;
-      completedFilter.click();
-      await tick();
-
-      expect(completedFilter.getAttribute('data-state')).toBe('on');
-      expect(target.textContent).not.toContain('Open task');
-      expect(target.querySelector('.task-board')?.getAttribute('aria-busy')).toBe('true');
-      expect(target.textContent).toContain('Loading tasks…');
-
-      pending.resolve({ items: [completedTask] });
-      await vi.waitFor(() => expect(target.textContent).toContain('Completed task'));
-      expect(target.querySelector('.task-board')?.getAttribute('aria-busy')).toBe('false');
-    } finally {
-      await unmount(component);
-    }
-  });
-
-  it('renders completed tasks as compact title-only summaries', async () => {
-    vi.mocked(listTasks).mockResolvedValue({
-      items: [
-        {
-          ...task('done', 'Completed task', 'DONE'),
-          description: 'Details that no longer need attention',
-        },
+describe('Task list redesign', () => {
+  it('keeps all open Todo tasks in one list and marks only high priority', async () => {
+    const { target, component } = await setup(
+      [
+        task('Alpha'),
+        task('Later', { dueDate: '2026-09-07', priority: 1 }),
+        task('Undated', { dueDate: null, description: 'A private note' }),
       ],
-    });
-    const target = document.createElement('div');
-    document.body.append(target);
-    const component = mount(TaskBoard, {
-      props: { mode: 'all', today: '2026-08-23' },
-      target,
-    });
-
+      'todo',
+    );
     try {
-      const completedRow = await vi.waitFor(() => {
-        const row = target.querySelector<HTMLElement>('[data-focus-uid="done"]');
-        expect(row).not.toBeNull();
-        return row!;
-      });
+      expect(listTasks).toHaveBeenCalledWith({ status: 'TODO' }, expect.any(AbortSignal));
+      expect(target.querySelectorAll('[data-focus-uid]')).toHaveLength(3);
+      expect(target.querySelector('[aria-label="High priority"]')).not.toBeNull();
+      expect(target.textContent).not.toContain('Regular');
+      expect(target.textContent).not.toContain('A private note');
+      button('Details for Undated', target).click();
+      await vi.waitFor(() =>
+        expect(document.body.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe(
+          'A private note',
+        ),
+      );
+    } finally {
+      await unmount(component);
+    }
+  });
 
-      expect(completedRow.classList).toContain('task-done');
-      expect(completedRow.textContent).toContain('Completed task');
-      expect(completedRow.textContent).not.toContain('Details that no longer need attention');
-      expect(completedRow.textContent).not.toContain('Today');
-      expect(completedRow.querySelector('[aria-label="Restore Completed task"]')).not.toBeNull();
+  it('saves just the title and preserves legacy details, priority and time', async () => {
+    const original = task('Alpha', { dueTime: '16:30', description: 'Keep details', priority: 1 });
+    vi.mocked(updateTask).mockResolvedValue({ ...original, title: 'Renamed' });
+    const { target, component } = await setup([original]);
+    try {
+      expect(target.querySelector('[aria-label="Sort tasks"]')).toBeNull();
+      const input = await editTitle(target, 'Alpha', 'Renamed');
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+      );
+      await vi.waitFor(() =>
+        expect(updateTask).toHaveBeenCalledExactlyOnceWith('Alpha', { title: 'Renamed' }),
+      );
+      await vi.waitFor(() => expect(document.activeElement).toBe(button('Edit Renamed', target)));
+      expect(target.textContent).toContain('Renamed');
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it('cancels with Escape, ignores composition Enter, and keeps failed edits for retry', async () => {
+    vi.mocked(updateTask)
+      .mockRejectedValueOnce(new Error('Offline'))
+      .mockResolvedValueOnce(task('Alpha', { title: 'Keep draft' }));
+    const { target, component } = await setup([task('Alpha')]);
+    try {
+      let input = await editTitle(target, 'Alpha', 'Discard draft');
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+      );
+      await tick();
+      expect(updateTask).not.toHaveBeenCalled();
+      input = await editTitle(target, 'Alpha', 'Keep draft');
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          isComposing: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      expect(updateTask).not.toHaveBeenCalled();
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+      );
+      await vi.waitFor(() => expect(target.textContent).toContain('Offline'));
+      expect(input.value).toBe('Keep draft');
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      await vi.waitFor(() => expect(target.querySelector('#task-title-Alpha')).toBeNull());
+      expect(updateTask).toHaveBeenCalledTimes(2);
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it('changes dates in place and clears legacy time only when removing the date', async () => {
+    const original = task('Alpha', { dueTime: '16:30' });
+    vi.mocked(updateTask)
+      .mockResolvedValueOnce({ ...original, dueDate: '2026-09-06' })
+      .mockResolvedValueOnce({ ...original, dueDate: null, dueTime: null });
+    const { target, component } = await setup([original], 'todo');
+    try {
+      button('Target date and priority for Alpha', target).click();
+      (await textButton('Tomorrow')).click();
+      await vi.waitFor(() =>
+        expect(updateTask).toHaveBeenCalledWith('Alpha', { dueDate: '2026-09-06' }),
+      );
+      await vi.waitFor(() => expect(target.textContent).toContain('Tomorrow'));
+      const noDate = await textButton('No date');
+      await vi.waitFor(() => expect(noDate.disabled).toBe(false));
+      noDate.click();
+      await vi.waitFor(() =>
+        expect(updateTask).toHaveBeenLastCalledWith('Alpha', { dueDate: null, dueTime: null }),
+      );
+      await vi.waitFor(() => expect(target.querySelector('.task-date')).toBeNull());
+      expect(target.querySelector('[data-focus-uid="Alpha"]')).not.toBeNull();
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it('opens a real calendar and leaves a failed priority change visibly unchecked', async () => {
+    vi.mocked(updateTask)
+      .mockRejectedValueOnce(new Error('Cannot save priority'))
+      .mockResolvedValueOnce(task('Alpha', { dueDate: '2026-09-15' }));
+    const { target, component } = await setup([task('Alpha')]);
+    try {
+      button('Target date and priority for Alpha', target).click();
+      const priority = await vi.waitFor(() => {
+        const node = document.body.querySelector<HTMLButtonElement>(
+          '[data-slot="toggle-group-item"][aria-label="High priority"]',
+        );
+        expect(node).not.toBeNull();
+        return node!;
+      });
+      priority.click();
+      await vi.waitFor(() => expect(document.body.textContent).toContain('Cannot save priority'));
+      expect(priority.getAttribute('data-state')).toBe('off');
+      expect(priority.textContent?.trim()).toBe('');
+      expect(updateTask).toHaveBeenCalledWith('Alpha', { priority: 1 });
+      (await textButton('Choose date')).click();
+      const day = await vi.waitFor(() => {
+        const node = document.body.querySelector<HTMLButtonElement>(
+          '[data-bits-day][data-value="2026-09-15"]',
+        );
+        expect(node).not.toBeNull();
+        return node!;
+      });
+      day.click();
+      await vi.waitFor(() =>
+        expect(updateTask).toHaveBeenLastCalledWith('Alpha', { dueDate: '2026-09-15' }),
+      );
+      await vi.waitFor(() => expect(target.textContent).toContain('Sep 15'));
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it('completes and restores tasks with focus across a collapsible completed group', async () => {
+    const alpha = task('Alpha');
+    vi.mocked(updateTask)
+      .mockResolvedValueOnce({ ...alpha, status: 'DONE' })
+      .mockResolvedValueOnce(alpha);
+    const { target, component } = await setup([alpha, task('Beta')]);
+    try {
+      button('Complete Alpha', target).focus();
+      button('Complete Alpha', target).click();
+      await vi.waitFor(() => expect(document.activeElement).toBe(button('Restore Alpha', target)));
+      const collapse = target.querySelector<HTMLButtonElement>('.completed-toggle')!;
+      collapse.click();
+      await tick();
+      expect(target.querySelector('[aria-label="Restore Alpha"]')).toBeNull();
+      collapse.click();
+      await tick();
+      button('Restore Alpha', target).click();
+      await vi.waitFor(() => expect(document.activeElement).toBe(button('Complete Alpha', target)));
+      expect(target.querySelector('.completed-toggle')).toBeNull();
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it('rolls back a failed completion in Todo and returns focus to the restored task', async () => {
+    vi.mocked(updateTask).mockRejectedValue(new Error('Offline'));
+    const { target, component } = await setup([task('Alpha'), task('Beta')], 'todo');
+    try {
+      button('Complete Alpha', target).focus();
+      button('Complete Alpha', target).click();
+      await vi.waitFor(() => expect(target.textContent).toContain('Offline'));
+      await vi.waitFor(() => expect(document.activeElement).toBe(button('Complete Alpha', target)));
+      expect(target.querySelectorAll('[data-focus-uid]')).toHaveLength(2);
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it('keeps delete outside the date menu, confirms deletion and focuses the neighbor', async () => {
+    vi.mocked(deleteTask).mockResolvedValue(undefined);
+    const { target, component } = await setup([task('Alpha'), task('Beta')]);
+    try {
+      button('Details for Alpha', target).click();
+      const remove = await vi.waitFor(() => button('Delete Alpha'));
+      remove.click();
+      const confirm = await vi.waitFor(() => {
+        const node = document.body.querySelector<HTMLButtonElement>(
+          '[data-slot="alert-dialog-action"]',
+        );
+        expect(node).not.toBeNull();
+        return node!;
+      });
+      expect(deleteTask).not.toHaveBeenCalled();
+      confirm.click();
+      await vi.waitFor(() => expect(deleteTask).toHaveBeenCalledWith('Alpha'));
+      await vi.waitFor(() =>
+        expect(
+          document.activeElement?.closest('[data-focus-uid]')?.getAttribute('data-focus-uid'),
+        ).toBe('Beta'),
+      );
     } finally {
       await unmount(component);
     }
   });
 });
-
-function task(uid: string, title: string, status: TaskStatus = 'TODO'): Task {
-  return {
-    completedAt: status === 'DONE' ? '2026-08-23T12:00:00.000Z' : null,
-    createdAt: '2026-08-23T10:00:00.000Z',
-    description: '',
-    dueDate: '2026-08-23',
-    dueTime: null,
-    priority: 0,
-    sortKey: 1,
-    status,
-    title,
-    uid,
-    updatedAt: '2026-08-23T10:00:00.000Z',
-  };
-}
-
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => {
-    resolve = resolvePromise;
-  });
-  return { promise, resolve };
-}
-
-function installDialogPolyfill(): void {
-  Object.defineProperties(HTMLDialogElement.prototype, {
-    close: {
-      configurable: true,
-      value(this: HTMLDialogElement) {
-        this.open = false;
-      },
-    },
-    showModal: {
-      configurable: true,
-      value(this: HTMLDialogElement) {
-        this.open = true;
-      },
-    },
-  });
-}
-
-function uninstallDialogPolyfill(): void {
-  delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>).close;
-  delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>).showModal;
-}

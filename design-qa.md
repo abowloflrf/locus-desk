@@ -58,3 +58,54 @@
 - No P3 follow-up is required for the requested scope.
 
 final result: passed
+
+---
+
+# Task UI design verification
+
+final result: blocked
+
+## Reference and scope
+
+- Source: `/home/ruofeng/.codex/generated_images/01a070d6-b533-7d13-8765-15fd157de116/exec-56111399-53c6-47e0-8c09-2316fd2904d7.png`.
+- Implementation: `/tasks` and the workspace Todo rail; the existing navigation and monochrome theme are retained, with a red semantic high-priority flag as requested in the follow-up annotations.
+- Target viewports: desktop 1440 × 1024, tablet 834 × 1194, mobile 390 × 844, and narrow mobile 320px wide.
+- Target states: idle list, inline title editing, task properties, calendar, completed group, loading and failed saves.
+- Implementation screenshot: unavailable. No browser-control or screenshot tool is exposed in this session. The existing development server responds at `http://127.0.0.1:5173/tasks`, but HTTP availability is not visual verification.
+- Source/implementation density normalization, full-view comparison and focused-region comparison: not performed.
+
+## Functional decisions
+
+- Title edits submit only the title. Enter saves, Escape cancels, and leaving the row saves; failed drafts remain editable. Composition Enter does not submit.
+- The properties popover contains only target date and two icon-only priority choices. Normal tasks have no priority label.
+- Date shortcuts use the workspace calendar date. This week means Sunday of the current Monday–Sunday week, including today when it is Sunday.
+- Dates are optional. New tasks do not set a clock time. Existing times survive title, priority and nonempty date changes; clearing the date clears its dependent time.
+- Description editing and confirmed deletion remain available through the separate details icon.
+- Tasks uses a single open list and a collapsible completed group. Todo continues to show every open task.
+
+## Automated checks
+
+- `pnpm check`: zero errors and warnings.
+- `pnpm test`: 107 tests passed across 21 files.
+- `pnpm build`: passed, including production CSS verification.
+
+## Verification limits
+
+The automated component checks cover attribute updates, optional dates, failed saves, title focus and keyboard behavior, creation, completion rollback and confirmed deletion. They do not prove browser layout, touch behavior, contrast, or visual fidelity.
+
+Fonts/typography, spacing/layout, colors/tokens, icon rendering and app copy all still require comparison against a browser-rendered implementation. Browser console errors have not been inspected. There is no visual comparison history and no visual pass is claimed.
+
+## Remaining visual checks
+
+- Capture the list and properties at matched desktop dimensions and compare with the source.
+- Check title wrapping and metadata density in the narrow Todo rail.
+- Verify mobile keyboard behavior, calendar bounds, touch targets and lack of horizontal overflow.
+- Check popover positioning, focus return and nested deletion confirmation in a real browser.
+
+## Task annotation follow-up
+
+- Date shortcuts and the no-date action now use labeled icons without visible option text.
+- Priority uses an outline flag for no priority and a red filled flag for high priority.
+- The sort control is removed; the existing default target-date order remains.
+- Updated validation: type checking and production build passed; all 11 affected task component tests passed.
+- Browser-rendered verification of these updates remains unavailable.

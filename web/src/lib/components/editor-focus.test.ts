@@ -170,7 +170,7 @@ describe('inline editor focus', () => {
     try {
       target.querySelector<HTMLButtonElement>('[aria-label="Edit A task to edit"]')?.click();
       await vi.waitFor(() => expect(document.activeElement?.tagName).toBe('INPUT'));
-      expect(target.querySelector('.task-edit-form')).not.toBeNull();
+      expect(target.querySelector('#task-title-task-1')).not.toBeNull();
       expect(document.body.querySelector('.task-editor-sheet')).toBeNull();
       const inlineTitle = document.activeElement as HTMLInputElement;
       expect(inlineTitle.selectionStart).toBe(0);
@@ -187,139 +187,56 @@ describe('inline editor focus', () => {
     }
   });
 
-  it('opens and saves the task editor in a bottom sheet on mobile', async () => {
-    const visualViewport = Object.assign(new EventTarget(), { height: 844, offsetTop: 0 });
-    vi.stubGlobal('innerHeight', 844);
-    vi.stubGlobal('visualViewport', visualViewport as unknown as VisualViewport);
+  it('edits a title in place on mobile and saves with Enter', async () => {
     vi.stubGlobal(
       'matchMedia',
-      vi.fn(
-        (query: string) =>
-          ({
-            addEventListener: vi.fn(),
-            matches: query === '(max-width: 767px)',
-            media: query,
-            removeEventListener: vi.fn(),
-          }) as unknown as MediaQueryList,
-      ),
+      vi.fn((query: string) => ({
+        matches: query === '(max-width: 767px)',
+        media: query,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
     );
     const onSave = vi.fn().mockResolvedValue(undefined);
     const target = document.createElement('div');
     document.body.append(target);
     const component = mount(TaskRow, {
+      target,
       props: {
         busy: false,
-        onDelete: vi.fn(),
+        task,
+        today: '2026-09-05',
         onSave,
-        onToggle: vi.fn().mockResolvedValue(undefined),
-        task,
-        today: '2026-08-23',
+        onToggle: vi.fn(),
+        onDelete: vi.fn(),
       },
-      target,
     });
-
     try {
-      await tick();
-      target.querySelector<HTMLButtonElement>('[aria-label="Edit A task to edit"]')?.click();
-      const sheet = await vi.waitFor(() => {
-        const content = document.body.querySelector<HTMLElement>('.task-editor-sheet');
-        expect(content).not.toBeNull();
-        return content!;
+      target.querySelector<HTMLButtonElement>('[aria-label="Edit A task to edit"]')!.click();
+      const input = await vi.waitFor(() => {
+        const input = target.querySelector<HTMLInputElement>('#task-title-task-1');
+        expect(input).not.toBeNull();
+        return input!;
       });
-
-      expect(sheet.dataset.side).toBe('bottom');
-      expect(target.querySelector('.task-edit-form')).toBeNull();
-      expect(sheet.textContent).toContain('Edit task');
-      expect(sheet.querySelector('textarea[aria-label="Details"]')).not.toBeNull();
-      const title = sheet.querySelector<HTMLInputElement>('#task-title-task-1')!;
-      expect(document.activeElement).toBe(title);
-      expect(title.selectionStart).toBe(title.value.length);
-      expect(title.selectionEnd).toBe(title.value.length);
-
-      visualViewport.height = 500;
-      visualViewport.dispatchEvent(new Event('resize'));
-      await vi.waitFor(() => expect(sheet.style.bottom).toBe('344px'));
-      expect(sheet.style.maxHeight).toBe('min(42rem, 450px)');
-
-      title.value = 'Discarded mobile edit';
-      title.dispatchEvent(new Event('input', { bubbles: true }));
-      [...sheet.querySelectorAll<HTMLButtonElement>('button')]
-        .find((button) => button.textContent?.trim() === 'Cancel')
-        ?.click();
-
-      await vi.waitFor(() => expect(document.body.querySelector('.task-editor-sheet')).toBeNull());
-      expect(onSave).not.toHaveBeenCalled();
-      expect(document.activeElement?.getAttribute('aria-label')).toBe('Edit A task to edit');
-
-      target.querySelector<HTMLButtonElement>('[aria-label="Edit A task to edit"]')?.click();
-      const reopenedSheet = await vi.waitFor(() => {
-        const content = document.body.querySelector<HTMLElement>('.task-editor-sheet');
-        expect(content).not.toBeNull();
-        return content!;
-      });
-      const reopenedTitle = reopenedSheet.querySelector<HTMLInputElement>('#task-title-task-1')!;
-      expect(reopenedTitle.value).toBe('A task to edit');
-
-      reopenedTitle.value = 'Updated on mobile';
-      reopenedTitle.dispatchEvent(new Event('input', { bubbles: true }));
-      [...reopenedSheet.querySelectorAll<HTMLButtonElement>('button')]
-        .find((button) => button.textContent?.trim() === 'Save')
-        ?.click();
-
-      await vi.waitFor(() => expect(onSave).toHaveBeenCalledOnce());
-      expect(onSave).toHaveBeenCalledWith(
-        task,
-        expect.objectContaining({ title: 'Updated on mobile' }),
+      expect(document.activeElement).toBe(input);
+      expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+      input.value = 'Updated on mobile';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
       );
-      await vi.waitFor(() => expect(document.body.querySelector('.task-editor-sheet')).toBeNull());
-      expect(document.activeElement?.getAttribute('aria-label')).toBe('Edit A task to edit');
+      await vi.waitFor(() =>
+        expect(onSave).toHaveBeenCalledExactlyOnceWith(task, { title: 'Updated on mobile' }),
+      );
+      await vi.waitFor(() =>
+        expect(document.activeElement?.getAttribute('aria-label')).toBe('Edit A task to edit'),
+      );
     } finally {
       await unmount(component);
     }
   });
 
-  it('moves from the task title to the details without submitting on Enter', async () => {
-    const onSave = vi.fn().mockResolvedValue(undefined);
-    const target = document.createElement('div');
-    document.body.append(target);
-    const component = mount(TaskRow, {
-      props: {
-        busy: false,
-        onDelete: vi.fn(),
-        onSave,
-        onToggle: vi.fn().mockResolvedValue(undefined),
-        task,
-        today: '2026-08-23',
-      },
-      target,
-    });
-
-    try {
-      target.querySelector<HTMLButtonElement>('[aria-label="Edit A task to edit"]')?.click();
-      await vi.waitFor(() => expect(document.activeElement?.tagName).toBe('INPUT'));
-
-      document.activeElement?.dispatchEvent(
-        new KeyboardEvent('keydown', {
-          bubbles: true,
-          cancelable: true,
-          isComposing: true,
-          key: 'Enter',
-        }),
-      );
-      expect(document.activeElement?.tagName).toBe('INPUT');
-
-      document.activeElement?.dispatchEvent(
-        new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter' }),
-      );
-
-      expect(document.activeElement?.tagName).toBe('TEXTAREA');
-      expect(onSave).not.toHaveBeenCalled();
-    } finally {
-      await unmount(component);
-    }
-  });
-
-  it('auto-saves a task when focus leaves the expanded editor', async () => {
+  it('auto-saves a task when focus leaves the title editor', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     const target = document.createElement('div');
     const outside = document.createElement('button');
@@ -348,10 +265,9 @@ describe('inline editor focus', () => {
       outside.focus();
 
       await vi.waitFor(() => expect(onSave).toHaveBeenCalledOnce());
-      expect(onSave).toHaveBeenCalledWith(
-        expect.objectContaining({ uid: 'task-1' }),
-        expect.objectContaining({ description: 'Existing details', title: 'Updated task' }),
-      );
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ uid: 'task-1' }), {
+        title: 'Updated task',
+      });
       expect(document.activeElement).toBe(outside);
     } finally {
       await unmount(component);

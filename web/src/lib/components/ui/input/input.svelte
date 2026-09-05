@@ -7,6 +7,8 @@
       variant: {
         default: 'shadow-xs',
         flat: 'shadow-none',
+        'task-title':
+          'h-9 rounded-none border-0 border-b border-ring px-0 text-[15px] md:text-[15px] shadow-none focus-visible:ring-0 pointer-coarse:text-base',
       },
     },
     defaultVariants: {

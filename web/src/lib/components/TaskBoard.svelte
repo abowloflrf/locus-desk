@@ -12,7 +12,9 @@
   import { Button } from './ui/button';
   import * as Empty from './ui/empty';
   import { Spinner } from './ui/spinner';
-  import * as ToggleGroup from './ui/toggle-group';
+  import ListTodo from '@lucide/svelte/icons/list-todo';
+  import ChevronDown from '@lucide/svelte/icons/chevron-down';
+  import ChevronRight from '@lucide/svelte/icons/chevron-right';
 
   let {
     mode,
@@ -34,21 +36,31 @@
   let pendingDelete = $state<Task | null>(null);
   let deleteBusy = $state(false);
   let deleteError = $state<string | null>(null);
-  let statusFilter = $state<'ALL' | TaskStatus>('ALL');
+  let completedOpen = $state(true);
   let requestId = 0;
   let activeController: AbortController | null = null;
-  let loadKey = $derived(`${mode}:${statusFilter}:${refreshToken}`);
+  let loadKey = $derived(`${mode}:${refreshToken}`);
   let previousLoadKey = '';
   let boardElement = $state<HTMLElement>();
   let deleteFocusSnapshot: ListFocusSnapshot | null = null;
 
-  let priorityTasks = $derived(
-    tasks.filter((task) => task.status === 'TODO' && task.priority === 1),
+  let openTasks = $derived(
+    tasks
+      .filter((task) => task.status === 'TODO')
+      .sort((a, b) => {
+        return (
+          (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999') ||
+          a.sortKey - b.sortKey ||
+          a.createdAt.localeCompare(b.createdAt) ||
+          a.uid.localeCompare(b.uid)
+        );
+      }),
   );
-  let regularTasks = $derived(
-    tasks.filter((task) => task.status === 'TODO' && task.priority === 0),
+  let completedTasks = $derived(
+    tasks
+      .filter((task) => task.status === 'DONE')
+      .sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? '')),
   );
-  let completedTasks = $derived(tasks.filter((task) => task.status === 'DONE'));
 
   onDestroy(() => activeController?.abort());
 
@@ -69,7 +81,7 @@
     try {
       const response = await listTasks(
         {
-          status: mode === 'todo' ? 'TODO' : statusFilter !== 'ALL' ? statusFilter : undefined,
+          status: mode === 'todo' ? 'TODO' : undefined,
         },
         activeController.signal,
       );
@@ -89,7 +101,8 @@
     operationError = null;
     try {
       const task = await createTask(payload);
-      if (mode === 'todo' || statusFilter !== 'DONE') tasks = [...tasks, task];
+      tasks = [...tasks, task];
+      actionStatus = `Task added: ${task.title}.`;
       window.dispatchEvent(new CustomEvent('locus:tasks-changed'));
     } catch (cause) {
       operationError = errorMessage(cause, 'Unable to add the task.');
@@ -101,6 +114,8 @@
   }
 
   async function handleToggle(task: Task): Promise<void> {
+    if (busyUids.has(task.uid)) return;
+    if (mode === 'all' && task.status === 'TODO') completedOpen = true;
     const focusSnapshot = captureListFocus(boardElement, task.uid);
     invalidateTaskRequest();
     const previous = task;
@@ -228,17 +243,7 @@
     if (mode === 'todo') {
       return task.status === 'TODO';
     }
-    return statusFilter === 'ALL' || task.status === statusFilter;
-  }
-
-  function selectStatusFilter(filter: 'ALL' | TaskStatus): void {
-    if (statusFilter === filter) return;
-    invalidateTaskRequest();
-    statusFilter = filter;
-    tasks = [];
-    loading = true;
-    operationError = null;
-    actionStatus = null;
+    return true;
   }
 
   function markBusy(uid: string, busy: boolean): void {
@@ -264,27 +269,12 @@
   class="task-board"
 >
   {#if mode === 'all'}
-    <header class="page-header task-header">
-      <h1>Tasks</h1>
-      <ToggleGroup.Root
-        aria-label="Task status"
-        class="shrink-0"
-        size="sm"
-        onValueChange={(value) => selectStatusFilter(value as 'ALL' | TaskStatus)}
-        type="single"
-        value={statusFilter}
-        variant="outline"
-      >
-        {#each ['ALL', 'TODO', 'DONE'] as filter}
-          <ToggleGroup.Item class="max-[767px]:flex-1" value={filter}>
-            {filter === 'ALL' ? 'All' : filter === 'TODO' ? 'Open' : 'Completed'}
-          </ToggleGroup.Item>
-        {/each}
-      </ToggleGroup.Root>
+    <header class="task-header">
+      <h1><ListTodo /> Tasks</h1>
     </header>
   {/if}
 
-  <TaskCreateForm busy={creating} {mode} onCreate={handleCreate} />
+  <TaskCreateForm busy={creating} {mode} {today} onCreate={handleCreate} />
 
   {#if operationError}
     <StatusMessage tone="error">{operationError}</StatusMessage>
@@ -320,60 +310,47 @@
       </Empty.Header>
     </Empty.Root>
   {:else}
-    {#if priorityTasks.length > 0}
-      <section class="task-section" aria-labelledby={`priority-${mode}`}>
-        <h2 id={`priority-${mode}`}>Priority <span>{priorityTasks.length}</span></h2>
-        <div class="task-list">
-          {#each priorityTasks as task (task.uid)}
-            <TaskRow
-              busy={busyUids.has(task.uid)}
-              {mode}
-              onDelete={requestDelete}
-              onSave={handleSave}
-              onToggle={handleToggle}
-              {task}
-              {today}
-            />
-          {/each}
-        </div>
-      </section>
-    {/if}
-
-    {#if regularTasks.length > 0}
-      <section aria-labelledby={`regular-${mode}`} class="task-section">
-        <h2 id={`regular-${mode}`}>Regular <span>{regularTasks.length}</span></h2>
-        <div class="task-list">
-          {#each regularTasks as task (task.uid)}
-            <TaskRow
-              busy={busyUids.has(task.uid)}
-              {mode}
-              onDelete={requestDelete}
-              onSave={handleSave}
-              onToggle={handleToggle}
-              {task}
-              {today}
-            />
-          {/each}
-        </div>
-      </section>
-    {/if}
-
-    {#if completedTasks.length > 0}
-      <section class="task-section completed-section" aria-labelledby={`completed-${mode}`}>
-        <h2 id={`completed-${mode}`}>Completed <span>{completedTasks.length}</span></h2>
-        <div class="task-list">
-          {#each completedTasks as task (task.uid)}
-            <TaskRow
-              busy={busyUids.has(task.uid)}
-              {mode}
-              onDelete={requestDelete}
-              onSave={handleSave}
-              onToggle={handleToggle}
-              {task}
-              {today}
-            />
-          {/each}
-        </div>
+    <div class="task-list" aria-label="Open tasks">
+      {#each openTasks as task (task.uid)}
+        <TaskRow
+          busy={busyUids.has(task.uid)}
+          {mode}
+          onDelete={requestDelete}
+          onSave={handleSave}
+          onToggle={handleToggle}
+          {task}
+          {today}
+        />
+      {/each}
+    </div>
+    {#if mode === 'all' && completedTasks.length > 0}
+      <section class="completed-section" aria-labelledby={`completed-${mode}`}>
+        <h2 id={`completed-${mode}`}>
+          <button
+            class="completed-toggle"
+            aria-expanded={completedOpen}
+            aria-controls={`completed-list-${mode}`}
+            onclick={() => (completedOpen = !completedOpen)}
+          >
+            {#if completedOpen}<ChevronDown />{:else}<ChevronRight />{/if}
+            Completed <span>{completedTasks.length}</span>
+          </button>
+        </h2>
+        {#if completedOpen}
+          <div class="task-list" id={`completed-list-${mode}`}>
+            {#each completedTasks as task (task.uid)}
+              <TaskRow
+                busy={busyUids.has(task.uid)}
+                {mode}
+                onDelete={requestDelete}
+                onSave={handleSave}
+                onToggle={handleToggle}
+                {task}
+                {today}
+              />
+            {/each}
+          </div>
+        {/if}
       </section>
     {/if}
   {/if}
@@ -395,49 +372,76 @@
   .task-board {
     min-width: 0;
   }
-
   .todo-task-board {
     min-height: 0;
   }
-
-  .task-section {
-    margin-bottom: 16px;
-    animation: content-enter 180ms ease both;
-  }
-
-  .task-section > h2 {
+  .task-header {
     display: flex;
-    gap: 7px;
     align-items: center;
-    padding: 0 0 4px;
-    margin-bottom: 0;
-    color: var(--foreground);
-    font-size: 12px;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .task-header h1 {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin: 0;
+    font-size: 24px;
     font-weight: 650;
+    line-height: 36px;
   }
-
-  .task-section > h2 span {
-    color: var(--muted-foreground);
-    font-weight: 500;
+  .task-header h1 :global(svg) {
+    width: 24px;
+    height: 24px;
+    stroke-width: 1.5;
   }
-
-  .completed-section > h2 {
-    color: var(--muted-foreground);
-    font-weight: 600;
-  }
-
   .task-list {
     display: grid;
+    gap: 4px;
   }
-
-  @keyframes content-enter {
-    from {
-      opacity: 0;
-      transform: translateY(4px);
+  .completed-section {
+    margin-top: 32px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+  }
+  .completed-section h2 {
+    margin: 0 0 8px;
+  }
+  .completed-toggle {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 44px;
+    padding: 4px 12px;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--foreground);
+    font-size: 14px;
+    font-weight: 550;
+    cursor: pointer;
+  }
+  .completed-toggle:hover {
+    background: var(--muted);
+  }
+  .completed-toggle span {
+    color: var(--muted-foreground);
+    font-size: 12px;
+    font-weight: 400;
+  }
+  .completed-toggle :global(svg) {
+    width: 16px;
+    height: 16px;
+    color: var(--muted-foreground);
+  }
+  @media (max-width: 767px) {
+    .task-header {
+      margin-bottom: 16px;
     }
-    to {
-      opacity: 1;
-      transform: translateY(0);
+    .task-header h1 {
+      font-size: 20px;
+      gap: 12px;
     }
   }
 </style>

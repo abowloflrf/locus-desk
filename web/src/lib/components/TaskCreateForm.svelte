@@ -1,80 +1,52 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { Spinner } from './ui/spinner';
-  import Calendar from '@lucide/svelte/icons/calendar';
-  import Ellipsis from '@lucide/svelte/icons/ellipsis';
-  import Flag from '@lucide/svelte/icons/flag';
   import Plus from '@lucide/svelte/icons/plus';
-
-  import type { CreateTaskRequest, TaskPriority } from '../api/types';
+  import Flag from '@lucide/svelte/icons/flag';
+  import type { CreateTaskRequest, TaskPriority, UpdateTaskRequest } from '../api/types';
   import { errorMessage } from '../api/client';
+  import { targetDateLabel } from '../utils/task-date';
+  import TaskProperties from './TaskProperties.svelte';
   import { Button } from './ui/button';
-  import * as DropdownMenu from './ui/dropdown-menu';
   import * as Field from './ui/field';
-  import { Input } from './ui/input';
+  import * as InputGroup from './ui/input-group';
+  import { Spinner } from './ui/spinner';
 
   let {
     mode,
+    today,
     busy,
     onCreate,
   }: {
     mode: 'todo' | 'all';
+    today: string;
     busy: boolean;
     onCreate: (payload: CreateTaskRequest) => Promise<void>;
   } = $props();
 
   let title = $state('');
-  let description = $state('');
   let priority = $state<TaskPriority>(0);
-  let dueDate = $state('');
-  let dueTime = $state('');
+  let dueDate = $state<string | null>(null);
   let error = $state<string | null>(null);
   let submitting = $state(false);
-  let compactFocused = $state(false);
-  let detailsOpen = $state(false);
-  let priorityOpen = $state(false);
-  let moreButton = $state<HTMLButtonElement | null>(null);
+  let propertiesOpen = $state(false);
   let titleInput = $state<HTMLInputElement | null>(null);
-  let formElement = $state<HTMLFormElement | null>(null);
   let formBusy = $derived(busy || submitting);
-  let quickActionsVisible = $derived(
-    compactFocused ||
-      priorityOpen ||
-      Boolean(title.trim()) ||
-      Boolean(dueDate) ||
-      priority === 1 ||
-      detailsOpen,
-  );
 
-  async function submit(event: SubmitEvent): Promise<void> {
-    event.preventDefault();
-    if (busy || submitting) return;
-    const trimmedTitle = title.trim();
-    if (!trimmedTitle) {
+  async function submit(event?: SubmitEvent) {
+    event?.preventDefault();
+    if (formBusy) return;
+    if (!title.trim()) {
       error = 'Enter a task title.';
       return;
     }
-
     error = null;
     submitting = true;
     try {
-      const payload: CreateTaskRequest = {
-        description: description.trim() || undefined,
-        priority,
-        title: trimmedTitle,
-      };
-      if (dueDate) {
-        payload.dueDate = dueDate;
-        if (dueTime) payload.dueTime = dueTime;
-      }
-      await onCreate(payload);
+      await onCreate({ title: title.trim(), priority, ...(dueDate ? { dueDate } : {}) });
       title = '';
-      description = '';
-      dueTime = '';
       priority = 0;
-      priorityOpen = false;
-      dueDate = '';
-      detailsOpen = false;
+      dueDate = null;
+      propertiesOpen = false;
     } catch (cause) {
       error = errorMessage(cause, 'Unable to add the task.');
     } finally {
@@ -84,297 +56,97 @@
     }
   }
 
-  function handleFocusOut(event: FocusEvent & { currentTarget: HTMLFormElement }): void {
-    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) {
-      return;
-    }
-    compactFocused = false;
-  }
-
-  function handleKeydown(event: KeyboardEvent): void {
-    if (
-      (event.ctrlKey || event.metaKey) &&
-      event.key === 'Enter' &&
-      event.target instanceof Node &&
-      formElement?.contains(event.target)
-    ) {
-      event.preventDefault();
-      formElement.requestSubmit();
-      return;
-    }
-    if (event.key !== 'Escape') return;
-    if (!detailsOpen) return;
-    event.preventDefault();
-    detailsOpen = false;
-    requestAnimationFrame(() => moreButton?.focus());
-  }
-
-  function selectPriority(value: TaskPriority): void {
-    priority = value;
-    priorityOpen = false;
+  async function changeProperties(payload: UpdateTaskRequest) {
+    if (payload.dueDate !== undefined) dueDate = payload.dueDate;
+    if (payload.priority !== undefined) priority = payload.priority;
   }
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
-<form
-  bind:this={formElement}
-  class:has-advanced={mode === 'all' && detailsOpen}
-  class="task-create task-create-compact"
-  onfocusin={() => (compactFocused = true)}
-  onfocusout={handleFocusOut}
-  onsubmit={submit}
->
-  <Field.Field
-    class="task-title-field min-w-0 flex-row items-center gap-2"
-    orientation="horizontal"
-  >
+<form class="task-create" class:task-create-todo={mode === 'todo'} onsubmit={submit}>
+  <Field.Field class="gap-2" data-invalid={Boolean(error)}>
     <Field.Label class="sr-only" for={`new-task-${mode}`}>Task title</Field.Label>
-    <span class="task-add-icon" aria-hidden="true"><Plus /></span>
-    <Input
-      class="border-0 bg-transparent shadow-none focus-visible:ring-0"
-      autocomplete="off"
-      bind:ref={titleInput}
-      disabled={formBusy}
-      id={`new-task-${mode}`}
-      maxlength={500}
-      placeholder="Add a task…"
-      bind:value={title}
-    />
-  </Field.Field>
-
-  <div aria-hidden={!quickActionsVisible} class:visible={quickActionsVisible} class="quick-actions">
-    <label
-      class:active={Boolean(dueDate)}
-      class="quick-action date-action"
-      title={dueDate ? `Due ${dueDate}` : 'Set due date'}
-    >
-      <Calendar />
-      {#if dueDate}<span class="selected-date">{dueDate}</span>{/if}
-      <Input
-        class="absolute inset-0 min-h-0 cursor-pointer p-0 opacity-0"
-        aria-label="Due date"
+    <InputGroup.Root variant="task">
+      <InputGroup.Addon><Plus /></InputGroup.Addon>
+      <InputGroup.Input
+        bind:ref={titleInput}
+        bind:value={title}
+        id={`new-task-${mode}`}
+        placeholder="Add a task…"
+        autocomplete="off"
+        maxlength={500}
         disabled={formBusy}
-        tabindex={quickActionsVisible ? 0 : -1}
-        type="date"
-        bind:value={dueDate}
+        onkeydown={(event) => {
+          if (!event.isComposing && (event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+            event.preventDefault();
+            void submit();
+          }
+        }}
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? `new-task-error-${mode}` : undefined}
       />
-    </label>
-    <DropdownMenu.Root bind:open={priorityOpen}>
-      <DropdownMenu.Trigger disabled={formBusy} tabindex={quickActionsVisible ? 0 : -1}>
-        {#snippet child({ props })}
-          <Button
-            {...props}
-            aria-label="Set priority"
-            size="icon-sm"
-            title={priority === 1 ? 'Priority task' : 'Set priority'}
-            variant={priority === 1 ? 'secondary' : 'ghost'}
+      <InputGroup.Addon align="inline-end" class="gap-1">
+        <TaskProperties
+          {today}
+          {dueDate}
+          {priority}
+          busy={formBusy}
+          bind:open={propertiesOpen}
+          label="New task options"
+          onChange={changeProperties}
+        />
+        {#if title.trim() || formBusy}
+          <Button type="submit" size="sm" disabled={formBusy}
+            >{#if formBusy}<Spinner />{:else}Add{/if}</Button
           >
-            <Flag />
-          </Button>
-        {/snippet}
-      </DropdownMenu.Trigger>
-      {#if priorityOpen}
-        <DropdownMenu.Content align="end" class="w-36" forceMount>
-          <DropdownMenu.Label>Task priority</DropdownMenu.Label>
-          <DropdownMenu.RadioGroup value={String(priority)}>
-            <DropdownMenu.RadioItem onclick={() => selectPriority(0)} value="0">
-              <Flag />
-              Regular
-            </DropdownMenu.RadioItem>
-            <DropdownMenu.RadioItem onclick={() => selectPriority(1)} value="1">
-              <Flag />
-              Priority
-            </DropdownMenu.RadioItem>
-          </DropdownMenu.RadioGroup>
-        </DropdownMenu.Content>
-      {/if}
-    </DropdownMenu.Root>
-    {#if mode === 'all'}
-      <Button
-        aria-controls="new-task-options"
-        aria-expanded={detailsOpen}
-        aria-label="More task options"
-        bind:ref={moreButton}
-        disabled={formBusy}
-        onclick={() => (detailsOpen = !detailsOpen)}
-        size="icon-sm"
-        tabindex={quickActionsVisible ? 0 : -1}
-        title="More task options"
-        variant={detailsOpen || description || dueTime ? 'secondary' : 'ghost'}
-      >
-        <Ellipsis />
-      </Button>
+        {/if}
+      </InputGroup.Addon>
+    </InputGroup.Root>
+    {#if dueDate || priority === 1}
+      <div class="creation-metadata">
+        {#if dueDate}<span>{targetDateLabel(dueDate, today)}</span>{/if}
+        {#if priority === 1}<span
+            class="priority-marker"
+            role="img"
+            aria-label="High priority"
+            title="High priority"><Flag /></span
+          >{/if}
+      </div>
     {/if}
-    {#if title.trim() || formBusy}
-      <Button class="task-submit ml-auto" type="submit" disabled={formBusy} size="sm">
-        {#if formBusy}<Spinner data-icon="inline-start" />{/if}
-        {formBusy ? 'Adding…' : 'Add'}
-      </Button>
-    {/if}
-  </div>
-
-  {#if mode === 'all' && detailsOpen}
-    <div class="task-advanced" id="new-task-options">
-      <Field.Field class="min-w-0 gap-2">
-        <Field.Label for={`new-task-details-${mode}`}>Details</Field.Label>
-        <Input
-          class="text-xs max-[767px]:text-base"
-          autocomplete="off"
-          disabled={formBusy}
-          id={`new-task-details-${mode}`}
-          bind:value={description}
-        />
-      </Field.Field>
-      <Field.Field class="gap-2">
-        <Field.Label for={`new-task-time-${mode}`}>Time</Field.Label>
-        <Input
-          aria-label="Due time"
-          disabled={formBusy || !dueDate}
-          id={`new-task-time-${mode}`}
-          type="time"
-          bind:value={dueTime}
-        />
-      </Field.Field>
-    </div>
-  {/if}
-
-  {#if error}
-    <Field.Error aria-live="assertive" class="col-span-full">{error}</Field.Error>
-  {/if}
+    {#if error}<Field.Error id={`new-task-error-${mode}`} role="alert">{error}</Field.Error>{/if}
+  </Field.Field>
 </form>
 
 <style>
   .task-create {
+    margin-bottom: 24px;
+  }
+  .task-create-todo {
     margin-bottom: 16px;
   }
-
-  .task-add-icon {
-    color: var(--muted-foreground);
-  }
-
-  .task-create-compact {
-    position: relative;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 4px;
-    align-items: center;
-    padding: 5px 6px 5px 10px;
-    margin-bottom: 12px;
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    transition:
-      border-color 150ms ease,
-      box-shadow 150ms ease;
-  }
-
-  .task-create-compact:focus-within {
-    border-color: var(--ring);
-    box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring), transparent 84%);
-  }
-
-  .quick-actions {
-    display: none;
-    grid-column: 1 / -1;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 4px;
-  }
-
-  .quick-actions.visible {
+  .creation-metadata {
     display: flex;
-  }
-
-  .selected-date {
-    font-family: var(--font-mono);
+    gap: 12px;
+    padding-inline: 12px;
+    color: var(--muted-foreground);
     font-size: 12px;
   }
-
-  .date-action.active {
+  .creation-metadata span {
     display: inline-flex;
-    width: auto;
+    align-items: center;
     gap: 4px;
-    padding-inline: 8px;
   }
-
-  .date-action :global(svg) {
-    width: 16px;
-    height: 16px;
-    flex: none;
+  .priority-marker {
+    color: var(--priority-high);
   }
-
-  .quick-action {
-    position: relative;
-    display: inline-grid;
-    width: 32px;
-    height: 32px;
-    flex: none;
-    padding: 0;
-    color: var(--muted-foreground);
-    background: transparent;
-    border: 0;
-    border-radius: 7px;
-    cursor: pointer;
-    place-items: center;
+  .creation-metadata :global(svg) {
+    width: 12px;
+    height: 12px;
+    fill: currentColor;
   }
-
-  .quick-action:hover,
-  .quick-action:focus-visible,
-  .quick-action:focus-within {
-    color: var(--foreground);
-    background: var(--muted);
-  }
-
-  .quick-action:focus-visible {
-    outline: 2px solid var(--ring);
-    outline-offset: 2px;
-  }
-
-  .quick-action.active {
-    color: var(--primary);
-    background: var(--accent);
-  }
-
-  .task-advanced {
-    display: grid;
-    min-width: 0;
-    grid-column: 1 / -1;
-    grid-template-columns: minmax(0, 1fr) minmax(120px, 150px);
-    gap: 10px;
-    padding: 10px 2px 2px 26px;
-    animation: details-enter 160ms ease both;
-  }
-
-  @keyframes details-enter {
-    from {
-      opacity: 0;
-      transform: translateY(-4px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
   @media (max-width: 767px) {
-    .task-create-compact {
-      padding: 5px 6px 5px 10px;
-    }
-
-    .quick-actions :global(button) {
+    .task-create :global(button) {
       min-height: 44px;
       min-width: 44px;
-    }
-
-    .quick-action {
-      width: 44px;
-      min-height: 44px;
-    }
-
-    .task-advanced {
-      grid-template-columns: minmax(0, 1fr);
-      padding: 10px 2px 4px 26px;
     }
   }
 </style>
