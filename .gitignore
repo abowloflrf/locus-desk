@@ -4,6 +4,8 @@
 /web/node_modules/
 /web/dist/*
 !/web/dist/.gitkeep
+/.agents/skills/
+/skills-lock.json
 
 .DS_Store
 *.log
