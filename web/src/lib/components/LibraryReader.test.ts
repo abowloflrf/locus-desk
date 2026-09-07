@@ -9,6 +9,8 @@ import { READER_PREFERENCES_STORAGE_KEY } from '../reader-preferences';
 import LibraryReader from './LibraryReader.svelte';
 import readerSource from './LibraryReader.svelte?raw';
 
+vi.mock('../api/summaries', () => ({ getArticleSummary: vi.fn().mockResolvedValue(null) }));
+
 vi.mock('../api/library', () => ({
   getLibraryContent: vi.fn(),
 }));

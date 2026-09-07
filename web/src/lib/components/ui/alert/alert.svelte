@@ -8,6 +8,8 @@
         default: 'bg-card text-card-foreground',
         success:
           'bg-success/5 border-success/25 text-success *:data-[slot=alert-description]:text-success',
+        warning:
+          'bg-warning/5 border-warning/25 text-warning *:data-[slot=alert-description]:text-warning',
         destructive:
           'bg-card text-destructive *:data-[slot=alert-description]:text-destructive/90 *:[svg]:text-current',
       },

@@ -1,13 +1,17 @@
 import { mount, unmount, tick } from 'svelte';
-import { afterEach, expect, it, vi } from 'vitest';
-import { getAiSettings, saveAiSettings, testAiSettings } from '../api/settings';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { getAiSettings, saveAiSettings, testAiSettings, getGeneralSettings } from '../api/settings';
 import SettingsPage from './SettingsPage.svelte';
 
 vi.mock('../api/settings', () => ({
+  getGeneralSettings: vi.fn(),
   getAiSettings: vi.fn(),
   saveAiSettings: vi.fn(),
   testAiSettings: vi.fn(),
 }));
+beforeEach(() => {
+  vi.mocked(getGeneralSettings).mockResolvedValue({ language: 'en' });
+});
 afterEach(() => {
   vi.resetAllMocks();
   document.body.replaceChildren();

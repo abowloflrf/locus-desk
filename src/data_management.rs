@@ -107,6 +107,27 @@ const REQUIRED_SCHEMA_V5_TABLES: &[&str] = &[
     "jobs",
     "_sqlx_migrations",
 ];
+const REQUIRED_SCHEMA_V6_TABLES: &[&str] = &[
+    "ai_settings",
+    "user_preferences",
+    "article_summaries",
+    "users",
+    "workspaces",
+    "workspace_members",
+    "sessions",
+    "objects",
+    "notes",
+    "note_tags",
+    "tasks",
+    "object_tags",
+    "library_items",
+    "library_captures",
+    "blobs",
+    "object_blobs",
+    "library_content_versions",
+    "jobs",
+    "_sqlx_migrations",
+];
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 pub type DataManagementResult<T> = Result<T, DataManagementError>;
@@ -1422,6 +1443,7 @@ async fn validate_sqlite_snapshot(path: &Path) -> DataManagementResult<()> {
         3 => REQUIRED_SCHEMA_V3_TABLES,
         4 => REQUIRED_SCHEMA_V4_TABLES,
         5 => REQUIRED_SCHEMA_V5_TABLES,
+        6 => REQUIRED_SCHEMA_V6_TABLES,
         _ => {
             return Err(DataManagementError::InvalidBackup {
                 path: path.to_owned(),

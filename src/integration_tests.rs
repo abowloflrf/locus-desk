@@ -1403,6 +1403,21 @@ async fn workspace_isolation_and_request_boundaries_return_json_errors() {
         )
         .await;
     assert_eq!(hidden_library_content.status(), StatusCode::NOT_FOUND);
+    for method in [Method::GET, Method::POST] {
+        assert_eq!(
+            application
+                .request(
+                    method,
+                    &format!("/api/v1/library/{library_uid}/summary"),
+                    Some(&cookie),
+                    None
+                )
+                .await
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+
     let hidden_library_retry = application
         .request(
             Method::POST,
@@ -1657,4 +1672,189 @@ async fn ai_connection_test_reuses_saved_key_without_saving_drafts() {
             .to_string()
             .contains("saved-test-key")
     );
+}
+
+#[tokio::test]
+async fn article_summaries_are_manual_persistent_and_use_general_language() {
+    use std::sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+    };
+    struct ArticleFetcher;
+    #[async_trait::async_trait]
+    impl crate::content::PageFetcher for ArticleFetcher {
+        async fn fetch(
+            &self,
+            url: &str,
+        ) -> Result<crate::content::ExtractedDocument, crate::content::ContentError> {
+            crate::content::extract_document(url, b"<html><article><h1>Saved article</h1><p>Research found that regular practice improves recall. The study was small and further evidence is needed.</p></article></html>".to_vec())
+        }
+    }
+    let app = TestApp::new().await;
+    let general = "/api/v1/settings/general";
+    assert_eq!(
+        app.request(Method::GET, general, None, None).await.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let (cookie, _) = app.login().await;
+    assert_eq!(
+        response_json(app.request(Method::GET, general, Some(&cookie), None).await).await["language"],
+        "en"
+    );
+    assert_eq!(
+        app.request(
+            Method::PUT,
+            general,
+            Some(&cookie),
+            Some(json!({"language":"fr"}))
+        )
+        .await
+        .status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let saved_language = app
+        .request(
+            Method::PUT,
+            general,
+            Some(&cookie),
+            Some(json!({"language":"zh-CN"})),
+        )
+        .await;
+    assert_eq!(saved_language.status(), StatusCode::OK);
+    // General preferences can be saved before any model is configured.
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM ai_settings")
+            .fetch_one(app.state.pool())
+            .await
+            .unwrap(),
+        0
+    );
+    let item = response_json(
+        app.request(
+            Method::POST,
+            "/api/v1/library",
+            Some(&cookie),
+            Some(json!({"url":"https://example.com/article"})),
+        )
+        .await,
+    )
+    .await;
+    let path = format!("/api/v1/library/{}/summary", item["uid"].as_str().unwrap());
+    assert_eq!(
+        app.request(Method::POST, &path, None, None).await.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        app.request(Method::POST, &path, Some(&cookie), None)
+            .await
+            .status(),
+        StatusCode::CONFLICT
+    );
+    assert!(
+        crate::jobs::process_one(
+            app.state.pool(),
+            &ArticleFetcher,
+            "summary-test",
+            app.state.clock().now().timestamp_millis()
+        )
+        .await
+        .unwrap()
+    );
+    assert_eq!(
+        app.request(Method::POST, &path, Some(&cookie), None)
+            .await
+            .status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+
+    let requests = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let fail = Arc::new(AtomicBool::new(false));
+    let captured = requests.clone();
+    let failing = fail.clone();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let provider = Router::new().route("/v1/chat/completions", axum::routing::post(move |headers: axum::http::HeaderMap, axum::Json(payload): axum::Json<Value>| {
+        let captured = captured.clone();
+        let failing = failing.clone();
+        async move {
+            assert_eq!(headers["authorization"], "Bearer summary-secret");
+            captured.lock().unwrap().push(payload);
+            if failing.load(Ordering::SeqCst) {
+                (StatusCode::TOO_MANY_REQUESTS, axum::Json(json!({"secret":"summary-secret"})))
+            } else {
+                (StatusCode::OK, axum::Json(json!({"choices":[{"finish_reason":"stop", "message":{"content":"Generated summary"}}]})))
+            }
+        }
+    }));
+    let server = tokio::spawn(async move {
+        axum::serve(listener, provider).await.unwrap();
+    });
+    assert_eq!(app.request(Method::PUT, "/api/v1/settings/ai", Some(&cookie), Some(json!({"baseUrl":format!("http://{address}/v1"),"model":"summary-model","apiKey":"summary-secret"}))).await.status(), StatusCode::OK);
+    assert!(
+        response_json(app.request(Method::GET, &path, Some(&cookie), None).await)
+            .await
+            .is_null()
+    );
+    assert!(requests.lock().unwrap().is_empty());
+    let generated = app.request(Method::POST, &path, Some(&cookie), None).await;
+    assert_eq!(generated.status(), StatusCode::OK);
+    let first = response_json(generated).await;
+    assert_eq!(first["language"], "zh-CN");
+    assert_eq!(first["contentVersion"], 1);
+    assert_eq!(
+        response_json(app.request(Method::GET, &path, Some(&cookie), None).await).await,
+        first
+    );
+    assert!(
+        requests.lock().unwrap()[0]["messages"][0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Simplified Chinese")
+    );
+    assert!(
+        requests.lock().unwrap()[0]["messages"][1]["content"]
+            .as_str()
+            .unwrap()
+            .contains("further evidence")
+    );
+
+    app.request(
+        Method::PUT,
+        general,
+        Some(&cookie),
+        Some(json!({"language":"en"})),
+    )
+    .await;
+    assert_eq!(requests.lock().unwrap().len(), 1);
+    fail.store(true, Ordering::SeqCst);
+    let failed = app.request(Method::POST, &path, Some(&cookie), None).await;
+    assert_eq!(failed.status(), StatusCode::BAD_GATEWAY);
+    assert!(
+        !response_json(failed)
+            .await
+            .to_string()
+            .contains("summary-secret")
+    );
+    assert_eq!(
+        response_json(app.request(Method::GET, &path, Some(&cookie), None).await).await,
+        first
+    );
+    fail.store(false, Ordering::SeqCst);
+    let regenerated =
+        response_json(app.request(Method::POST, &path, Some(&cookie), None).await).await;
+    assert_eq!(regenerated["language"], "en");
+    assert!(
+        requests.lock().unwrap()[2]["messages"][0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("in English")
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM article_summaries")
+            .fetch_one(app.state.pool())
+            .await
+            .unwrap(),
+        1
+    );
+    server.abort();
 }

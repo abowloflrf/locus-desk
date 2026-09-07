@@ -17,8 +17,47 @@ use crate::{
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route("/settings/general", get(read_general).put(save_general))
         .route("/settings/ai", get(read).put(save))
         .route("/settings/ai/test", post(test_connection))
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct GeneralSettings {
+    language: String,
+}
+
+pub(super) async fn language(pool: &sqlx::SqlitePool, user_id: i64) -> AppResult<String> {
+    Ok(
+        sqlx::query_scalar("SELECT language FROM user_preferences WHERE user_id = ?")
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await?
+            .unwrap_or_else(|| "en".to_owned()),
+    )
+}
+
+async fn read_general(
+    State(state): State<AppState>,
+    context: RequestContext,
+) -> AppResult<Json<GeneralSettings>> {
+    Ok(Json(GeneralSettings {
+        language: language(state.pool(), context.user_id).await?,
+    }))
+}
+
+async fn save_general(
+    State(state): State<AppState>,
+    context: RequestContext,
+    ApiJson(input): ApiJson<GeneralSettings>,
+) -> AppResult<Json<GeneralSettings>> {
+    if !matches!(input.language.as_str(), "en" | "zh-CN") {
+        return Err(AppError::validation("Choose Chinese or English."));
+    }
+    sqlx::query("INSERT INTO user_preferences (user_id, language) VALUES (?, ?) ON CONFLICT (user_id) DO UPDATE SET language = excluded.language")
+        .bind(context.user_id).bind(&input.language).execute(state.pool()).await?;
+    Ok(Json(input))
 }
 
 #[derive(Default, Serialize, sqlx::FromRow)]
@@ -143,6 +182,30 @@ async fn probe_model(
     timeout: Duration,
 ) -> AppResult<ConnectionResult> {
     let started = Instant::now();
+    complete(
+        base_url,
+        model,
+        key,
+        serde_json::json!([
+            {"role": "user", "content": "Reply with OK only."}
+        ]),
+        32,
+        timeout,
+    )
+    .await?;
+    Ok(ConnectionResult {
+        elapsed_ms: started.elapsed().as_millis(),
+    })
+}
+
+pub(super) async fn complete(
+    base_url: &str,
+    model: &str,
+    key: &str,
+    messages: serde_json::Value,
+    max_tokens: u32,
+    timeout: Duration,
+) -> AppResult<String> {
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(10))
@@ -150,10 +213,7 @@ async fn probe_model(
         .build()
         .map_err(|_| provider_error("Unable to initialize the model connection."))?;
     let payload = serde_json::json!({
-        "model": model,
-        "messages": [{"role": "user", "content": "Reply with OK only."}],
-        "stream": false,
-        "max_tokens": 32
+        "model": model, "messages": messages, "stream": false, "max_tokens": max_tokens
     });
     let mut request = client
         .post(format!("{base_url}/chat/completions"))
@@ -172,10 +232,10 @@ async fn probe_model(
             404 => "The endpoint or model was not found. Check the base URL and model ID.",
             429 => "The provider rate limit or quota was exceeded. Check your quota and try again.",
             400 | 422 => {
-                "The provider rejected the test request. Check the model ID and Chat Completions compatibility."
+                "The provider rejected the request. Check the model ID and Chat Completions compatibility."
             }
             300..=399 => "The provider redirected the request. Enter the final API base URL.",
-            _ => "The provider could not complete the test request. Try again later.",
+            _ => "The provider could not complete the request. Try again later.",
         };
         return Err(provider_error(format!(
             "{message} (HTTP {})",
@@ -186,7 +246,7 @@ async fn probe_model(
     while let Some(chunk) = response.chunk().await.map_err(connection_error)? {
         if bytes.len() + chunk.len() > 64 * 1024 {
             return Err(provider_error(
-                "The provider response exceeded the test size limit.",
+                "The provider response exceeded the size limit.",
             ));
         }
         bytes.extend_from_slice(&chunk);
@@ -202,13 +262,24 @@ async fn probe_model(
             "The provider returned no text completion. Check the model's Chat Completions compatibility.",
         ));
     }
-    Ok(ConnectionResult {
-        elapsed_ms: started.elapsed().as_millis(),
-    })
+    if value
+        .pointer("/choices/0/finish_reason")
+        .and_then(serde_json::Value::as_str)
+        == Some("length")
+    {
+        return Err(provider_error(
+            "The model response was incomplete. Try again or use another model.",
+        ));
+    }
+    Ok(content.unwrap().trim().to_owned())
 }
 
 fn provider_error(message: impl Into<String>) -> AppError {
-    AppError::client(StatusCode::BAD_GATEWAY, "model_test_failed", message.into())
+    AppError::client(
+        StatusCode::BAD_GATEWAY,
+        "model_request_failed",
+        message.into(),
+    )
 }
 
 fn connection_error(error: reqwest::Error) -> AppError {

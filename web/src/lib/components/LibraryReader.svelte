@@ -28,6 +28,7 @@
   import ReaderPreferencesControl from './ReaderPreferences.svelte';
   import ReaderTableOfContents from './ReaderTableOfContents.svelte';
   import StatusMessage from './StatusMessage.svelte';
+  import ArticleSummary from './ArticleSummary.svelte';
   import { Button } from './ui/button';
   import * as Alert from './ui/alert';
   import * as Empty from './ui/empty';
@@ -435,6 +436,15 @@
       <div aria-atomic="true" aria-live="polite" class="sr-only" role="status">
         {loadStatus}
       </div>
+
+      {#if !loading && !loadError && item.processingStatus === 'READY' && plainText}
+        {#key `${item.uid}:${content?.contentVersion}`}
+          <ArticleSummary
+            uid={item.uid}
+            contentVersion={content?.contentVersion ?? item.contentVersion}
+          />
+        {/key}
+      {/if}
 
       {#if loading}
         <div aria-live="polite" class="reader-state">

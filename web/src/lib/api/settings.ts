@@ -23,3 +23,20 @@ export function testAiSettings(
 ): Promise<{ elapsedMs: number }> {
   return request('/settings/ai/test', { method: 'POST', body: settings, signal });
 }
+
+export type Language = 'zh-CN' | 'en';
+
+export interface GeneralSettings {
+  language: Language;
+}
+
+export function getGeneralSettings(signal?: AbortSignal): Promise<GeneralSettings> {
+  return request('/settings/general', { signal });
+}
+
+export function saveGeneralSettings(
+  settings: GeneralSettings,
+  signal?: AbortSignal,
+): Promise<GeneralSettings> {
+  return request('/settings/general', { method: 'PUT', body: settings, signal });
+}

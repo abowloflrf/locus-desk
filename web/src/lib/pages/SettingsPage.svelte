@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
+  import GeneralSettings from '../components/GeneralSettings.svelte';
   import { Button } from '$lib/components/ui/button';
   import * as Field from '$lib/components/ui/field';
   import { Input } from '$lib/components/ui/input';
@@ -136,6 +137,7 @@
   <header class="page-header">
     <h1 class="max-md:sr-only">Settings</h1>
   </header>
+  <GeneralSettings />
   <section class="max-w-[560px]" aria-labelledby="ai-settings-title">
     <div class="mb-8">
       <h2 id="ai-settings-title" class="mb-2 text-base font-semibold">AI model</h2>
@@ -143,7 +145,7 @@
         Configure an OpenAI-compatible provider for article summaries in Library.
       </p>
       <p class="mt-2 text-xs leading-5 text-muted-foreground">
-        Summaries are not available yet. You can save your configuration now.
+        Generate summaries manually from the top of any prepared Library article.
       </p>
     </div>
     {#if loading}
