@@ -414,9 +414,10 @@
   @media (max-width: 767px) {
     .task-row {
       display: grid;
-      grid-template-columns: 32px minmax(0, 1fr) auto 44px 44px;
+      grid-template-columns: 44px minmax(0, 1fr) auto 44px 44px;
       gap: 0 4px;
-      padding: 8px 4px;
+      min-height: 44px;
+      padding: 0 4px;
     }
     .task-check {
       grid-column: 1;
@@ -429,7 +430,7 @@
     }
     .task-title-button {
       min-height: 44px;
-      font-size: 16px;
+      font-size: var(--text-base);
     }
     .task-priority {
       grid-column: 3;
@@ -449,6 +450,8 @@
     .task-date {
       grid-column: 2;
       grid-row: 2;
+      padding-bottom: 4px;
+      line-height: 16px;
     }
   }
 </style>

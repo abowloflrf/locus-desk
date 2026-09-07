@@ -16,6 +16,7 @@
   import LibraryPage from './lib/pages/LibraryPage.svelte';
   import LoginPage from './lib/pages/LoginPage.svelte';
   import NotesPage from './lib/pages/NotesPage.svelte';
+  import SettingsPage from './lib/pages/SettingsPage.svelte';
   import TasksPage from './lib/pages/TasksPage.svelte';
   import {
     pathForRoute,
@@ -48,7 +49,9 @@
             ? 'Library · Locus Desk'
             : route === 'tasks'
               ? 'Tasks · Locus Desk'
-              : 'Archive · Locus Desk',
+              : route === 'settings'
+                ? 'Settings · Locus Desk'
+                : 'Archive · Locus Desk',
   );
 
   $effect(() => {
@@ -258,6 +261,8 @@
       <TasksPage refreshToken={taskRefreshToken} {session} />
     {:else if route === 'library'}
       <LibraryPage onImmersiveChange={(open) => (immersive = open)} {session} />
+    {:else if route === 'settings'}
+      <SettingsPage />
     {:else if route === 'archive'}
       <ArchivePage {session} />
     {:else}

@@ -322,7 +322,7 @@
         bind:value={selectedTag}
         class="tag-filter min-w-0"
         onValueChange={handleTagFilterChange}
-        size="sm"
+        size="xs"
         spacing={1}
         type="single"
       >
@@ -410,7 +410,7 @@
 
 <style>
   .tag-toolbar {
-    margin-bottom: 8px;
+    margin-bottom: 4px;
     min-width: 0;
   }
 
@@ -441,11 +441,24 @@
     }
 
     .tag-toolbar {
-      margin-bottom: 0;
+      margin-bottom: 8px;
+    }
+
+    .tag-toolbar :global(.tag-filter) {
+      row-gap: 16px;
     }
 
     .tag-toolbar :global([data-slot='toggle-group-item']) {
+      position: relative;
+      height: 28px;
+      min-height: 28px;
       font-size: 12px;
+    }
+
+    .tag-toolbar :global([data-slot='toggle-group-item'])::before {
+      content: '';
+      position: absolute;
+      inset: -8px 0;
     }
   }
 </style>

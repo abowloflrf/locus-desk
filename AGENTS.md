@@ -8,8 +8,9 @@
 
 ## UI/UX
 
-- Follow the current Memos visual baseline: neutral grayscale, dark text, restrained radii, and no decorative shadows. Keep visible focus indicators and subtle overlay outlines. Preserve semantic priority and error indicators.
+- Follow the current Memos visual baseline: neutral grayscale for base surfaces and text, restrained radii, and no decorative shadows. Keep visible focus indicators and subtle overlay outlines. Preserve semantic priority and status indicators.
 - Use semantic design tokens. Avoid hardcoded colors, gradients, glass effects, heavy cards, excessive pills, and module-specific color themes.
+- Use consistent semantic colors for feedback: green for success, amber for warnings, and red for errors or destructive actions. Make status feedback clearly visible with semantic tokens and accompanying text or icons; the grayscale baseline must not suppress these colors.
 - Keep UI clean and purposeful. Remove redundant copy, repeated labels, decorative separators, borders, and containers; every visible element must support content, action, state, or orientation.
 - Create hierarchy and grouping with spacing, alignment, typography, scale, weight, and restrained semantic color. Add dividers, borders, or extra surfaces only when these cues are insufficient.
 - Use Montserrat for the app UI and monospace for code/timestamps/tags. Reader fonts may be customized. Use a 4px spacing base, 8px control radii, and 12px surface or overlay radii.

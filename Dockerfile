@@ -4,8 +4,7 @@ FROM node:24-bookworm-slim AS web-builder
 
 WORKDIR /app/web
 
-RUN corepack enable \
-    && corepack prepare pnpm@11.22.0 --activate
+RUN npm install --global pnpm@12.3.4
 
 COPY web/package.json web/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile

@@ -51,7 +51,7 @@
   function resizeTextarea(): void {
     if (!textarea) return;
     textarea.style.height = 'auto';
-    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 44), 280)}px`;
+    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 64), 280)}px`;
   }
 </script>
 
@@ -64,14 +64,14 @@
         aria-describedby={error ? 'composer-error' : undefined}
         aria-invalid={error ? 'true' : undefined}
         bind:ref={textarea}
-        class="min-h-11 max-h-[280px] transition-[height] duration-150"
+        class="min-h-16 max-h-[280px] transition-[height] duration-150"
         bind:value={content}
         disabled={busy}
         id="note-composer-input"
         oninput={resizeTextarea}
         onkeydown={handleKeydown}
         placeholder="Write a quick memo…"
-        rows={1}
+        rows={2}
       />
       <InputGroup.Addon align="block-end" class={cn(!showActions && 'hidden')}>
         <InputGroup.Button

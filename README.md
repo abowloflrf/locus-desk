@@ -31,11 +31,11 @@ Requirements:
 
 - Rust 1.97.1
 - Node.js 24
-- pnpm 11.22.0
+- pnpm 12.3.4
 - GNU Make
 
 ```bash
-corepack enable
+npm install --global pnpm@12.3.4
 make install
 
 # Set owner credentials before starting an empty database.
@@ -200,3 +200,11 @@ initialized; the application still preserves the stored account. Compose default
 `APP_COOKIE_SECURE=false`; set it to `true` when serving the application through HTTPS.
 
 `make docker-build` and `make docker-up` pass the current Git commit into the image so `--version` and `/api/v1/health` identify the source build.
+
+### AI settings
+
+Open **Settings** to save an OpenAI-compatible API base URL, model ID, and optional API key for your account in the current workspace. Leave the key field blank to preserve an existing key. **Test connection** sends a short Chat Completions request using the current form values without saving them, reports the result and latency, and may consume API credit. A saved key can be reused only while testing the same base URL.
+
+This configuration prepares Library for article summaries; summary generation is not implemented yet.
+
+Settings are persisted in SQLite. API responses expose only whether a key is configured, never its value. Keys are stored without application-level encryption and are included in full database backups, but excluded from portable JSON and Markdown exports.

@@ -209,7 +209,9 @@
                 ? 'Library'
                 : current === 'tasks'
                   ? 'Tasks'
-                  : 'Archive'}</span
+                  : current === 'settings'
+                    ? 'Settings'
+                    : 'Archive'}</span
         >
         <div class="compact-topbar-actions">
           {#if current === 'home' && !mobile}
@@ -479,8 +481,8 @@
     }
 
     .compact-topbar > span {
-      font-size: 13px;
-      font-weight: 620;
+      font-size: 16px;
+      font-weight: 700;
     }
 
     .compact-topbar > :last-child {

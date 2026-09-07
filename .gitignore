@@ -2,6 +2,7 @@
 /var/
 /web/var/
 /web/node_modules/
+/.pnpm-store/
 /web/dist/*
 !/web/dist/.gitkeep
 /.agents/skills/

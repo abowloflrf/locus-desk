@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { listTasks } from '../api/tasks';
 import type { SessionInfo } from '../api/types';
 import AppShell from './AppShell.svelte';
+import Sidebar from './Sidebar.svelte';
 import shellSource from './AppShell.svelte?raw';
 import sidebarSource from './Sidebar.svelte?raw';
 
@@ -52,6 +53,37 @@ afterEach(() => {
 });
 
 describe('AppShell modal boundaries', () => {
+  it('opens settings from the desktop account footer without a primary navigation row', async () => {
+    const target = document.createElement('div');
+    document.body.append(target);
+    const onNavigate = vi.fn();
+    const component = mount(Sidebar, {
+      props: {
+        current: 'settings',
+        session,
+        onNavigate,
+        onLogout: vi.fn(),
+        onToggleCollapsed: vi.fn(),
+        todoOpen: false,
+      },
+      target,
+    });
+
+    try {
+      await tick();
+      expect(target.querySelector('.primary-nav a[href="/settings"]')).toBeNull();
+      const settings = target.querySelector<HTMLAnchorElement>(
+        '.sidebar-footer a[aria-label="Settings"]',
+      );
+      expect(settings?.getAttribute('href')).toBe('/settings');
+      expect(settings?.getAttribute('aria-current')).toBe('page');
+      settings?.click();
+      expect(onNavigate).toHaveBeenCalledWith('settings');
+    } finally {
+      await unmount(component);
+    }
+  });
+
   it('hides mobile navigation chrome while an immersive reader is open', async () => {
     const target = document.createElement('div');
     document.body.append(target);
@@ -81,7 +113,7 @@ describe('AppShell modal boundaries', () => {
     }
   });
 
-  it('keeps mobile navigation focused on Memos, Library, and Tasks', async () => {
+  it('provides mobile navigation to Memos, Library, Tasks, and Settings', async () => {
     const target = document.createElement('div');
     document.body.append(target);
     const children = createRawSnippet(() => ({ render: () => '<h1>Notes</h1>' }));
@@ -106,7 +138,8 @@ describe('AppShell modal boundaries', () => {
       expect(target.querySelector('.nav-item[title="Library"]')).not.toBeNull();
       expect(target.querySelector('.nav-item[title="Tasks"]')).not.toBeNull();
       expect(target.querySelector('.nav-item[title="Archive"]')).toBeNull();
-      expect(sidebarSource).toContain('grid-template-columns: repeat(3, minmax(0, 1fr))');
+      expect(target.querySelector('.nav-item[title="Settings"]')).not.toBeNull();
+      expect(sidebarSource).toContain('grid-template-columns: repeat(4, minmax(0, 1fr))');
       expect(sidebarSource).toMatch(
         /@media \(max-width: 767px\)[\s\S]*?\.sidebar \{[\s\S]*?z-index: 40;/,
       );

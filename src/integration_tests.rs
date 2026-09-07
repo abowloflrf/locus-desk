@@ -251,7 +251,10 @@ async fn phase_one_upgrade_creates_a_recoverable_schema_one_backup() {
         AppState::initialize_with_clock(config.clone(), Arc::new(FixedClock::new(upgrade_time)))
             .await
             .expect("schema v1 should back up and migrate to the latest schema");
-    assert_eq!(crate::db::schema_version(upgraded.pool()).await.unwrap(), 4);
+    assert_eq!(
+        crate::db::schema_version(upgraded.pool()).await.unwrap(),
+        crate::db::latest_schema_version()
+    );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM objects WHERE uid = 'pre_upgrade_note' AND object_type = 'NOTE'",
@@ -343,7 +346,7 @@ async fn bootstraps_authenticates_and_reports_real_schema() {
     );
     assert!(health.headers().contains_key("x-request-id"));
     let health = response_json(health).await;
-    assert_eq!(health["schemaVersion"], 4);
+    assert_eq!(health["schemaVersion"], crate::db::latest_schema_version());
 
     let bootstrap = application
         .request(Method::GET, "/api/v1/bootstrap/status", None, None)
@@ -1526,5 +1529,132 @@ async fn workspace_isolation_and_request_boundaries_return_json_errors() {
             .get(header::CONTENT_TYPE)
             .unwrap(),
         "application/json"
+    );
+}
+
+#[tokio::test]
+async fn ai_settings_require_auth_and_preserve_private_keys() {
+    let app = TestApp::new().await;
+    let path = "/api/v1/settings/ai";
+    assert_eq!(
+        app.request(Method::GET, path, None, None).await.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let (cookie, _) = app.login().await;
+    let empty = response_json(app.request(Method::GET, path, Some(&cookie), None).await).await;
+    assert_eq!(empty, json!({"baseUrl":"", "model":"", "hasApiKey":false}));
+    for payload in [
+        json!({"baseUrl":"https://models.example/v1/", "model":" model-a ", "apiKey":"private-test-key"}),
+        json!({"baseUrl":"https://models.example/v1", "model":"model-b"}),
+    ] {
+        let response = app
+            .request(Method::PUT, path, Some(&cookie), Some(payload))
+            .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let result = response_json(response).await;
+        assert_eq!(result["hasApiKey"], true);
+        assert_eq!(result["baseUrl"], "https://models.example/v1");
+        assert!(result.get("apiKey").is_none());
+        assert!(!result.to_string().contains("private-test-key"));
+    }
+    let key: String = sqlx::query_scalar("SELECT api_key FROM ai_settings")
+        .fetch_one(app.state.pool())
+        .await
+        .unwrap();
+    assert_eq!(key, "private-test-key");
+    for base_url in [
+        "file:///etc/passwd",
+        "https://user:secret@models.example",
+        "https://models.example?key=secret",
+    ] {
+        let response = app
+            .request(
+                Method::PUT,
+                path,
+                Some(&cookie),
+                Some(json!({"baseUrl":base_url,"model":"model-c"})),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+    let saved = response_json(app.request(Method::GET, path, Some(&cookie), None).await).await;
+    assert_eq!(
+        saved,
+        json!({"baseUrl":"https://models.example/v1", "model":"model-b", "hasApiKey":true})
+    );
+    let response = app
+        .request(
+            Method::PUT,
+            path,
+            Some(&cookie),
+            Some(json!({"baseUrl":"http://localhost:11434/v1", "model":"local", "apiKey":""})),
+        )
+        .await;
+    assert_eq!(response_json(response).await["hasApiKey"], false);
+}
+
+#[tokio::test]
+async fn ai_connection_test_reuses_saved_key_without_saving_drafts() {
+    let app = TestApp::new().await;
+    let path = "/api/v1/settings/ai/test";
+    let payload = json!({"baseUrl":"http://127.0.0.1/v1", "model":"draft"});
+    assert_eq!(
+        app.request(Method::POST, path, None, Some(payload.clone()))
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let (cookie, _) = app.login().await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let provider = Router::new().route(
+        "/v1/chat/completions",
+        axum::routing::post(
+            |headers: axum::http::HeaderMap, axum::Json(payload): axum::Json<Value>| async move {
+                assert_eq!(headers["authorization"], "Bearer saved-test-key");
+                assert_eq!(payload["model"], "draft");
+                axum::Json(json!({"choices":[{"message":{"content":"OK"}}]}))
+            },
+        ),
+    );
+    let server = tokio::spawn(async move {
+        axum::serve(listener, provider).await.unwrap();
+    });
+    let base_url = format!("http://{address}/v1");
+    let response = app
+        .request(
+            Method::PUT,
+            "/api/v1/settings/ai",
+            Some(&cookie),
+            Some(json!({"baseUrl":base_url,"model":"saved", "apiKey":"saved-test-key"})),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = app
+        .request(
+            Method::POST,
+            path,
+            Some(&cookie),
+            Some(json!({"baseUrl":base_url,"model":"draft"})),
+        )
+        .await;
+    server.abort();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(response_json(response).await["elapsedMs"].is_number());
+    let saved = response_json(
+        app.request(Method::GET, "/api/v1/settings/ai", Some(&cookie), None)
+            .await,
+    )
+    .await;
+    assert_eq!(saved["model"], "saved");
+    let response = app
+        .request(Method::POST, path, Some(&cookie), Some(payload))
+        .await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        !response_json(response)
+            .await
+            .to_string()
+            .contains("saved-test-key")
     );
 }

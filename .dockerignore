@@ -6,6 +6,7 @@ target
 var
 web/dist
 web/node_modules
+.pnpm-store
 
 .DS_Store
 *.log

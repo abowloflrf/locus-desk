@@ -141,4 +141,12 @@
     height: 12px;
     fill: currentColor;
   }
+  @media (max-width: 767px) {
+    .task-create {
+      margin-bottom: 8px;
+    }
+    .task-create :global([data-slot='input-group-addon']) {
+      padding-block: 0;
+    }
+  }
 </style>

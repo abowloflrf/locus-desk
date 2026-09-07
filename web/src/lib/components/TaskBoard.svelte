@@ -268,7 +268,7 @@
   class="task-board"
 >
   {#if mode === 'all'}
-    <header class="page-header">
+    <header class="page-header max-md:sr-only">
       <h1>Tasks</h1>
     </header>
   {/if}
@@ -412,5 +412,17 @@
     width: 16px;
     height: 16px;
     color: var(--muted-foreground);
+  }
+  @media (max-width: 767px) {
+    .task-list {
+      gap: 0;
+    }
+    .completed-section {
+      margin-top: 16px;
+      padding-top: 8px;
+    }
+    .completed-section h2 {
+      margin-bottom: 4px;
+    }
   }
 </style>

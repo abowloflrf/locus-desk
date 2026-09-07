@@ -33,7 +33,7 @@
 
   .prose-content h3,
   .prose-content h4 {
-    font-size: 16px;
+    font-size: var(--text-base);
   }
 
   .prose-content p,
@@ -177,7 +177,7 @@
 
   @media (max-width: 767px) {
     .prose-content {
-      font-size: 16px;
+      font-size: var(--text-base);
     }
   }
 

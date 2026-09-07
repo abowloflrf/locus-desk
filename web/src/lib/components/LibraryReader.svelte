@@ -539,7 +539,7 @@
   }
 
   .library-reader[data-reader-size='small'] {
-    --reader-font-size: 16px;
+    --reader-font-size: var(--text-base);
   }
 
   .library-reader[data-reader-size='large'] {
@@ -652,7 +652,7 @@
   }
 
   .library-reader.preview .reader-excerpt-copy {
-    font-size: 16px;
+    font-size: var(--text-base);
   }
 
   .reader-heading {
@@ -852,7 +852,7 @@
     }
 
     .reader-excerpt-copy {
-      font-size: 16px;
+      font-size: var(--text-base);
     }
 
     .reader-content :global(pre) {

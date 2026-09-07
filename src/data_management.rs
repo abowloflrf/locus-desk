@@ -88,6 +88,25 @@ const REQUIRED_SCHEMA_V4_TABLES: &[&str] = &[
     "jobs",
     "_sqlx_migrations",
 ];
+const REQUIRED_SCHEMA_V5_TABLES: &[&str] = &[
+    "ai_settings",
+    "users",
+    "workspaces",
+    "workspace_members",
+    "sessions",
+    "objects",
+    "notes",
+    "note_tags",
+    "tasks",
+    "object_tags",
+    "library_items",
+    "library_captures",
+    "blobs",
+    "object_blobs",
+    "library_content_versions",
+    "jobs",
+    "_sqlx_migrations",
+];
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 pub type DataManagementResult<T> = Result<T, DataManagementError>;
@@ -1402,6 +1421,7 @@ async fn validate_sqlite_snapshot(path: &Path) -> DataManagementResult<()> {
         2 => REQUIRED_SCHEMA_V2_TABLES,
         3 => REQUIRED_SCHEMA_V3_TABLES,
         4 => REQUIRED_SCHEMA_V4_TABLES,
+        5 => REQUIRED_SCHEMA_V5_TABLES,
         _ => {
             return Err(DataManagementError::InvalidBackup {
                 path: path.to_owned(),
@@ -2715,7 +2735,10 @@ mod tests {
             metadata.get::<String, _>("application_version"),
             env!("CARGO_PKG_VERSION")
         );
-        assert_eq!(metadata.get::<i64, _>("schema_version"), 4);
+        assert_eq!(
+            metadata.get::<i64, _>("schema_version"),
+            crate::db::latest_schema_version()
+        );
         assert!(!metadata.get::<String, _>("git_commit").is_empty());
 
         let error = create_sqlite_backup(&fixture.pool, &fixture.backups, &backup)
@@ -2745,7 +2768,7 @@ mod tests {
         assert!(!json.contains("tokenHash"));
         let payload: Value = serde_json::from_str(&json).expect("JSON export should be valid");
         assert_eq!(payload["formatVersion"], 3);
-        assert_eq!(payload["schemaVersion"], 4);
+        assert_eq!(payload["schemaVersion"], crate::db::latest_schema_version());
         assert_eq!(payload["notes"][0]["tags"][0], "中文");
         assert_eq!(payload["tasks"][0]["title"], "Ship the safe export");
         assert_eq!(payload["libraryItems"][0]["uid"], "library_01");

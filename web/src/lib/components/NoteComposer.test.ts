@@ -16,13 +16,13 @@ describe('note composer submission', () => {
     const component = mount(NoteComposer, { props: { onCreate }, target });
     try {
       const textarea = target.querySelector<HTMLTextAreaElement>('textarea')!;
-      expect(textarea.rows).toBe(1);
+      expect(textarea.rows).toBe(2);
       textarea.focus();
       await tick();
-      expect(textarea.rows).toBe(1);
+      expect(textarea.rows).toBe(2);
       textarea.blur();
       await tick();
-      expect(textarea.rows).toBe(1);
+      expect(textarea.rows).toBe(2);
       textarea.value = 'Keep this draft';
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
       const save = target.querySelector<HTMLButtonElement>('.composer-submit')!;
@@ -30,7 +30,7 @@ describe('note composer submission', () => {
       save.click();
       await vi.waitFor(() => expect(target.textContent).toContain('Connection lost'));
       expect(textarea.value).toBe('Keep this draft');
-      expect(textarea.rows).toBe(1);
+      expect(textarea.rows).toBe(2);
       await vi.waitFor(() => expect(document.activeElement).toBe(textarea));
     } finally {
       await unmount(component);

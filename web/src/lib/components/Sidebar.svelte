@@ -7,6 +7,7 @@
   import LogOut from '@lucide/svelte/icons/log-out';
   import PanelLeftClose from '@lucide/svelte/icons/panel-left-close';
   import PanelLeftOpen from '@lucide/svelte/icons/panel-left-open';
+  import Settings from '@lucide/svelte/icons/settings';
   import Search from '@lucide/svelte/icons/search';
   import type { Component } from 'svelte';
 
@@ -46,6 +47,7 @@
     { icon: FileText, label: 'Memos', route: 'notes' },
     { icon: ListTodo, label: 'Tasks', route: 'tasks' },
     { icon: BookOpen, label: 'Library', route: 'library' },
+    { icon: Settings, label: 'Settings', route: 'settings' },
     { icon: Archive, label: 'Archive', route: 'archive' },
   ];
 
@@ -104,7 +106,7 @@
 
   <nav class="primary-nav">
     {#each primaryItems as item}
-      {#if !mobile || (item.route !== 'home' && item.route !== 'archive')}
+      {#if mobile ? item.route !== 'home' && item.route !== 'archive' : item.route !== 'settings'}
         {@const NavIcon = item.icon}
         <a
           aria-current={current === item.route ? 'page' : undefined}
@@ -131,15 +133,28 @@
         <small>{session.workspace.role.toLocaleLowerCase()}</small>
       </span>
     </div>
-    <Button
-      aria-label="Sign out"
-      onclick={() => void onLogout()}
-      size="icon"
-      title="Sign out"
-      variant="ghost"
-    >
-      <LogOut />
-    </Button>
+    <div class="sidebar-account-actions">
+      <Button
+        aria-label="Settings"
+        aria-current={current === 'settings' ? 'page' : undefined}
+        href="/settings"
+        onclick={(event) => openRoute(event, 'settings')}
+        size="icon"
+        title="Settings"
+        variant={current === 'settings' ? 'secondary' : 'ghost'}
+      >
+        <Settings aria-hidden="true" />
+      </Button>
+      <Button
+        aria-label="Sign out"
+        onclick={() => void onLogout()}
+        size="icon"
+        title="Sign out"
+        variant="ghost"
+      >
+        <LogOut />
+      </Button>
+    </div>
   </div>
 </aside>
 
@@ -276,6 +291,12 @@
     align-items: center;
   }
 
+  .sidebar-account-actions {
+    display: flex;
+    flex: none;
+    gap: 4px;
+  }
+
   .sidebar-user > span:last-child {
     display: grid;
     min-width: 0;
@@ -329,6 +350,10 @@
     justify-content: center;
   }
 
+  .sidebar.collapsed .sidebar-account-actions {
+    flex-direction: column;
+  }
+
   .user-avatar {
     display: grid;
     width: 24px;
@@ -377,6 +402,10 @@
     .sidebar-footer {
       justify-content: center;
     }
+
+    .sidebar-account-actions {
+      flex-direction: column;
+    }
   }
 
   @media (pointer: coarse) and (min-width: 768px) {
@@ -419,7 +448,7 @@
       z-index: 2;
       width: min(100%, 440px);
       height: var(--mobile-navigation-content-height, 56px);
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 2px;
       padding: 4px;
       margin-inline: auto;

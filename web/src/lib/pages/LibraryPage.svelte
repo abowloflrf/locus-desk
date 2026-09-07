@@ -720,12 +720,8 @@
 {:else}
   <div bind:this={pageElement} class:detail-open={Boolean(selectedUid)} class="library-page">
     <div class="library-primary">
-      <header class="page-header">
-        <h1 id="library-title">Library</h1>
-        <LibraryCaptureForm onCreate={handleCreate} />
-      </header>
-
-      <section aria-labelledby="library-title" class="library-index">
+      <header class="page-header library-header">
+        <h1 id="library-title" class="max-md:sr-only">Library</h1>
         <div class="library-toolbar">
           <SearchField
             label="Search links"
@@ -735,8 +731,11 @@
             bind:ref={searchInput}
             fullWidth
           />
+          <LibraryCaptureForm onCreate={handleCreate} />
         </div>
+      </header>
 
+      <section aria-labelledby="library-title" class="library-index">
         <div class="library-filters">
           <ToggleGroup.Root
             aria-label="Library view"
@@ -1051,11 +1050,19 @@
     border-right: 1px solid var(--border);
   }
 
+  .library-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 16px;
+    margin-bottom: 12px;
+  }
+
   .library-toolbar {
-    display: flex;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
     align-items: center;
-    margin-bottom: 12px;
   }
 
   .library-filters {
@@ -1064,6 +1071,10 @@
     justify-content: space-between;
     gap: 8px;
     margin-bottom: 8px;
+  }
+
+  .library-filters :global([data-slot='toggle-group-item']) {
+    height: 24px;
   }
 
   .active-filter-label {
@@ -1256,6 +1267,18 @@
   }
 
   @media (max-width: 767px) {
+    .library-filters :global([data-slot='toggle-group-item']) {
+      position: relative;
+      height: 28px;
+      min-height: 28px;
+    }
+
+    .library-filters :global([data-slot='toggle-group-item'])::before {
+      content: '';
+      position: absolute;
+      inset: -8px 0;
+    }
+
     .library-page {
       width: 100%;
       padding: 16px 16px 24px;

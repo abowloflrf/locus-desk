@@ -1,6 +1,7 @@
 mod auth;
 mod library;
 mod notes;
+mod settings;
 mod tasks;
 
 use axum::{
@@ -30,6 +31,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .merge(library::router())
         .merge(notes::router())
         .merge(tasks::router())
+        .merge(settings::router())
         .method_not_allowed_fallback(method_not_allowed)
         .layer(DefaultBodyLimit::max(2 * 1024 * 1024))
         .layer(middleware::from_fn_with_state(state, enforce_same_origin))
