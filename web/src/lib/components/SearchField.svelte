@@ -30,7 +30,7 @@
   />
   <span class="sr-only">{label}</span>
   <Input
-    class={cn('pl-9', shortcut && 'pr-12')}
+    class={cn('pl-9', shortcut && 'md:pr-12')}
     autocomplete="off"
     bind:ref
     {oninput}
@@ -39,5 +39,7 @@
     {value}
     variant="flat"
   />
-  {#if shortcut}<Kbd.Root class="pointer-events-none absolute right-3">{shortcut}</Kbd.Root>{/if}
+  {#if shortcut}<Kbd.Root class="pointer-events-none absolute right-3 max-md:hidden"
+      >{shortcut}</Kbd.Root
+    >{/if}
 </label>

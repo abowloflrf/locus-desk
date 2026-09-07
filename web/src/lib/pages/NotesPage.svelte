@@ -302,7 +302,7 @@
 
 <div bind:this={pageElement} class="page notes-page">
   <header class="page-header notes-header">
-    <h1>Memos</h1>
+    <h1 class="max-md:sr-only">Memos</h1>
     <SearchField
       label="Search memos"
       placeholder="Search memos"
@@ -423,5 +423,29 @@
     font-family: var(--font-mono);
     flex-shrink: 0;
     max-width: min(160px, 100%);
+  }
+
+  @media (max-width: 767px) {
+    .notes-page {
+      padding-top: 12px;
+    }
+
+    .notes-header {
+      margin-bottom: 8px;
+    }
+
+    .notes-page :global(input[type='search']),
+    .notes-page :global(#note-composer-input) {
+      font-size: 14px;
+      line-height: 22px;
+    }
+
+    .tag-toolbar {
+      margin-bottom: 0;
+    }
+
+    .tag-toolbar :global([data-slot='toggle-group-item']) {
+      font-size: 12px;
+    }
   }
 </style>

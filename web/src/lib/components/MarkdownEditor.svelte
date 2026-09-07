@@ -293,7 +293,7 @@
 
   @media (max-width: 767px) {
     .markdown-editor :global(.cm-editor) {
-      font-size: 16px;
+      font-size: 14px;
     }
   }
 </style>

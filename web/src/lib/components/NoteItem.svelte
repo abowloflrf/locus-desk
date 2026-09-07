@@ -404,8 +404,32 @@
 
   @media (max-width: 767px) {
     .note-item {
-      gap: 3px;
+      gap: 0;
       padding: 12px;
+    }
+
+    .note-preview :global(.prose-content) {
+      --prose-block-gap: 8px;
+      font-size: 14px;
+      line-height: 22px;
+    }
+
+    .note-preview :global(pre) {
+      padding: 12px;
+      font-size: 12px;
+    }
+
+    .note-tags {
+      margin-top: 4px;
+    }
+
+    .note-meta {
+      padding-right: 44px;
+    }
+
+    .note-actions {
+      top: 0;
+      right: 4px;
     }
 
     .note-meta time {

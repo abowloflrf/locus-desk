@@ -3,6 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <script>
+      const isIOS =
+        /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      if (isIOS) {
+        // Suppress input focus zoom on iOS without restricting zoom on other platforms.
+        const viewport = document.querySelector('meta[name="viewport"]');
+        viewport.content += ', maximum-scale=1';
+      }
+    </script>
     <meta name="theme-color" content="#ffffff" />
     <meta name="description" content="Locus Desk personal information and action workspace" />
     <meta name="mobile-web-app-capable" content="yes" />

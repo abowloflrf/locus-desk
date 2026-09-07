@@ -398,7 +398,7 @@
       display: block;
       width: 100%;
       height: calc(
-        var(--mobile-navigation-content-height, 64px) +
+        var(--mobile-navigation-content-height, 56px) +
           var(--mobile-navigation-safe-space, max(8px, env(safe-area-inset-bottom)))
       );
       padding: 0 calc(12px + env(safe-area-inset-right))
@@ -418,10 +418,10 @@
       position: relative;
       z-index: 2;
       width: min(100%, 440px);
-      height: var(--mobile-navigation-content-height, 64px);
+      height: var(--mobile-navigation-content-height, 56px);
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 2px;
-      padding: 5px;
+      padding: 4px;
       margin-inline: auto;
       overflow: hidden;
       background: var(--sidebar);
@@ -431,15 +431,15 @@
 
     .primary-nav .nav-item {
       display: flex;
-      min-height: 52px;
+      min-height: 48px;
       flex-direction: column;
       gap: 4px;
-      padding: 6px 3px 5px;
+      padding: 4px;
       color: var(--muted-foreground);
       background: transparent;
       border: 0;
       border-radius: 8px;
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 520;
       line-height: 1;
       transition:
@@ -453,8 +453,8 @@
     }
 
     .primary-nav .nav-item :global(svg) {
-      width: 20px;
-      height: 20px;
+      width: 18px;
+      height: 18px;
       stroke-width: 1.8;
     }
 
