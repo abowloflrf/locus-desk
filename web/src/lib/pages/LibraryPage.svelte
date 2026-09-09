@@ -717,312 +717,316 @@
     {operationError}
     timeZone={session.workspace.timezone}
   />
-{:else}
-  <div bind:this={pageElement} class:detail-open={Boolean(selectedUid)} class="library-page">
-    <div class="library-primary">
-      <header class="page-header library-header">
-        <h1 id="library-title" class="max-md:sr-only">Library</h1>
-        <div class="library-toolbar">
-          <SearchField
-            label="Search links"
-            placeholder="Search links"
-            value={query}
-            oninput={handleSearch}
-            bind:ref={searchInput}
-            fullWidth
-          />
-          <LibraryCaptureForm onCreate={handleCreate} />
-        </div>
-      </header>
+{/if}
 
-      <section aria-labelledby="library-title" class="library-index">
-        <div class="library-filters">
-          <ToggleGroup.Root
-            aria-label="Library view"
-            type="single"
-            value={view}
-            onValueChange={selectView}
-            size="sm"
-            spacing={1}
-          >
-            <ToggleGroup.Item value="all">All</ToggleGroup.Item>
-            <ToggleGroup.Item value="unread">Unread</ToggleGroup.Item>
-            <ToggleGroup.Item value="starred">Starred</ToggleGroup.Item>
-          </ToggleGroup.Root>
-          <Popover.Root
-            bind:open={filterOpen}
-            onOpenChange={(open) => {
-              if (open) {
-                draftTag = tag;
-                draftStatus = status;
-              }
-            }}
-          >
-            <Popover.Trigger>
-              {#snippet child({ props })}
-                <Button
-                  {...props}
-                  aria-label={filterLabel ? `Filters: ${filterLabel}` : 'Filter Library'}
-                  title={filterLabel || 'Filters'}
-                  size="icon-sm"
-                  variant={filterLabel ? 'secondary' : 'ghost'}
-                >
-                  <ListFilter />
-                </Button>
-              {/snippet}
-            </Popover.Trigger>
-            <Popover.Content align="end" class="w-[min(20rem,calc(100vw-2rem))]">
-              <Popover.Header><Popover.Title>Filters</Popover.Title></Popover.Header>
-              <form onsubmit={applyFilters} class="mt-3">
-                <Field.Group>
-                  <Field.Field>
-                    <Field.Label id="library-status-label">Status</Field.Label>
-                    <ToggleGroup.Root
-                      aria-labelledby="library-status-label"
-                      type="single"
-                      value={draftStatus}
-                      onValueChange={(value) => {
-                        if (value) draftStatus = value as LibraryItemStatus;
-                      }}
-                      size="sm"
-                      variant="outline"
-                    >
-                      <ToggleGroup.Item value="ACTIVE">Active</ToggleGroup.Item>
-                      <ToggleGroup.Item value="ARCHIVED">Archived</ToggleGroup.Item>
-                    </ToggleGroup.Root>
-                  </Field.Field>
-                  <Field.Field>
-                    <Field.Label for="library-tag-filter">Tag</Field.Label>
-                    <Input
-                      id="library-tag-filter"
-                      bind:value={draftTag}
-                      placeholder="Any tag"
-                      autocomplete="off"
-                    />
-                  </Field.Field>
-                  <Field.Field orientation="horizontal" class="justify-end">
-                    <Button onclick={clearFilters} size="sm" variant="ghost">Reset</Button>
-                    <Button type="submit" size="sm">Apply</Button>
-                  </Field.Field>
-                </Field.Group>
-              </form>
-            </Popover.Content>
-          </Popover.Root>
-        </div>
-        {#if filterLabel}
-          <p class="active-filter-label" title={filterLabel}>{filterLabel}</p>
-        {/if}
+<div
+  bind:this={pageElement}
+  class:detail-open={Boolean(selectedUid)}
+  class="library-page"
+  hidden={Boolean(readerItem)}
+  inert={Boolean(readerItem)}
+>
+  <div class="library-primary">
+    <header class="page-header library-header">
+      <h1 id="library-title" class="max-md:sr-only">Library</h1>
+      <div class="library-toolbar">
+        <SearchField
+          label="Search links"
+          placeholder="Search links"
+          value={query}
+          oninput={handleSearch}
+          bind:ref={searchInput}
+          fullWidth
+        />
+        <LibraryCaptureForm onCreate={handleCreate} />
+      </div>
+    </header>
 
-        <span aria-live="polite" class="sr-only" data-library-count
-          >{`${total} ${
-            total === 1 ? 'item' : 'items'
-          } in this view.${loading && items.length > 0 ? ' Updating.' : ''}`}</span
+    <section aria-labelledby="library-title" class="library-index">
+      <div class="library-filters">
+        <ToggleGroup.Root
+          aria-label="Library view"
+          type="single"
+          value={view}
+          onValueChange={selectView}
+          size="sm"
+          spacing={1}
         >
-
-        {#if operationError}<StatusMessage tone="error">{operationError}</StatusMessage>{/if}
-        <div aria-atomic="true" aria-live="polite" class="sr-only" data-action-status role="status">
-          {actionStatus ?? ''}
-        </div>
-
-        <div aria-busy={loading || loadingMore} class="library-results">
-          {#if loading && items.length === 0}
-            <div aria-live="polite" class="loading-state flex items-center justify-center gap-2">
-              <Spinner />
-              Loading Library…
-            </div>
-          {:else if loadError}
-            <Empty.Root>
-              <Empty.Header>
-                <Empty.Title>Library unavailable</Empty.Title>
-                <Empty.Description>{loadError}</Empty.Description>
-              </Empty.Header>
-              <Empty.Content>
-                <Button onclick={() => void loadItems(true)} variant="secondary">Try again</Button>
-              </Empty.Content>
-            </Empty.Root>
-          {:else if items.length === 0}
-            <Empty.Root>
-              <Empty.Header>
-                <Empty.Title>
-                  {query || tag || view !== 'all'
-                    ? 'No saved items found'
-                    : status === 'ARCHIVED'
-                      ? 'No archived items'
-                      : 'Save your first link'}
-                </Empty.Title>
-                <Empty.Description>
-                  {query || tag || view !== 'all'
-                    ? 'Try another keyword or filter.'
-                    : status === 'ARCHIVED'
-                      ? 'Archived links will remain available here.'
-                      : 'Use Add link to save an article URL.'}
-                </Empty.Description>
-              </Empty.Header>
-              {#if query || tag || view !== 'all' || status === 'ARCHIVED'}
-                <Empty.Content>
-                  <Button onclick={clearFilters} variant="secondary">Reset filters</Button>
-                </Empty.Content>
-              {/if}
-            </Empty.Root>
-          {:else}
-            <ol aria-label="Library items" class="library-list">
-              {#each items as item (item.uid)}
-                <li
-                  class="list-action-row"
-                  data-actions-open={actionMenuUid === item.uid}
-                  class:busy={busyUids.has(item.uid)}
-                  class:selected={selectedUid === item.uid}
-                  data-focus-uid={item.uid}
-                >
-                  <button
-                    aria-current={selectedUid === item.uid ? 'true' : undefined}
-                    class="item-select"
-                    data-library-select={item.uid}
-                    onclick={() => void openDetail(item)}
-                    type="button"
+          <ToggleGroup.Item value="all">All</ToggleGroup.Item>
+          <ToggleGroup.Item value="unread">Unread</ToggleGroup.Item>
+          <ToggleGroup.Item value="starred">Starred</ToggleGroup.Item>
+        </ToggleGroup.Root>
+        <Popover.Root
+          bind:open={filterOpen}
+          onOpenChange={(open) => {
+            if (open) {
+              draftTag = tag;
+              draftStatus = status;
+            }
+          }}
+        >
+          <Popover.Trigger>
+            {#snippet child({ props })}
+              <Button
+                {...props}
+                aria-label={filterLabel ? `Filters: ${filterLabel}` : 'Filter Library'}
+                title={filterLabel || 'Filters'}
+                size="icon-sm"
+                variant={filterLabel ? 'secondary' : 'ghost'}
+              >
+                <ListFilter />
+              </Button>
+            {/snippet}
+          </Popover.Trigger>
+          <Popover.Content align="end" class="w-[min(20rem,calc(100vw-2rem))]">
+            <Popover.Header><Popover.Title>Filters</Popover.Title></Popover.Header>
+            <form onsubmit={applyFilters} class="mt-3">
+              <Field.Group>
+                <Field.Field>
+                  <Field.Label id="library-status-label">Status</Field.Label>
+                  <ToggleGroup.Root
+                    aria-labelledby="library-status-label"
+                    type="single"
+                    value={draftStatus}
+                    onValueChange={(value) => {
+                      if (value) draftStatus = value as LibraryItemStatus;
+                    }}
+                    size="sm"
+                    variant="outline"
                   >
-                    <span aria-hidden="true" class="item-favicon">
-                      <span>{faviconFallback(item)}</span>
-                      <img
-                        alt=""
-                        decoding="async"
-                        loading="lazy"
-                        onerror={hideBrokenFavicon}
-                        referrerpolicy="no-referrer"
-                        src={faviconUrl(item)}
-                      />
-                    </span>
-                    <span class="item-copy">
-                      <span class="item-title">{displayTitle(item)}</span>
-                      <span class="item-meta">
-                        <span class="item-source"
-                          >{item.siteName || hostname(item) || item.originalUrl}</span
-                        >
+                    <ToggleGroup.Item value="ACTIVE">Active</ToggleGroup.Item>
+                    <ToggleGroup.Item value="ARCHIVED">Archived</ToggleGroup.Item>
+                  </ToggleGroup.Root>
+                </Field.Field>
+                <Field.Field>
+                  <Field.Label for="library-tag-filter">Tag</Field.Label>
+                  <Input
+                    id="library-tag-filter"
+                    bind:value={draftTag}
+                    placeholder="Any tag"
+                    autocomplete="off"
+                  />
+                </Field.Field>
+                <Field.Field orientation="horizontal" class="justify-end">
+                  <Button onclick={clearFilters} size="sm" variant="ghost">Reset</Button>
+                  <Button type="submit" size="sm">Apply</Button>
+                </Field.Field>
+              </Field.Group>
+            </form>
+          </Popover.Content>
+        </Popover.Root>
+      </div>
+      {#if filterLabel}
+        <p class="active-filter-label" title={filterLabel}>{filterLabel}</p>
+      {/if}
+
+      <span aria-live="polite" class="sr-only" data-library-count
+        >{`${total} ${
+          total === 1 ? 'item' : 'items'
+        } in this view.${loading && items.length > 0 ? ' Updating.' : ''}`}</span
+      >
+
+      {#if operationError}<StatusMessage tone="error">{operationError}</StatusMessage>{/if}
+      <div aria-atomic="true" aria-live="polite" class="sr-only" data-action-status role="status">
+        {actionStatus ?? ''}
+      </div>
+
+      <div aria-busy={loading || loadingMore} class="library-results">
+        {#if loading && items.length === 0}
+          <div aria-live="polite" class="loading-state flex items-center justify-center gap-2">
+            <Spinner />
+            Loading Library…
+          </div>
+        {:else if loadError}
+          <Empty.Root>
+            <Empty.Header>
+              <Empty.Title>Library unavailable</Empty.Title>
+              <Empty.Description>{loadError}</Empty.Description>
+            </Empty.Header>
+            <Empty.Content>
+              <Button onclick={() => void loadItems(true)} variant="secondary">Try again</Button>
+            </Empty.Content>
+          </Empty.Root>
+        {:else if items.length === 0}
+          <Empty.Root>
+            <Empty.Header>
+              <Empty.Title>
+                {query || tag || view !== 'all'
+                  ? 'No saved items found'
+                  : status === 'ARCHIVED'
+                    ? 'No archived items'
+                    : 'Save your first link'}
+              </Empty.Title>
+              <Empty.Description>
+                {query || tag || view !== 'all'
+                  ? 'Try another keyword or filter.'
+                  : status === 'ARCHIVED'
+                    ? 'Archived links will remain available here.'
+                    : 'Use Add link to save an article URL.'}
+              </Empty.Description>
+            </Empty.Header>
+            {#if query || tag || view !== 'all' || status === 'ARCHIVED'}
+              <Empty.Content>
+                <Button onclick={clearFilters} variant="secondary">Reset filters</Button>
+              </Empty.Content>
+            {/if}
+          </Empty.Root>
+        {:else}
+          <ol aria-label="Library items" class="library-list">
+            {#each items as item (item.uid)}
+              <li
+                class="list-action-row"
+                data-actions-open={actionMenuUid === item.uid}
+                class:busy={busyUids.has(item.uid)}
+                class:selected={selectedUid === item.uid}
+                data-focus-uid={item.uid}
+              >
+                <button
+                  aria-current={selectedUid === item.uid ? 'true' : undefined}
+                  class="item-select"
+                  data-library-select={item.uid}
+                  onclick={() => void openDetail(item)}
+                  type="button"
+                >
+                  <span aria-hidden="true" class="item-favicon">
+                    <span>{faviconFallback(item)}</span>
+                    <img
+                      alt=""
+                      decoding="async"
+                      loading="lazy"
+                      onerror={hideBrokenFavicon}
+                      referrerpolicy="no-referrer"
+                      src={faviconUrl(item)}
+                    />
+                  </span>
+                  <span class="item-copy">
+                    <span class="item-title">{displayTitle(item)}</span>
+                    <span class="item-meta">
+                      <span class="item-source"
+                        >{item.siteName || hostname(item) || item.originalUrl}</span
+                      >
+                      <span aria-hidden="true">·</span>
+                      <span
+                        >{formatCompactDate(
+                          item.publishedAt ?? item.createdAt,
+                          session.workspace.timezone,
+                        )}</span
+                      >
+                      {#if visibleProcessingLabel(item)}
                         <span aria-hidden="true">·</span>
                         <span
-                          >{formatCompactDate(
-                            item.publishedAt ?? item.createdAt,
-                            session.workspace.timezone,
-                          )}</span
+                          class:failed={item.processingStatus === 'FAILED'}
+                          class="processing-state"
                         >
-                        {#if visibleProcessingLabel(item)}
-                          <span aria-hidden="true">·</span>
-                          <span
-                            class:failed={item.processingStatus === 'FAILED'}
-                            class="processing-state"
-                          >
-                            {visibleProcessingLabel(item)}
-                          </span>
-                        {/if}
-                      </span>
-                    </span>
-                    {#if !item.readAt}
-                      <span class="unread-mark" title="Unread">
-                        <span class="sr-only">Unread</span>
-                      </span>
-                    {/if}
-                  </button>
-                  <div class="item-actions list-action-group">
-                    <DropdownMenu.Root
-                      onOpenChange={(open) => (actionMenuUid = open ? item.uid : null)}
-                      open={actionMenuUid === item.uid}
-                    >
-                      <DropdownMenu.Trigger disabled={busyUids.has(item.uid)}>
-                        {#snippet child({ props })}
-                          <Button
-                            {...props}
-                            aria-label={`Actions for ${displayTitle(item)}`}
-                            size="icon-sm"
-                            variant="ghost"
-                          >
-                            <Ellipsis />
-                          </Button>
-                        {/snippet}
-                      </DropdownMenu.Trigger>
-                      {#if actionMenuUid === item.uid}
-                        <DropdownMenu.Content align="end" class="w-44" forceMount>
-                          <DropdownMenu.Group>
-                            <DropdownMenu.Item
-                              aria-label={`${item.starred ? 'Unstar' : 'Star'} ${displayTitle(item)}`}
-                              onclick={() => void toggleStar(item)}
-                            >
-                              <Star />
-                              {item.starred ? 'Unstar' : 'Star'}
-                            </DropdownMenu.Item>
-                            <DropdownMenu.Item onclick={() => void toggleRead(item)}>
-                              <BookOpenCheck />
-                              {item.readAt ? 'Mark unread' : 'Mark read'}
-                            </DropdownMenu.Item>
-                            <DropdownMenu.Item
-                              aria-label={`${item.status === 'ACTIVE' ? 'Archive' : 'Restore'} ${displayTitle(item)}`}
-                              onclick={() => void toggleArchive(item)}
-                            >
-                              {#if item.status === 'ACTIVE'}<Archive />{:else}<RotateCcw />{/if}
-                              {item.status === 'ACTIVE' ? 'Archive' : 'Restore'}
-                            </DropdownMenu.Item>
-                          </DropdownMenu.Group>
-                          <DropdownMenu.Separator />
-                          <DropdownMenu.Item
-                            aria-label={`Delete ${displayTitle(item)}`}
-                            onclick={() => requestDelete(item)}
-                            variant="destructive"
-                          >
-                            <Trash2 />
-                            Delete
-                          </DropdownMenu.Item>
-                        </DropdownMenu.Content>
+                          {visibleProcessingLabel(item)}
+                        </span>
                       {/if}
-                    </DropdownMenu.Root>
-                  </div>
-                </li>
-              {/each}
-            </ol>
+                    </span>
+                  </span>
+                  {#if !item.readAt}
+                    <span class="unread-mark" title="Unread">
+                      <span class="sr-only">Unread</span>
+                    </span>
+                  {/if}
+                </button>
+                <div class="item-actions list-action-group">
+                  <DropdownMenu.Root
+                    onOpenChange={(open) => (actionMenuUid = open ? item.uid : null)}
+                    open={actionMenuUid === item.uid}
+                  >
+                    <DropdownMenu.Trigger disabled={busyUids.has(item.uid)}>
+                      {#snippet child({ props })}
+                        <Button
+                          {...props}
+                          aria-label={`Actions for ${displayTitle(item)}`}
+                          size="icon-sm"
+                          variant="ghost"
+                        >
+                          <Ellipsis />
+                        </Button>
+                      {/snippet}
+                    </DropdownMenu.Trigger>
+                    {#if actionMenuUid === item.uid}
+                      <DropdownMenu.Content align="end" class="w-44" forceMount>
+                        <DropdownMenu.Group>
+                          <DropdownMenu.Item
+                            aria-label={`${item.starred ? 'Unstar' : 'Star'} ${displayTitle(item)}`}
+                            onclick={() => void toggleStar(item)}
+                          >
+                            <Star />
+                            {item.starred ? 'Unstar' : 'Star'}
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item onclick={() => void toggleRead(item)}>
+                            <BookOpenCheck />
+                            {item.readAt ? 'Mark unread' : 'Mark read'}
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item
+                            aria-label={`${item.status === 'ACTIVE' ? 'Archive' : 'Restore'} ${displayTitle(item)}`}
+                            onclick={() => void toggleArchive(item)}
+                          >
+                            {#if item.status === 'ACTIVE'}<Archive />{:else}<RotateCcw />{/if}
+                            {item.status === 'ACTIVE' ? 'Archive' : 'Restore'}
+                          </DropdownMenu.Item>
+                        </DropdownMenu.Group>
+                        <DropdownMenu.Separator />
+                        <DropdownMenu.Item
+                          aria-label={`Delete ${displayTitle(item)}`}
+                          onclick={() => requestDelete(item)}
+                          variant="destructive"
+                        >
+                          <Trash2 />
+                          Delete
+                        </DropdownMenu.Item>
+                      </DropdownMenu.Content>
+                    {/if}
+                  </DropdownMenu.Root>
+                </div>
+              </li>
+            {/each}
+          </ol>
 
-            {#if items.length < total}
-              <Button
-                class="load-more"
-                disabled={loadingMore}
-                onclick={() => void loadItems(false)}
-                variant="secondary"
-              >
-                {#if loadingMore}<Spinner data-icon="inline-start" />{/if}
-                {loadingMore ? 'Loading…' : 'Load more'}
-              </Button>
-            {/if}
+          {#if items.length < total}
+            <Button
+              class="load-more"
+              disabled={loadingMore}
+              onclick={() => void loadItems(false)}
+              variant="secondary"
+            >
+              {#if loadingMore}<Spinner data-icon="inline-start" />{/if}
+              {loadingMore ? 'Loading…' : 'Load more'}
+            </Button>
           {/if}
-        </div>
-      </section>
-    </div>
-
-    <aside aria-label="Library article preview" class="library-detail">
-      {#if selectedItem}
-        {#key selectedItem.uid}
-          <LibraryReader
-            {actionStatus}
-            busy={detailLoading ||
-              busyUids.has(selectedItem.uid) ||
-              retryingUid === selectedItem.uid}
-            item={selectedItem}
-            mode="preview"
-            onAcceptRefresh={(item) => resolveRefreshCandidate(item, true)}
-            onBack={closeDetail}
-            onDiscardRefresh={(item) => resolveRefreshCandidate(item, false)}
-            onExpand={() => openReader(selectedItem!)}
-            onRetry={retryCapture}
-            onToggleRead={toggleRead}
-            operationError={operationError ||
-              detailError ||
-              detailPollingError ||
-              detailProcessingError}
-            timeZone={session.workspace.timezone}
-          />
-        {/key}
-      {:else}
-        <div aria-hidden="true" class="empty-preview"></div>
-      {/if}
-    </aside>
+        {/if}
+      </div>
+    </section>
   </div>
-{/if}
+
+  <aside aria-label="Library article preview" class="library-detail">
+    {#if selectedItem && !readerItem}
+      {#key selectedItem.uid}
+        <LibraryReader
+          {actionStatus}
+          busy={detailLoading || busyUids.has(selectedItem.uid) || retryingUid === selectedItem.uid}
+          item={selectedItem}
+          mode="preview"
+          onAcceptRefresh={(item) => resolveRefreshCandidate(item, true)}
+          onBack={closeDetail}
+          onDiscardRefresh={(item) => resolveRefreshCandidate(item, false)}
+          onExpand={() => openReader(selectedItem!)}
+          onRetry={retryCapture}
+          onToggleRead={toggleRead}
+          operationError={operationError ||
+            detailError ||
+            detailPollingError ||
+            detailProcessingError}
+          timeZone={session.workspace.timezone}
+        />
+      {/key}
+    {:else}
+      <div aria-hidden="true" class="empty-preview"></div>
+    {/if}
+  </aside>
+</div>
 
 <ConfirmDialog
   busy={deleteBusy}
@@ -1037,6 +1041,10 @@
 />
 
 <style>
+  .library-page[hidden] {
+    display: none;
+  }
+
   .library-page {
     display: grid;
     width: 100%;

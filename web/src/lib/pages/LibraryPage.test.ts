@@ -525,12 +525,17 @@ describe('LibraryPage', () => {
         expect(button).not.toBeNull();
         return button!;
       });
+      const list = target.querySelector<HTMLElement>('.library-page')!;
+      const favicon = select.querySelector<HTMLImageElement>('.item-favicon img')!;
       select.focus();
       select.click();
 
       await vi.waitFor(() => expect(target.querySelector('.library-reader')).not.toBeNull());
       expect(target.querySelector('.library-reader.preview')).toBeNull();
       expect(document.body.querySelector('[data-slot="sheet-content"]')).toBeNull();
+      expect(list.hidden).toBe(true);
+      expect(list.inert).toBe(true);
+      expect(favicon.isConnected).toBe(true);
       expect(getLibraryItem).not.toHaveBeenCalled();
       expect(onImmersiveChange).toHaveBeenLastCalledWith(true);
       expect(window.history.state?.locusLibraryReader).toBe('alpha');
@@ -545,6 +550,11 @@ describe('LibraryPage', () => {
       });
       await vi.waitFor(() => expect(document.activeElement).toBe(restored));
       expect(onImmersiveChange).toHaveBeenLastCalledWith(false);
+      expect(restored).toBe(select);
+      expect(restored.querySelector('.item-favicon img')).toBe(favicon);
+      expect(list.hidden).toBe(false);
+      expect(list.inert).toBe(false);
+      expect(listLibraryItems).toHaveBeenCalledOnce();
     } finally {
       await unmount(component);
     }
@@ -681,7 +691,7 @@ describe('LibraryPage', () => {
       contentVersion: 1,
       processingStatus: 'READY',
     });
-    vi.mocked(listLibraryItems).mockResolvedValue(page([ready]));
+    vi.mocked(listLibraryItems).mockResolvedValue(page([ready, item('beta', 'Beta')]));
     vi.mocked(getLibraryItem).mockResolvedValue(ready);
     const { component, target } = mountPage();
 
@@ -691,6 +701,9 @@ describe('LibraryPage', () => {
         expect(button).not.toBeNull();
         return button!;
       });
+      const list = target.querySelector<HTMLElement>('.library-page')!;
+      const favicons = [...target.querySelectorAll<HTMLImageElement>('.item-favicon img')];
+      favicons[1]!.dispatchEvent(new Event('error'));
       select.click();
       const expand = await vi.waitFor(() => {
         expect(target.querySelector('.library-reader.preview')).not.toBeNull();
@@ -698,11 +711,15 @@ describe('LibraryPage', () => {
         expect(button).not.toBeNull();
         return button!;
       });
+      expect([...target.querySelectorAll('.item-favicon img')]).toEqual(favicons);
       expand.focus();
       expand.click();
 
       await vi.waitFor(() => expect(document.activeElement?.id).toBe('library-reader-title'));
       expect(target.querySelector('.library-reader.preview')).toBeNull();
+      expect(list.hidden).toBe(true);
+      expect(list.inert).toBe(true);
+      expect(favicons.every((favicon) => favicon.isConnected)).toBe(true);
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
 
       const restored = await vi.waitFor(() => {
@@ -712,6 +729,12 @@ describe('LibraryPage', () => {
       });
       await vi.waitFor(() => expect(document.activeElement).toBe(restored));
       expect(target.querySelector('.library-reader.preview')).not.toBeNull();
+      expect(list.hidden).toBe(false);
+      expect(list.inert).toBe(false);
+      const restoredFavicons = [...target.querySelectorAll('.item-favicon img')];
+      favicons.forEach((favicon, index) => expect(restoredFavicons[index]).toBe(favicon));
+      expect(favicons[1]!.hidden).toBe(true);
+      expect(listLibraryItems).toHaveBeenCalledOnce();
     } finally {
       await unmount(component);
     }
