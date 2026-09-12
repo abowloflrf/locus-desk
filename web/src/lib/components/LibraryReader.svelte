@@ -650,9 +650,9 @@
   }
 
   .library-reader.preview .reader-toolbar {
-    top: -3px;
+    top: 0;
     width: 100%;
-    padding: 3px 0 14px;
+    padding: 8px 0;
     margin-bottom: 30px;
     background: var(--background);
   }

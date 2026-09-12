@@ -286,11 +286,12 @@
         </Popover.Trigger>
         <Popover.Content
           bind:ref={panel}
+          variant="menu"
           aria-label="Table of contents"
           side="left"
           align="start"
           sideOffset={8}
-          class="max-h-[min(70dvh,36rem)] w-[min(20rem,calc(100vw-2rem))] overflow-y-auto overscroll-contain"
+          class="toc-popover max-h-[min(70dvh,36rem)] w-[min(20rem,calc(100vw-2rem))] overflow-y-auto overscroll-contain"
           onOpenAutoFocus={focusCurrent}
           onCloseAutoFocus={restoreFocus}
           onEscapeKeydown={() => (returnToTrigger = true)}
@@ -304,6 +305,14 @@
 </aside>
 
 <style>
+  :global(.toc-popover) {
+    scrollbar-width: none;
+  }
+
+  :global(.toc-popover::-webkit-scrollbar) {
+    display: none;
+  }
+
   .reader-toc {
     position: sticky;
     top: 96px;
