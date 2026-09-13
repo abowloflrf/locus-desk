@@ -198,6 +198,10 @@ async fn probe_model(
     })
 }
 
+const MAX_COMPLETION_BYTES: usize = 64 * 1024;
+/// Providers reached through an overloaded gateway can accept connections slowly.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
+
 pub(super) async fn complete(
     base_url: &str,
     model: &str,
@@ -208,16 +212,19 @@ pub(super) async fn complete(
 ) -> AppResult<String> {
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(Duration::from_secs(10))
+        .connect_timeout(CONNECT_TIMEOUT)
         .timeout(timeout)
         .build()
         .map_err(|_| provider_error("Unable to initialize the model connection."))?;
     let payload = serde_json::json!({
-        "model": model, "messages": messages, "stream": false, "max_tokens": max_tokens
+        // Streaming keeps bytes moving while the provider prefills the prompt, so
+        // gateways in front of the provider do not time out on long articles.
+        "model": model, "messages": messages, "stream": true, "max_tokens": max_tokens
     });
     let mut request = client
         .post(format!("{base_url}/chat/completions"))
         .header("Content-Type", "application/json")
+        .header("Accept", "text/event-stream")
         .body(payload.to_string());
     if !key.is_empty() {
         request = request.bearer_auth(key);
@@ -242,36 +249,130 @@ pub(super) async fn complete(
             status.as_u16()
         )));
     }
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(connection_error)? {
-        if bytes.len() + chunk.len() > 64 * 1024 {
+    read_completion(&mut response).await
+}
+
+/// Server-sent events arrive in arbitrary chunks, so partial lines are buffered
+/// as bytes until a newline completes them. An SSE response is only accepted
+/// after the provider sends an explicit terminal event.
+async fn read_completion(response: &mut reqwest::Response) -> AppResult<String> {
+    let mut content = String::new();
+    let mut pending = Vec::new();
+    let mut saw_sse = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value
+                .split(';')
+                .next()
+                .is_some_and(|mime| mime.trim().eq_ignore_ascii_case("text/event-stream"))
+        });
+    loop {
+        let chunk = match response.chunk().await {
+            Ok(Some(chunk)) => chunk,
+            Ok(None) => break,
+            Err(error) => return Err(connection_error(error)),
+        };
+        pending.extend_from_slice(&chunk);
+        if pending.len() > MAX_COMPLETION_BYTES || content.len() > MAX_COMPLETION_BYTES {
             return Err(provider_error(
                 "The provider response exceeded the size limit.",
             ));
         }
-        bytes.extend_from_slice(&chunk);
+        while let Some(end) = pending.iter().position(|byte| *byte == b'\n') {
+            let line: Vec<u8> = pending.drain(..=end).collect();
+            let event = read_event(&line, &mut content)?;
+            saw_sse |= event.is_sse;
+            if event.finished {
+                return completion_text(content);
+            }
+        }
     }
-    let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| {
-        provider_error("The provider returned invalid JSON. Check the API base URL.")
-    })?;
-    let content = value
-        .pointer("/choices/0/message/content")
-        .and_then(serde_json::Value::as_str);
-    if !content.is_some_and(|content| !content.trim().is_empty()) {
-        return Err(provider_error(
-            "The provider returned no text completion. Check the model's Chat Completions compatibility.",
-        ));
+    if !pending.is_empty() {
+        let event = read_event(&pending, &mut content)?;
+        saw_sse |= event.is_sse;
+        if event.finished {
+            return completion_text(content);
+        }
     }
-    if value
-        .pointer("/choices/0/finish_reason")
-        .and_then(serde_json::Value::as_str)
-        == Some("length")
-    {
+    if saw_sse {
         return Err(provider_error(
             "The model response was incomplete. Try again or use another model.",
         ));
     }
-    Ok(content.unwrap().trim().to_owned())
+    completion_text(content)
+}
+
+struct CompletionEvent {
+    is_sse: bool,
+    finished: bool,
+}
+
+fn read_event(line: &[u8], content: &mut String) -> AppResult<CompletionEvent> {
+    let line = std::str::from_utf8(line).map_err(|_| {
+        provider_error("The provider returned invalid JSON. Check the API base URL.")
+    })?;
+    let line = line.trim();
+    let (data, is_sse) = match line.strip_prefix("data:") {
+        Some(data) => (data.trim(), true),
+        // Tolerate providers that ignore `stream: true` and answer with one JSON body.
+        None if line.starts_with('{') => (line, false),
+        None => {
+            return Ok(CompletionEvent {
+                is_sse: false,
+                finished: false,
+            });
+        }
+    };
+    if data.is_empty() {
+        return Ok(CompletionEvent {
+            is_sse,
+            finished: false,
+        });
+    }
+    if data == "[DONE]" {
+        return Ok(CompletionEvent {
+            is_sse,
+            finished: true,
+        });
+    }
+    let value: serde_json::Value = serde_json::from_str(data).map_err(|_| {
+        provider_error("The provider returned invalid JSON. Check the API base URL.")
+    })?;
+    if value.get("error").is_some() {
+        return Err(provider_error(
+            "The provider reported an error while generating the response. Try again later.",
+        ));
+    }
+    let finish_reason = value
+        .pointer("/choices/0/finish_reason")
+        .and_then(serde_json::Value::as_str);
+    if finish_reason == Some("length") {
+        return Err(provider_error(
+            "The model response was incomplete. Try again or use another model.",
+        ));
+    }
+    if let Some(text) = value
+        .pointer("/choices/0/delta/content")
+        .or_else(|| value.pointer("/choices/0/message/content"))
+        .and_then(serde_json::Value::as_str)
+    {
+        content.push_str(text);
+    }
+    Ok(CompletionEvent {
+        is_sse,
+        finished: finish_reason.is_some(),
+    })
+}
+
+fn completion_text(content: String) -> AppResult<String> {
+    if content.trim().is_empty() {
+        return Err(provider_error(
+            "The provider returned no text completion. Check the model's Chat Completions compatibility.",
+        ));
+    }
+    Ok(content.trim().to_owned())
 }
 
 fn provider_error(message: impl Into<String>) -> AppError {
@@ -299,24 +400,68 @@ mod tests {
     use axum::{response::IntoResponse, routing::post};
 
     #[tokio::test]
-    async fn model_probe_checks_response_and_bounds_failures() {
+    async fn model_probe_handles_streamed_responses_and_provider_failures() {
+        let oversized = format!(
+            "data: {}\n\n",
+            serde_json::json!({"choices":[{"delta":{"content":"x".repeat(65_537)}}]})
+        );
         for (status, body, expected) in [
+            (
+                200,
+                "data: {\"choices\":[{\"delta\":{\"content\":\"OK\"}}]}\n\ndata: [DONE]\n\n"
+                    .to_owned(),
+                None,
+            ),
+            // Providers that ignore `stream: true` still answer with one JSON body.
             (
                 200,
                 r#"{"choices":[{"message":{"content":"OK"}}]}"#.to_owned(),
                 None,
             ),
-            (200, "<html>Login</html>".to_owned(), Some("invalid JSON")),
             (
                 200,
-                r#"{"choices":[]}"#.to_owned(),
+                "<html>Login</html>".to_owned(),
                 Some("no text completion"),
+            ),
+            (200, r#"{"choices":[]}"#.to_owned(), Some("no text completion")),
+            (
+                200,
+                "data: {\"choices\":[]}\n\n".to_owned(),
+                Some("incomplete"),
+            ),
+            (
+                200,
+                "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"
+                    .to_owned(),
+                Some("incomplete"),
+            ),
+            (
+                200,
+                "data: {\"choices\":[{\"delta\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}\n\n"
+                    .to_owned(),
+                None,
+            ),
+            (
+                200,
+                "data: {\"error\":{\"message\":\"secret-key\"}}\n\n".to_owned(),
+                Some("reported an error"),
+            ),
+            (
+                200,
+                "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"},\"finish_reason\":\"length\"}]}\n\n"
+                    .to_owned(),
+                Some("incomplete"),
+            ),
+            (
+                200,
+                "data: {\"choices\":\n\n".to_owned(),
+                Some("invalid JSON"),
             ),
             (401, "secret-key".to_owned(), Some("authentication")),
             (404, String::new(), Some("not found")),
             (429, String::new(), Some("quota")),
             (302, String::new(), Some("redirected")),
-            (200, "x".repeat(65537), Some("size limit")),
+            (200, oversized, Some("size limit")),
         ] {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let address = listener.local_addr().unwrap();
@@ -326,8 +471,9 @@ mod tests {
                     move |headers: axum::http::HeaderMap,
                           Json(payload): Json<serde_json::Value>| async move {
                         assert_eq!(headers["authorization"], "Bearer secret-key");
+                        assert_eq!(headers["accept"], "text/event-stream");
                         assert_eq!(payload["model"], "test-model");
-                        assert_eq!(payload["stream"], false);
+                        assert_eq!(payload["stream"], true);
                         (
                             StatusCode::from_u16(status).unwrap(),
                             [("location", "/redirect-target")],
@@ -359,6 +505,87 @@ mod tests {
                 assert!(result.is_ok());
             }
         }
+    }
+
+    #[tokio::test]
+    async fn complete_reassembles_stream_chunks_split_mid_line() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = socket.read(&mut request).await.unwrap();
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            for part in [
+                "data: {\"choices\":[{\"delta\":{\"content\":\"Hel",
+                "lo \"}}]}\n\n: keep-alive\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"world\"}}]}\n",
+                "\ndata: [DONE]\n\n",
+            ] {
+                socket.write_all(part.as_bytes()).await.unwrap();
+                socket.flush().await.unwrap();
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        });
+        let result = complete(
+            &format!("http://{address}/v1"),
+            "test-model",
+            "",
+            serde_json::json!([{"role": "user", "content": "hi"}]),
+            32,
+            Duration::from_secs(2),
+        )
+        .await;
+        server.abort();
+        assert_eq!(result.unwrap(), "Hello world");
+    }
+
+    #[tokio::test]
+    async fn complete_preserves_utf8_split_across_response_chunks() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = socket.read(&mut request).await.unwrap();
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            socket
+                .write_all(b"data: {\"choices\":[{\"delta\":{\"content\":\"")
+                .await
+                .unwrap();
+            socket.write_all(&[0xe4]).await.unwrap();
+            socket.flush().await.unwrap();
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            socket.write_all(&[0xbd, 0xa0]).await.unwrap();
+            socket
+                .write_all(b"\"}}]}\n\ndata: [DONE]\n\n")
+                .await
+                .unwrap();
+        });
+        let result = complete(
+            &format!("http://{address}/v1"),
+            "test-model",
+            "",
+            serde_json::json!([{"role": "user", "content": "hi"}]),
+            32,
+            Duration::from_secs(2),
+        )
+        .await;
+        server.abort();
+        assert_eq!(result.unwrap(), "你");
     }
 
     #[tokio::test]
