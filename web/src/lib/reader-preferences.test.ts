@@ -8,14 +8,14 @@ import {
 } from './reader-preferences';
 
 describe('reader preferences', () => {
-  it('loads valid preferences and repairs invalid values', () => {
+  it('migrates the old app font to System and repairs invalid values', () => {
     const storage = {
       getItem: () =>
         JSON.stringify({ fontPreset: 'sans', fontSize: 'huge', lineHeight: 'spacious' }),
     };
 
     expect(loadReaderPreferences(storage)).toEqual({
-      fontPreset: 'sans',
+      fontPreset: 'system',
       fontSize: DEFAULT_READER_PREFERENCES.fontSize,
       lineHeight: 'spacious',
       width: DEFAULT_READER_PREFERENCES.width,
@@ -30,7 +30,7 @@ describe('reader preferences', () => {
   it('persists preferences under the versioned browser key', () => {
     const values = new Map<string, string>();
     const preferences = {
-      fontPreset: 'sans',
+      fontPreset: 'source-serif',
       fontSize: 'large',
       lineHeight: 'compact',
       width: 'wide',

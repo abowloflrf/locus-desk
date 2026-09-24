@@ -4,6 +4,7 @@ use axum::{
     Router,
     body::{Body, to_bytes},
     http::{Method, Request, Response, StatusCode, header},
+    response::IntoResponse,
 };
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
@@ -1780,9 +1781,18 @@ async fn article_summaries_are_manual_persistent_and_use_general_language() {
             assert_eq!(headers["authorization"], "Bearer summary-secret");
             captured.lock().unwrap().push(payload);
             if failing.load(Ordering::SeqCst) {
-                (StatusCode::TOO_MANY_REQUESTS, axum::Json(json!({"secret":"summary-secret"})))
+                (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    axum::Json(json!({"secret":"summary-secret"})),
+                )
+                    .into_response()
             } else {
-                (StatusCode::OK, axum::Json(json!({"choices":[{"finish_reason":"stop", "message":{"content":"Generated summary"}}]})))
+                (
+                    StatusCode::OK,
+                    [("content-type", "text/event-stream")],
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"Generated \"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"summary\"}}]}\n\ndata: [DONE]\n\n",
+                )
+                    .into_response()
             }
         }
     }));

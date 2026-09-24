@@ -57,7 +57,7 @@
 
 @theme inline {
   --font-sans:
-    'Montserrat Variable', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC',
+    'Work Sans Variable', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC',
     sans-serif;
   --shadow-menu:
     0 2px 4px -2px color-mix(in oklab, var(--foreground) 6%, transparent),

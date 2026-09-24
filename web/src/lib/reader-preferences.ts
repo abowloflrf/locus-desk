@@ -1,9 +1,31 @@
 export const READER_PREFERENCES_STORAGE_KEY = 'locus.reader.preferences.v1';
 
 export const READER_FONT_PRESETS = [
-  { label: 'Plex', value: 'plex' },
-  { label: 'Montserrat', value: 'sans' },
-  { label: 'System', value: 'system' },
+  { label: 'System', value: 'system', description: 'App default', family: 'var(--font-sans)' },
+  {
+    label: 'IBM Plex Sans',
+    value: 'plex',
+    description: 'Sans-serif',
+    family: 'var(--font-reader-plex)',
+  },
+  {
+    label: 'Noto Sans SC',
+    value: 'noto-sans',
+    description: 'Sans-serif · Chinese',
+    family: 'var(--font-reader-noto-sans)',
+  },
+  {
+    label: 'Source Serif 4',
+    value: 'source-serif',
+    description: 'Serif',
+    family: 'var(--font-reader-source-serif)',
+  },
+  {
+    label: 'Noto Serif SC',
+    value: 'noto-serif',
+    description: 'Serif · Chinese',
+    family: 'var(--font-reader-noto-serif)',
+  },
 ] as const;
 
 export const READER_FONT_SIZES = [
@@ -29,6 +51,12 @@ export type ReaderFontSize = (typeof READER_FONT_SIZES)[number]['value'];
 export type ReaderLineHeight = (typeof READER_LINE_HEIGHTS)[number]['value'];
 export type ReaderWidth = (typeof READER_WIDTHS)[number]['value'];
 
+export function readerFontFamily(preset: ReaderFontPreset): string {
+  return (
+    READER_FONT_PRESETS.find((option) => option.value === preset)?.family ?? 'var(--font-sans)'
+  );
+}
+
 export interface ReaderPreferences {
   fontPreset: ReaderFontPreset;
   fontSize: ReaderFontSize;
@@ -37,7 +65,7 @@ export interface ReaderPreferences {
 }
 
 export const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
-  fontPreset: 'plex',
+  fontPreset: 'system',
   fontSize: 'medium',
   lineHeight: 'comfortable',
   width: 'balanced',
@@ -49,9 +77,12 @@ export function loadReaderPreferences(storage: Pick<Storage, 'getItem'>): Reader
     if (!stored) return { ...DEFAULT_READER_PREFERENCES };
     const value = JSON.parse(stored) as Record<string, unknown>;
     return {
-      fontPreset: isOption(READER_FONT_PRESETS, value.fontPreset)
-        ? value.fontPreset
-        : DEFAULT_READER_PREFERENCES.fontPreset,
+      fontPreset:
+        value.fontPreset === 'sans'
+          ? 'system'
+          : isOption(READER_FONT_PRESETS, value.fontPreset)
+            ? value.fontPreset
+            : DEFAULT_READER_PREFERENCES.fontPreset,
       fontSize: isOption(READER_FONT_SIZES, value.fontSize)
         ? value.fontSize
         : DEFAULT_READER_PREFERENCES.fontSize,

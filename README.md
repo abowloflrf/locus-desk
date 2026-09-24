@@ -205,6 +205,6 @@ initialized; the application still preserves the stored account. Compose default
 
 Open **Settings** to save an OpenAI-compatible API base URL, model ID, and optional API key for your account in the current workspace. Leave the key field blank to preserve an existing key. **Test connection** sends a short Chat Completions request using the current form values without saving them, reports the result and latency, and may consume API credit. A saved key can be reused only while testing the same base URL.
 
-This configuration prepares Library for article summaries; summary generation is not implemented yet.
+Library article summaries are generated only when you ask for one in the reader. Requests stream, so a slow provider keeps its connection alive while it prefills; text longer than the prompt budget is trimmed in the middle, and each request may run for up to five minutes.
 
 Settings are persisted in SQLite. API responses expose only whether a key is configured, never its value. Keys are stored without application-level encryption and are included in full database backups, but excluded from portable JSON and Markdown exports.

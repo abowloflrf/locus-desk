@@ -388,7 +388,7 @@ describe('LibraryReader', () => {
 
     try {
       const reader = target.querySelector<HTMLElement>('.library-reader')!;
-      await vi.waitFor(() => expect(reader.dataset.readerFont).toBe('sans'));
+      await vi.waitFor(() => expect(reader.dataset.readerFont).toBe('system'));
       expect(reader.dataset.readerSize).toBe('large');
       expect(reader.dataset.readerLineHeight).toBe('spacious');
       expect(reader.dataset.readerWidth).toBe('wide');
@@ -401,15 +401,33 @@ describe('LibraryReader', () => {
       );
       document.querySelector<HTMLButtonElement>('[aria-label="16 pixel text"]')!.click();
       document.querySelector<HTMLButtonElement>('[aria-label="Balanced article width"]')!.click();
-      document.querySelector<HTMLButtonElement>('[aria-label="System typeface"]')!.click();
-      await vi.waitFor(() => expect(reader.dataset.readerFont).toBe('system'));
-      document.querySelector<HTMLButtonElement>('[aria-label="Montserrat typeface"]')!.click();
-      await vi.waitFor(() => expect(reader.dataset.readerFont).toBe('sans'));
+      document.querySelector<HTMLButtonElement>('#reader-font-trigger')!.click();
+      await vi.waitFor(() =>
+        expect(document.querySelector('[aria-label="Source Serif 4 typeface"]')).not.toBeNull(),
+      );
+      document.querySelector<HTMLElement>('[aria-label="Source Serif 4 typeface"]')!.click();
+      await vi.waitFor(() => expect(reader.dataset.readerFont).toBe('source-serif'));
+      expect(reader.style.getPropertyValue('--reader-font-sans')).toBe(
+        'var(--font-reader-source-serif)',
+      );
+      await vi.waitFor(() =>
+        expect(document.querySelector('[data-slot="dropdown-menu-content"]')).toBeNull(),
+      );
+      expect(document.querySelector('[data-slot="popover-content"]')).not.toBeNull();
+      document.querySelector<HTMLButtonElement>('#reader-font-trigger')!.click();
+      await vi.waitFor(() =>
+        expect(document.querySelector('[aria-label="Noto Sans SC typeface"]')).not.toBeNull(),
+      );
+      document.querySelector<HTMLElement>('[aria-label="Noto Sans SC typeface"]')!.click();
+      await vi.waitFor(() => expect(reader.dataset.readerFont).toBe('noto-sans'));
+      expect(reader.style.getPropertyValue('--reader-font-sans')).toBe(
+        'var(--font-reader-noto-sans)',
+      );
 
       await vi.waitFor(() => expect(reader.dataset.readerSize).toBe('small'));
       expect(reader.dataset.readerWidth).toBe('balanced');
       expect(JSON.parse(window.localStorage.getItem(READER_PREFERENCES_STORAGE_KEY)!)).toEqual({
-        fontPreset: 'sans',
+        fontPreset: 'noto-sans',
         fontSize: 'small',
         lineHeight: 'spacious',
         width: 'balanced',

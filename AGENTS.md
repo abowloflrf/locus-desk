@@ -2,38 +2,27 @@
 
 ## Language
 
-- Write code, error messages, log messages, and UI copy in English.
-- Write comments in English.
-- Write README content in English.
+- Code, comments, error messages, logs, UI copy, and README content in English.
 
 ## UI/UX
 
-- Follow the current Memos visual baseline: neutral grayscale for base surfaces and text, restrained radii, and no decorative shadows. Keep visible focus indicators and subtle overlay outlines. Preserve semantic priority and status indicators.
-- Use semantic design tokens. Avoid hardcoded colors, gradients, glass effects, heavy cards, excessive pills, and module-specific color themes.
-- Use consistent semantic colors for feedback: green for success, amber for warnings, and red for errors or destructive actions. Make status feedback clearly visible with semantic tokens and accompanying text or icons; the grayscale baseline must not suppress these colors.
-- Keep UI clean and purposeful. Remove redundant copy, repeated labels, decorative separators, borders, and containers; every visible element must support content, action, state, or orientation.
-- Create hierarchy and grouping with spacing, alignment, typography, scale, weight, and restrained semantic color. Add dividers, borders, or extra surfaces only when these cues are insufficient.
-- Use Montserrat for the app UI and monospace for code/timestamps/tags. Reader fonts may be customized. Use a 4px spacing base, 8px control radii, and 12px surface or overlay radii.
-- List pages share the Memos page header and 920px content container. Preserve Library split views, reader typography, compact Todo density, and Memo card borders.
-- Reveal secondary list actions on hover, keyboard focus, or while their overlay is open. Keep them visible on mobile and touch devices; reserve ellipsis icons for action menus.
-- Responsive layout: full navigation and context rail at `>= 1200px`; icon rail and drawer at `768–1199px`; single column, top bar, and bottom navigation below `768px`.
-- Keep mobile targets at least 44px, prevent horizontal scrolling, and never require hover for primary actions.
-- Prefer inline editing. Confirm destructive actions; optimistic updates must roll back and show clear errors on failure.
-- Preserve focus after edits, dialogs, and list changes. Support `Ctrl/Cmd + Enter`, `Ctrl/Cmd + K`, and `Esc`.
-- Provide clear loading, empty, submitting, success, and error states. Use compact loading and empty states across list pages. Use shared inline Field.Error messages for form errors and StatusMessage for page-level operation errors. Announce errors and async results through appropriate live regions.
-- Use visible `:focus-visible` states, accessible names for icon buttons, WCAG 2.2 AA contrast, and non-color state indicators.
-- Keep motion purposeful and within 100–220ms; respect `prefers-reduced-motion`.
+- Visual baseline: Memos-style neutral grayscale with subtle overlay outlines, restrained radii, no decorative shadows, and visible focus indicators. Preserve semantic priority/status cues.
+- Use semantic design tokens only — no hardcoded colors, gradients, glass effects, heavy cards, excessive pills, or module-specific color themes. Feedback colors stay semantic (green success, amber warning, red error/destructive) and always pair color with text or an icon.
+- Keep UI clean: drop redundant copy, labels, separators, borders, and containers; every element must serve content, action, state, or orientation. Build hierarchy with spacing, alignment, typography, scale, and weight before adding dividers or surfaces.
+- Typography: Work Sans for app UI, monospace for code/timestamps/tags; reader fonts may be customized. Spacing base 4px, control radii 8px, surface/overlay radii 12px.
+- List pages share the Memos page header and 920px container. Preserve Library split views, reader typography, compact Todo density, and Memo card borders.
+- Reveal secondary list actions on hover, keyboard focus, or open overlay — and always keep them visible on mobile/touch. Reserve ellipsis icons for action menus.
+- Responsive: full navigation + context rail at `>= 1200px`; icon rail + drawer at `768–1199px`; single column, top bar, bottom nav below `768px`. Mobile targets at least 44px, no horizontal scrolling, never require hover for primary actions.
+- Prefer inline editing; confirm destructive actions; optimistic updates must roll back with clear errors. Preserve focus after edits, dialogs, and list changes. Support `Ctrl/Cmd + Enter`, `Ctrl/Cmd + K`, and `Esc`.
+- Cover loading, empty, submitting, success, and error states — compact loading/empty on list pages, inline Field.Error for forms, StatusMessage for page-level errors, live regions for async results. Accessibility: visible `:focus-visible`, accessible names for icon buttons, WCAG 2.2 AA contrast, non-color state indicators, and purposeful motion within 100–220ms that respects `prefers-reduced-motion`.
 
 ## Code Style
 
-- Avoid redundant comments.
-- Add comments only when they clarify non-obvious intent or constraints, and keep them concise.
+- Avoid redundant comments; comment only non-obvious intent or constraints, concisely.
 
 ## Tests
 
-- Test core behavior and important risk boundaries.
-- Avoid large numbers of low-value, repetitive, or implementation-detail tests.
-- Skip tests when they do not provide meaningful confidence.
+- Test core behavior and important risk boundaries; skip low-value, repetitive, or implementation-detail tests.
 
 ## Git
 

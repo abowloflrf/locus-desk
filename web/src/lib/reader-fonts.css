@@ -1,0 +1,12 @@
+@import '@fontsource-variable/source-serif-4/wght.css';
+@import '@fontsource-variable/source-serif-4/wght-italic.css';
+@import '@fontsource-variable/noto-sans-sc/wght.css';
+@import '@fontsource-variable/noto-serif-sc/wght.css';
+
+:root {
+  --font-reader-noto-sans:
+    'Noto Sans SC Variable', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-reader-noto-serif: 'Noto Serif SC Variable', 'Noto Serif SC', 'Songti SC', SimSun, serif;
+  --font-reader-plex: 'IBM Plex Sans Variable', var(--font-reader-noto-sans);
+  --font-reader-source-serif: 'Source Serif 4 Variable', var(--font-reader-noto-serif);
+}

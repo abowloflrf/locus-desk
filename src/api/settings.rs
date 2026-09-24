@@ -190,6 +190,7 @@ async fn probe_model(
             {"role": "user", "content": "Reply with OK only."}
         ]),
         32,
+        None,
         timeout,
     )
     .await?;
@@ -202,25 +203,50 @@ const MAX_COMPLETION_BYTES: usize = 64 * 1024;
 /// Providers reached through an overloaded gateway can accept connections slowly.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Token accounting reported by the provider for a single completion. Fields
+/// stay optional because providers differ in what they report.
+#[derive(Clone, Copy, Default)]
+pub(super) struct TokenUsage {
+    pub(super) prompt_tokens: Option<u64>,
+    pub(super) completion_tokens: Option<u64>,
+    pub(super) total_tokens: Option<u64>,
+    /// Prompt tokens served from the provider's cache (`prompt_tokens_details.cached_tokens`).
+    pub(super) cached_tokens: Option<u64>,
+    /// Hidden thinking tokens billed as output (`completion_tokens_details.reasoning_tokens`).
+    pub(super) reasoning_tokens: Option<u64>,
+}
+
+pub(super) struct Completion {
+    pub(super) content: String,
+    pub(super) usage: Option<TokenUsage>,
+}
+
 pub(super) async fn complete(
     base_url: &str,
     model: &str,
     key: &str,
     messages: serde_json::Value,
     max_tokens: u32,
+    reasoning_effort: Option<&str>,
     timeout: Duration,
-) -> AppResult<String> {
+) -> AppResult<Completion> {
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(CONNECT_TIMEOUT)
         .timeout(timeout)
         .build()
         .map_err(|_| provider_error("Unable to initialize the model connection."))?;
-    let payload = serde_json::json!({
+    let mut payload = serde_json::json!({
         // Streaming keeps bytes moving while the provider prefills the prompt, so
         // gateways in front of the provider do not time out on long articles.
-        "model": model, "messages": messages, "stream": true, "max_tokens": max_tokens
+        // `include_usage` makes OpenAI-compatible providers emit a final usage chunk.
+        "model": model, "messages": messages, "stream": true, "max_tokens": max_tokens,
+        "stream_options": {"include_usage": true}
     });
+    if let Some(effort) = reasoning_effort {
+        // Only reasoning models honor this; it keeps thinking from eating the output budget.
+        payload["reasoning_effort"] = serde_json::Value::String(effort.to_owned());
+    }
     let mut request = client
         .post(format!("{base_url}/chat/completions"))
         .header("Content-Type", "application/json")
@@ -255,8 +281,10 @@ pub(super) async fn complete(
 /// Server-sent events arrive in arbitrary chunks, so partial lines are buffered
 /// as bytes until a newline completes them. An SSE response is only accepted
 /// after the provider sends an explicit terminal event.
-async fn read_completion(response: &mut reqwest::Response) -> AppResult<String> {
+async fn read_completion(response: &mut reqwest::Response) -> AppResult<Completion> {
     let mut content = String::new();
+    let mut usage = None;
+    let mut completed = false;
     let mut pending = Vec::new();
     let mut saw_sse = response
         .headers()
@@ -282,34 +310,40 @@ async fn read_completion(response: &mut reqwest::Response) -> AppResult<String> 
         }
         while let Some(end) = pending.iter().position(|byte| *byte == b'\n') {
             let line: Vec<u8> = pending.drain(..=end).collect();
-            let event = read_event(&line, &mut content)?;
+            let event = read_event(&line, &mut content, &mut usage)?;
             saw_sse |= event.is_sse;
-            if event.finished {
-                return completion_text(content);
+            completed |= event.finished;
+            if event.done {
+                return completion(content, usage);
             }
         }
     }
     if !pending.is_empty() {
-        let event = read_event(&pending, &mut content)?;
+        let event = read_event(&pending, &mut content, &mut usage)?;
         saw_sse |= event.is_sse;
-        if event.finished {
-            return completion_text(content);
-        }
+        completed |= event.finished;
     }
-    if saw_sse {
+    // A finish reason or `[DONE]` proves the stream ended on purpose; the usage
+    // chunk OpenAI sends after the finish reason must not be mistaken for a stall.
+    if saw_sse && !completed {
         return Err(provider_error(
             "The model response was incomplete. Try again or use another model.",
         ));
     }
-    completion_text(content)
+    completion(content, usage)
 }
 
 struct CompletionEvent {
     is_sse: bool,
     finished: bool,
+    done: bool,
 }
 
-fn read_event(line: &[u8], content: &mut String) -> AppResult<CompletionEvent> {
+fn read_event(
+    line: &[u8],
+    content: &mut String,
+    usage: &mut Option<TokenUsage>,
+) -> AppResult<CompletionEvent> {
     let line = std::str::from_utf8(line).map_err(|_| {
         provider_error("The provider returned invalid JSON. Check the API base URL.")
     })?;
@@ -322,6 +356,7 @@ fn read_event(line: &[u8], content: &mut String) -> AppResult<CompletionEvent> {
             return Ok(CompletionEvent {
                 is_sse: false,
                 finished: false,
+                done: false,
             });
         }
     };
@@ -329,12 +364,14 @@ fn read_event(line: &[u8], content: &mut String) -> AppResult<CompletionEvent> {
         return Ok(CompletionEvent {
             is_sse,
             finished: false,
+            done: false,
         });
     }
     if data == "[DONE]" {
         return Ok(CompletionEvent {
             is_sse,
             finished: true,
+            done: true,
         });
     }
     let value: serde_json::Value = serde_json::from_str(data).map_err(|_| {
@@ -344,6 +381,10 @@ fn read_event(line: &[u8], content: &mut String) -> AppResult<CompletionEvent> {
         return Err(provider_error(
             "The provider reported an error while generating the response. Try again later.",
         ));
+    }
+    // The usage chunk arrives after the finish reason and carries no choices.
+    if let Some(reported) = token_usage(&value) {
+        *usage = Some(reported);
     }
     let finish_reason = value
         .pointer("/choices/0/finish_reason")
@@ -363,16 +404,33 @@ fn read_event(line: &[u8], content: &mut String) -> AppResult<CompletionEvent> {
     Ok(CompletionEvent {
         is_sse,
         finished: finish_reason.is_some(),
+        done: false,
     })
 }
 
-fn completion_text(content: String) -> AppResult<String> {
+fn token_usage(value: &serde_json::Value) -> Option<TokenUsage> {
+    let usage = value.get("usage").filter(|usage| usage.is_object())?;
+    let tokens = |pointer: &str| usage.pointer(pointer).and_then(serde_json::Value::as_u64);
+    Some(TokenUsage {
+        prompt_tokens: tokens("/prompt_tokens"),
+        completion_tokens: tokens("/completion_tokens"),
+        total_tokens: tokens("/total_tokens"),
+        cached_tokens: tokens("/prompt_tokens_details/cached_tokens")
+            .or_else(|| tokens("/prompt_cache_hit_tokens")),
+        reasoning_tokens: tokens("/completion_tokens_details/reasoning_tokens"),
+    })
+}
+
+fn completion(content: String, usage: Option<TokenUsage>) -> AppResult<Completion> {
     if content.trim().is_empty() {
         return Err(provider_error(
             "The provider returned no text completion. Check the model's Chat Completions compatibility.",
         ));
     }
-    Ok(content.trim().to_owned())
+    Ok(Completion {
+        content: content.trim().to_owned(),
+        usage,
+    })
 }
 
 fn provider_error(message: impl Into<String>) -> AppError {
@@ -398,6 +456,102 @@ fn connection_error(error: reqwest::Error) -> AppError {
 mod tests {
     use super::*;
     use axum::{response::IntoResponse, routing::post};
+
+    #[test]
+    fn token_usage_reads_cache_and_reasoning_details() {
+        let usage = token_usage(&serde_json::json!({
+            "usage": {
+                "prompt_tokens": 1200,
+                "completion_tokens": 340,
+                "total_tokens": 1540,
+                "prompt_tokens_details": {"cached_tokens": 1024},
+                "completion_tokens_details": {"reasoning_tokens": 200}
+            }
+        }))
+        .unwrap();
+        assert_eq!(usage.prompt_tokens, Some(1200));
+        assert_eq!(usage.cached_tokens, Some(1024));
+        assert_eq!(usage.reasoning_tokens, Some(200));
+        assert_eq!(usage.total_tokens, Some(1540));
+
+        let hit_only = token_usage(&serde_json::json!({
+            "usage": {"prompt_tokens": 10, "prompt_cache_hit_tokens": 8}
+        }))
+        .unwrap();
+        assert_eq!(hit_only.cached_tokens, Some(8));
+        assert!(token_usage(&serde_json::json!({"choices": []})).is_none());
+    }
+
+    #[tokio::test]
+    async fn complete_reads_usage_sent_after_the_finish_reason() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":2,\"total_tokens\":13,\"prompt_tokens_details\":{\"cached_tokens\":7},\"completion_tokens_details\":{\"reasoning_tokens\":1}}}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let app = Router::new().route(
+            "/v1/chat/completions",
+            post(move || async move { ([("content-type", "text/event-stream")], body.to_owned()) }),
+        );
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let result = complete(
+            &format!("http://{address}/v1"),
+            "test-model",
+            "",
+            serde_json::json!([{"role": "user", "content": "hi"}]),
+            32,
+            None,
+            Duration::from_secs(2),
+        )
+        .await;
+        server.abort();
+        let result = result.unwrap();
+        assert_eq!(result.content, "OK");
+        let usage = result.usage.unwrap();
+        assert_eq!(usage.prompt_tokens, Some(11));
+        assert_eq!(usage.cached_tokens, Some(7));
+        assert_eq!(usage.reasoning_tokens, Some(1));
+    }
+
+    #[tokio::test]
+    async fn complete_sends_reasoning_effort_only_when_requested() {
+        for expected in [Some("low"), None] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let app = Router::new().route(
+                "/v1/chat/completions",
+                post(move |Json(payload): Json<serde_json::Value>| async move {
+                    assert_eq!(
+                        payload.get("reasoning_effort").and_then(|value| value.as_str()),
+                        expected
+                    );
+                    (
+                        [("content-type", "text/event-stream")],
+                        "data: {\"choices\":[{\"delta\":{\"content\":\"OK\"}}]}\n\ndata: [DONE]\n\n",
+                    )
+                }),
+            );
+            let server = tokio::spawn(async move {
+                axum::serve(listener, app).await.unwrap();
+            });
+            let result = complete(
+                &format!("http://{address}/v1"),
+                "test-model",
+                "",
+                serde_json::json!([{"role": "user", "content": "hi"}]),
+                32,
+                expected,
+                Duration::from_secs(2),
+            )
+            .await;
+            server.abort();
+            assert_eq!(result.unwrap().content, "OK");
+        }
+    }
 
     #[tokio::test]
     async fn model_probe_handles_streamed_responses_and_provider_failures() {
@@ -539,11 +693,12 @@ mod tests {
             "",
             serde_json::json!([{"role": "user", "content": "hi"}]),
             32,
+            None,
             Duration::from_secs(2),
         )
         .await;
         server.abort();
-        assert_eq!(result.unwrap(), "Hello world");
+        assert_eq!(result.unwrap().content, "Hello world");
     }
 
     #[tokio::test]
@@ -581,11 +736,12 @@ mod tests {
             "",
             serde_json::json!([{"role": "user", "content": "hi"}]),
             32,
+            None,
             Duration::from_secs(2),
         )
         .await;
         server.abort();
-        assert_eq!(result.unwrap(), "你");
+        assert_eq!(result.unwrap().content, "你");
     }
 
     #[tokio::test]

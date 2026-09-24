@@ -1,5 +1,6 @@
 <script lang="ts">
   import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
+  import ChevronDown from '@lucide/svelte/icons/chevron-down';
   import TypeIcon from '@lucide/svelte/icons/type';
 
   import {
@@ -15,6 +16,7 @@
     type ReaderWidth,
   } from '../reader-preferences';
   import { Button, buttonVariants } from './ui/button';
+  import * as DropdownMenu from './ui/dropdown-menu';
   import * as Field from './ui/field';
   import * as Popover from './ui/popover';
   import * as ToggleGroup from './ui/toggle-group';
@@ -26,6 +28,11 @@
     onChange: (preferences: ReaderPreferences) => void;
     preferences: ReaderPreferences;
   } = $props();
+
+  const selectedFont = $derived(
+    READER_FONT_PRESETS.find((option) => option.value === preferences.fontPreset) ??
+      READER_FONT_PRESETS[0],
+  );
 
   function setFontPreset(value: string): void {
     if (!READER_FONT_PRESETS.some((option) => option.value === value)) return;
@@ -60,45 +67,71 @@
   >
     <TypeIcon />
   </Popover.Trigger>
-  <Popover.Content align="end" class="w-[min(22rem,calc(100vw-2rem))]" sideOffset={8}>
-    <Popover.Header>
+  <Popover.Content
+    align="end"
+    variant="menu"
+    class="max-h-[min(calc(100dvh-2rem),var(--bits-popover-content-available-height))] w-[min(20rem,calc(100vw-2rem))] gap-3 overflow-y-auto p-3"
+    sideOffset={8}
+  >
+    <div class="flex items-center justify-between gap-2">
       <Popover.Title>Reading preferences</Popover.Title>
-      <Popover.Description>Saved in this browser for Library articles.</Popover.Description>
-    </Popover.Header>
+      <Button
+        onclick={() => onChange({ ...DEFAULT_READER_PREFERENCES })}
+        size="sm"
+        variant="ghost"
+        class="max-md:min-h-11 pointer-coarse:min-h-11"
+      >
+        <RotateCcw data-icon="inline-start" />
+        Reset
+      </Button>
+    </div>
 
-    <Field.Group class="gap-5">
-      <Field.Field>
-        <Field.Title id="reader-font-label">Typeface</Field.Title>
-        <ToggleGroup.Root
-          aria-labelledby="reader-font-label"
-          class="w-full"
-          onValueChange={setFontPreset}
-          spacing={2}
-          type="single"
-          value={preferences.fontPreset}
-          variant="outline"
-        >
-          {#each READER_FONT_PRESETS as option}
-            <ToggleGroup.Item
-              aria-label={`${option.label} typeface`}
-              class="flex-auto px-2"
-              data-font-option={option.value}
-              value={option.value}
+    <Field.Group class="gap-2">
+      <Field.Field orientation="horizontal" class="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-2">
+        <Field.Title id="reader-font-label">Font</Field.Title>
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger>
+            {#snippet child({ props })}
+              <Button
+                {...props}
+                id="reader-font-trigger"
+                aria-labelledby="reader-font-label reader-font-value"
+                variant="outline"
+                size="sm"
+                class="w-full min-w-0 justify-between max-md:min-h-11 pointer-coarse:min-h-11"
+              >
+                <span id="reader-font-value" class="truncate">{selectedFont.label}</span>
+                <ChevronDown data-icon="inline-end" />
+              </Button>
+            {/snippet}
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Content align="end" class="w-56" sideOffset={4}>
+            <DropdownMenu.RadioGroup
+              value={preferences.fontPreset}
+              onValueChange={setFontPreset}
+              aria-labelledby="reader-font-label"
             >
-              <span aria-hidden="true" class="font-preview">Aa</span>
-              <span>{option.label}</span>
-            </ToggleGroup.Item>
-          {/each}
-        </ToggleGroup.Root>
+              {#each READER_FONT_PRESETS as option}
+                <DropdownMenu.RadioItem
+                  value={option.value}
+                  aria-label={`${option.label} typeface`}
+                  class="min-h-8 max-md:min-h-11 pointer-coarse:min-h-11"
+                >
+                  <span style:font-family={option.family}>{option.label}</span>
+                </DropdownMenu.RadioItem>
+              {/each}
+            </DropdownMenu.RadioGroup>
+          </DropdownMenu.Content>
+        </DropdownMenu.Root>
       </Field.Field>
 
-      <Field.Field>
-        <Field.Title id="reader-size-label">Text size</Field.Title>
+      <Field.Field orientation="horizontal" class="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-2">
+        <Field.Title id="reader-size-label">Size</Field.Title>
         <ToggleGroup.Root
           aria-labelledby="reader-size-label"
           class="w-full"
           onValueChange={setFontSize}
-          spacing={2}
+          size="sm"
           type="single"
           value={preferences.fontSize}
           variant="outline"
@@ -106,7 +139,7 @@
           {#each READER_FONT_SIZES as option}
             <ToggleGroup.Item
               aria-label={`${option.label} pixel text`}
-              class="flex-1"
+              class="min-w-0 flex-1 max-md:min-h-11 pointer-coarse:min-h-11"
               value={option.value}
             >
               {option.label}
@@ -115,30 +148,35 @@
         </ToggleGroup.Root>
       </Field.Field>
 
-      <Field.Field>
-        <Field.Title id="reader-spacing-label">Line spacing</Field.Title>
+      <Field.Field orientation="horizontal" class="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-2">
+        <Field.Title id="reader-spacing-label">Spacing</Field.Title>
         <ToggleGroup.Root
           aria-labelledby="reader-spacing-label"
           class="w-full"
           onValueChange={setLineHeight}
-          spacing={2}
+          size="sm"
           type="single"
           value={preferences.lineHeight}
           variant="outline"
         >
           {#each READER_LINE_HEIGHTS as option}
-            <ToggleGroup.Item class="flex-1" value={option.value}>{option.label}</ToggleGroup.Item>
+            <ToggleGroup.Item
+              class="min-w-0 flex-1 max-md:min-h-11 pointer-coarse:min-h-11"
+              value={option.value}
+            >
+              {option.label}
+            </ToggleGroup.Item>
           {/each}
         </ToggleGroup.Root>
       </Field.Field>
 
-      <Field.Field>
-        <Field.Title id="reader-width-label">Article width</Field.Title>
+      <Field.Field orientation="horizontal" class="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-2">
+        <Field.Title id="reader-width-label">Width</Field.Title>
         <ToggleGroup.Root
           aria-labelledby="reader-width-label"
           class="w-full"
           onValueChange={setWidth}
-          spacing={2}
+          size="sm"
           type="single"
           value={preferences.width}
           variant="outline"
@@ -146,7 +184,7 @@
           {#each READER_WIDTHS as option}
             <ToggleGroup.Item
               aria-label={`${option.label} article width`}
-              class="flex-1"
+              class="min-w-0 flex-1 max-md:min-h-11 pointer-coarse:min-h-11"
               value={option.value}
             >
               {option.label}
@@ -155,44 +193,5 @@
         </ToggleGroup.Root>
       </Field.Field>
     </Field.Group>
-
-    <div class="preference-footer">
-      <Button onclick={() => onChange({ ...DEFAULT_READER_PREFERENCES })} size="sm" variant="ghost">
-        <RotateCcw data-icon="inline-start" />
-        Reset
-      </Button>
-    </div>
   </Popover.Content>
 </Popover.Root>
-
-<style>
-  .preference-footer {
-    display: flex;
-    justify-content: flex-end;
-  }
-
-  :global([data-font-option]) {
-    height: auto;
-    min-height: 56px;
-    flex-direction: column;
-    gap: 1px;
-  }
-
-  .font-preview {
-    font-size: 17px;
-    font-weight: 600;
-    line-height: 1;
-  }
-
-  :global([data-font-option='plex'] .font-preview) {
-    font-family: 'IBM Plex Sans Variable', sans-serif;
-  }
-
-  :global([data-font-option='sans'] .font-preview) {
-    font-family: var(--font-sans);
-  }
-
-  :global([data-font-option='system'] .font-preview) {
-    font-family: ui-sans-serif, system-ui, sans-serif;
-  }
-</style>

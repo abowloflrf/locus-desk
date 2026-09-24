@@ -1,5 +1,6 @@
 <script lang="ts">
   import '../vitesse-light.css';
+  import '../reader-fonts.css';
   import ArrowLeft from '@lucide/svelte/icons/arrow-left';
   import BookOpenCheck from '@lucide/svelte/icons/book-open-check';
   import ExternalLink from '@lucide/svelte/icons/external-link';
@@ -20,6 +21,7 @@
   import {
     DEFAULT_READER_PREFERENCES,
     loadReaderPreferences,
+    readerFontFamily,
     saveReaderPreferences,
     type ReaderPreferences,
   } from '../reader-preferences';
@@ -280,6 +282,7 @@
   data-reader-line-height={readerPreferences.lineHeight}
   data-reader-size={readerPreferences.fontSize}
   data-reader-width={readerPreferences.width}
+  style:--reader-font-sans={readerFontFamily(readerPreferences.fontPreset)}
 >
   <header
     bind:this={readerToolbar}
@@ -535,17 +538,6 @@
     min-height: 100%;
     padding: 24px var(--reader-gutter) 88px;
     animation: reader-enter 180ms ease both;
-  }
-
-  .library-reader[data-reader-font='plex'] {
-    --reader-font-sans: 'IBM Plex Sans Variable', 'Noto Sans SC', sans-serif;
-  }
-
-  .library-reader[data-reader-font='system'] {
-    --reader-font-sans:
-      ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC',
-      'PingFang SC', 'Microsoft YaHei', sans-serif;
-    --reader-font-mono: ui-monospace, 'SFMono-Regular', Consolas, monospace;
   }
 
   .library-reader[data-reader-size='small'] {
