@@ -7,6 +7,7 @@ pub mod content;
 pub mod data_management;
 pub mod db;
 pub mod error;
+mod hash;
 pub mod jobs;
 pub mod library;
 pub mod notes;

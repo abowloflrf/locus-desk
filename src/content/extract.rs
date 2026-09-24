@@ -3,10 +3,10 @@ use std::collections::{HashMap, HashSet};
 use ammonia::{Builder, UrlRelative};
 use chrono::{DateTime, NaiveDate, NaiveDateTime};
 use scraper::{ElementRef, Html, Selector};
-use sha2::{Digest, Sha256};
 use url::Url;
 
 use super::{ContentError, MAX_READER_BYTES, MAX_SOURCE_BYTES};
+use crate::hash::sha256_hex;
 
 const MAX_URL_BYTES: usize = 8_192;
 const MAX_TITLE_CHARACTERS: usize = 1_000;
@@ -50,7 +50,7 @@ pub fn extract_document(
         .map(|value| truncate_chars(&value, MAX_EXCERPT_CHARACTERS))
         .filter(|value| !value.is_empty())
         .unwrap_or_default();
-    let content_hash = format!("{:x}", Sha256::digest(safe_html.as_bytes()));
+    let content_hash = sha256_hex(safe_html.as_bytes());
 
     Ok(ExtractedDocument {
         final_url: final_url.to_string(),
@@ -825,7 +825,7 @@ mod tests {
         assert_eq!(extracted.source_html, source);
         assert_eq!(
             extracted.content_hash,
-            format!("{:x}", Sha256::digest(extracted.safe_html.as_bytes()))
+            sha256_hex(extracted.safe_html.as_bytes())
         );
     }
 

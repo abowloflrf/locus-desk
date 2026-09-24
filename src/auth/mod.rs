@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
 };
 
-use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::SaltString};
+use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use axum_extra::extract::cookie::{Cookie, SameSite};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use cookie::time::Duration as CookieDuration;
@@ -437,9 +437,8 @@ where
 fn hash_password_sync(password: &str) -> AppResult<String> {
     let mut salt = [0_u8; 16];
     getrandom::fill(&mut salt).map_err(|_| AppError::Random)?;
-    let salt = SaltString::encode_b64(&salt).map_err(|_| AppError::Password)?;
     Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
+        .hash_password_with_salt(password.as_bytes(), &salt)
         .map(|hash| hash.to_string())
         .map_err(|_| AppError::Password)
 }
@@ -629,6 +628,28 @@ mod tests {
         assert!(login_password_too_long(
             &"界".repeat(MAX_PASSWORD_BYTES / "界".len() + 1)
         ));
+    }
+
+    #[test]
+    fn password_hashes_verify_across_argon2_versions() {
+        // Argon2 0.5.3 reference hash for "password" with salt "somesalt".
+        let legacy = PasswordHash::new(
+            "$argon2id$v=19$m=65536,t=2,p=1$c29tZXNhbHQ$CTFhFdXPJO1aFaMaO6Mm5c8y7cJHAph8ArZWb2GRPPc",
+        )
+        .unwrap();
+        assert!(
+            Argon2::default()
+                .verify_password(b"password", &legacy)
+                .is_ok()
+        );
+
+        let encoded = hash_password_sync("new-password").unwrap();
+        let generated = PasswordHash::new(&encoded).unwrap();
+        assert!(
+            Argon2::default()
+                .verify_password(b"new-password", &generated)
+                .is_ok()
+        );
     }
 
     #[test]

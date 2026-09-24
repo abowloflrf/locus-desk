@@ -31,11 +31,11 @@ Requirements:
 
 - Rust 1.97.1
 - Node.js 24
-- pnpm 12.3.4
+- pnpm 12.6.0
 - GNU Make
 
 ```bash
-npm install --global pnpm@12.3.4
+npm install --global pnpm@12.6.0
 make install
 
 # Set owner credentials before starting an empty database.

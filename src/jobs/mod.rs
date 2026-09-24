@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use sha2::{Digest, Sha256};
 use sqlx::{FromRow, Sqlite, SqlitePool, Transaction};
 use tokio::sync::watch;
 use ulid::Ulid;
@@ -11,6 +10,7 @@ use crate::{
         ExtractedDocument, MAX_READER_BYTES, MAX_SOURCE_BYTES, PageFetcher, SecurePageFetcher,
     },
     error::{AppError, AppResult},
+    hash::sha256_hex,
     state::AppState,
 };
 
@@ -769,10 +769,6 @@ fn truncate_utf8(value: &str, max_bytes: usize) -> &str {
         end -= 1;
     }
     &value[..end]
-}
-
-fn sha256_hex(body: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(body))
 }
 
 async fn wait_or_shutdown(shutdown: &mut watch::Receiver<bool>, duration: Duration) -> bool {
