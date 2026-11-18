@@ -209,7 +209,7 @@
     >
   {/if}
   <div class="task-metadata">
-    <Popover.Root open={detailsOpen} onOpenChange={changeDetailsOpen}>
+    <Popover.Root bind:open={() => detailsOpen, changeDetailsOpen}>
       <Popover.Trigger>
         {#snippet child({ props })}
           <Button

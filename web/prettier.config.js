@@ -9,6 +9,7 @@ export default {
       files: '*.svelte',
       options: {
         parser: 'svelte',
+        htmlWhitespaceSensitivity: 'strict',
       },
     },
   ],

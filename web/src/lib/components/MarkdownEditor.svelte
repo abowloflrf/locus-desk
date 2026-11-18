@@ -256,11 +256,7 @@
 </script>
 
 <div class="markdown-editor">
-  <div
-    aria-busy={loading}
-    bind:this={host}
-    class:failed={Boolean(loadError)}
-    class="editor-mount"
+  <div aria-busy={loading} bind:this={host} class:failed={Boolean(loadError)} class="editor-mount"
   ></div>
   {#if loadError}<p class="editor-load-error" role="alert">{loadError}</p>{/if}
 </div>

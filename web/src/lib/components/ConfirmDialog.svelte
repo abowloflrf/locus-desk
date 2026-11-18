@@ -48,7 +48,7 @@
   }
 </script>
 
-<AlertDialog.Root {open} onOpenChange={handleOpenChange}>
+<AlertDialog.Root bind:open={() => open, handleOpenChange}>
   <AlertDialog.Content>
     <AlertDialog.Header>
       <AlertDialog.Title>{title}</AlertDialog.Title>

@@ -4,15 +4,15 @@ FROM node:24-bookworm-slim AS web-builder
 
 WORKDIR /app/web
 
-RUN npm install --global pnpm@12.6.0
+RUN npm install --global 'pnpm@^12.21.0'
 
-COPY web/package.json web/pnpm-lock.yaml ./
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
 COPY web/ ./
 RUN pnpm build
 
-FROM rust:1.97.1-bookworm AS rust-builder
+FROM rust:1.100.0-bookworm AS rust-builder
 
 WORKDIR /app
 ARG LOCUS_GIT_COMMIT=unknown

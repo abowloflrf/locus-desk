@@ -73,7 +73,7 @@
   }
 </script>
 
-<Dialog.Root {open} onOpenChange={handleOpenChange}>
+<Dialog.Root bind:open={() => open, handleOpenChange}>
   <Dialog.Trigger
     bind:ref={triggerButton}
     aria-label="Add a link"

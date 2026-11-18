@@ -73,7 +73,7 @@ describe('inline editor focus', () => {
     }
   });
 
-  it('moves focus into and back out of the note editor', async () => {
+  it('preserves the memo height while moving focus into and back out of its editor', async () => {
     const target = document.createElement('div');
     document.body.append(target);
     const component = mount(NoteItem, {
@@ -88,10 +88,15 @@ describe('inline editor focus', () => {
     });
 
     try {
+      const card = target.querySelector<HTMLElement>('.note-item')!;
+      vi.spyOn(card, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 386, 358, 350));
       (await openAction(target, 'More memo actions', 'Edit memo')).click();
+      await tick();
+      expect(card.style.minHeight).toBe('350px');
       await vi.waitFor(() =>
         expect(document.activeElement?.classList.contains('cm-content')).toBe(true),
       );
+      expect(card.style.minHeight).toBe('350px');
       expect(target.querySelector('.cm-editor')).not.toBeNull();
       expect(document.activeElement?.getAttribute('aria-label')).toBe('Edit memo');
       expect(target.querySelector('.note-item')?.classList.contains('editing')).toBe(true);
@@ -104,6 +109,7 @@ describe('inline editor focus', () => {
         expect(document.activeElement?.getAttribute('aria-label')).toBe('More memo actions'),
       );
       expect(target.querySelector('.note-item')?.classList.contains('editing')).toBe(false);
+      expect(card.style.minHeight).toBe('');
     } finally {
       await unmount(component);
     }

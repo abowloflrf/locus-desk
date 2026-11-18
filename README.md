@@ -29,13 +29,13 @@ See the [living design document](docs/rust-svelte-mvp-design.md) for the product
 
 Requirements:
 
-- Rust 1.97.1
-- Node.js 24
-- pnpm 12.6.0
+- Rust 1.100.0
+- Node.js 24.22.3 or newer in the 24.x line
+- pnpm 12.21.0 or newer in the 12.x line
 - GNU Make
 
 ```bash
-npm install --global pnpm@12.6.0
+npm install --global 'pnpm@^12.21.0'
 make install
 
 # Set owner credentials before starting an empty database.
@@ -194,6 +194,9 @@ make docker-up
 ```
 
 Docker builds and Compose services use host networking. Application data is stored in the `locus-desk_locus-data` volume.
+
+`make docker-up` first builds and loads the image with explicit `network.host` permission, then starts
+Compose with `--no-build`. This avoids Bake's host-network permission prompt during Compose builds.
 
 Compose requires both owner credential variables on every invocation, even after the database is
 initialized; the application still preserves the stored account. Compose defaults to

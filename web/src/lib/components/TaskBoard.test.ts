@@ -253,8 +253,51 @@ describe('Task list redesign', () => {
     }
   });
 
-  it('keeps delete outside the date menu, confirms deletion and focuses the neighbor', async () => {
-    vi.mocked(deleteTask).mockResolvedValue(undefined);
+  it('keeps task details open until saving finishes', async () => {
+    const alpha = task('Alpha');
+    let finishSave: ((value: Task) => void) | undefined;
+    vi.mocked(updateTask).mockImplementationOnce(
+      () =>
+        new Promise<Task>((resolve) => {
+          finishSave = resolve;
+        }),
+    );
+    const { target, component } = await setup([alpha]);
+    try {
+      const trigger = button('Details for Alpha', target);
+      trigger.click();
+      const save = await textButton('Save');
+      const details = document.body.querySelector<HTMLTextAreaElement>('#task-details-Alpha')!;
+      details.value = 'Remember this';
+      details.dispatchEvent(new Event('input', { bubbles: true }));
+      await tick();
+      save.click();
+      await vi.waitFor(() =>
+        expect(updateTask).toHaveBeenCalledExactlyOnceWith('Alpha', {
+          description: 'Remember this',
+        }),
+      );
+      details.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+      );
+      await tick();
+      expect(document.body.querySelector('#task-details-Alpha')).toBe(details);
+      finishSave?.({ ...alpha, description: 'Remember this' });
+      await vi.waitFor(() => expect(document.body.querySelector('#task-details-Alpha')).toBeNull());
+      await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it('keeps delete confirmation open until deletion finishes and focuses the neighbor', async () => {
+    let finishDelete: (() => void) | undefined;
+    vi.mocked(deleteTask).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishDelete = resolve;
+        }),
+    );
     const { target, component } = await setup([task('Alpha'), task('Beta')]);
     try {
       button('Details for Alpha', target).click();
@@ -270,6 +313,14 @@ describe('Task list redesign', () => {
       expect(deleteTask).not.toHaveBeenCalled();
       confirm.click();
       await vi.waitFor(() => expect(deleteTask).toHaveBeenCalledWith('Alpha'));
+      await vi.waitFor(() => expect(confirm.disabled).toBe(true));
+      const dialog = confirm.closest('[role="alertdialog"]')!;
+      dialog.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+      );
+      await tick();
+      expect(document.body.querySelector('[role="alertdialog"]')).toBe(dialog);
+      finishDelete?.();
       await vi.waitFor(() =>
         expect(
           document.activeElement?.closest('[data-focus-uid]')?.getAttribute('data-focus-uid'),

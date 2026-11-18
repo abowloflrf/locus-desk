@@ -67,12 +67,16 @@
   }
 
   let editing = $state(false);
+  let noteElement = $state<HTMLElement | null>(null);
+  let editMinHeight = $state(0);
   let actionsOpen = $state(false);
   let draft = $state('');
   let editError = $state<string | null>(null);
   let moreButton = $state<HTMLButtonElement | null>(null);
 
   function beginEdit(): void {
+    // Keep the loading editor from shrinking the scroll range at the end of the list.
+    editMinHeight = noteElement?.getBoundingClientRect().height ?? 0;
     draft = note.content;
     editError = null;
     editing = true;
@@ -119,11 +123,13 @@
 </script>
 
 <article
+  bind:this={noteElement}
   class:editing
   class:note-pinned={note.pinned}
   class="note-item list-action-row"
   data-actions-open={actionsOpen}
   data-focus-uid={note.uid}
+  style:min-height={editing ? `${editMinHeight}px` : undefined}
   tabindex="-1"
 >
   <div class="note-meta">
@@ -307,8 +313,9 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     gap: 2px;
+    align-content: start;
     align-items: start;
-    padding: 12px;
+    padding: 12px 16px;
     overflow: visible;
     background: var(--card);
     border: 1px solid var(--border);
@@ -405,7 +412,6 @@
   @media (max-width: 767px) {
     .note-item {
       gap: 0;
-      padding: 12px;
     }
 
     .note-preview :global(.prose-content) {

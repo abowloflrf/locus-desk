@@ -41,10 +41,10 @@ web-build:
 	cd web && pnpm build
 
 docker-build:
-	docker build --network=host --build-arg LOCUS_GIT_COMMIT="$$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)" --tag locus-desk:local .
+	docker build --allow=network.host --network=host --load --build-arg LOCUS_GIT_COMMIT="$$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)" --tag locus-desk:local .
 
-docker-up:
-	LOCUS_GIT_COMMIT="$$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)" docker compose --file docker-compose.yml up --build -d
+docker-up: docker-build
+	docker compose --file docker-compose.yml up --no-build -d
 
 docker-down:
 	docker compose --file docker-compose.yml down

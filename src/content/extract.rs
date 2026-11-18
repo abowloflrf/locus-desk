@@ -239,7 +239,7 @@ fn normalize_reader_markup(input: &str, base_url: &Url) -> String {
             name.local = "data-language".into();
             element
                 .attrs
-                .retain(|(key, _)| key.local.as_ref() != "data-language");
+                .retain(|(key, _)| key.local.as_str() != "data-language");
             element.attrs.push((name, language.into()));
         }
     }
