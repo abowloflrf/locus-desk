@@ -136,7 +136,7 @@ impl SecurePageFetcher {
         if addresses.is_empty() {
             return Err(ContentError::DnsResolutionFailed);
         }
-        if addresses.iter().any(|address| !is_public_ip(address.ip())) {
+        if addresses.iter().any(|address| !is_allowed_ip(address.ip())) {
             return Err(ContentError::UnsafeAddress);
         }
 
@@ -405,15 +405,16 @@ fn is_html_content_type(content_type: Option<&str>) -> bool {
         })
 }
 
-fn is_public_ip(address: IpAddr) -> bool {
+fn is_allowed_ip(address: IpAddr) -> bool {
     match address {
-        IpAddr::V4(address) => is_public_ipv4(address),
+        IpAddr::V4(address) => is_allowed_ipv4(address),
         IpAddr::V6(address) => is_public_ipv6(address),
     }
 }
 
-fn is_public_ipv4(address: Ipv4Addr) -> bool {
+fn is_allowed_ipv4(address: Ipv4Addr) -> bool {
     let address = u32::from(address);
+    // Allow 198.18.0.0/15 for networks that use it for Fake-IP DNS.
     ![
         ("0.0.0.0", 8),
         ("10.0.0.0", 8),
@@ -425,7 +426,6 @@ fn is_public_ipv4(address: Ipv4Addr) -> bool {
         ("192.0.2.0", 24),
         ("192.88.99.0", 24),
         ("192.168.0.0", 16),
-        ("198.18.0.0", 15),
         ("198.51.100.0", 24),
         ("203.0.113.0", 24),
         ("224.0.0.0", 4),
@@ -545,7 +545,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_non_public_ip_ranges() {
+    fn rejects_restricted_ip_ranges() {
         let blocked = [
             "0.0.0.0",
             "10.0.0.1",
@@ -557,7 +557,6 @@ mod tests {
             "192.0.2.1",
             "192.88.99.1",
             "192.168.1.1",
-            "198.18.0.1",
             "198.51.100.1",
             "203.0.113.1",
             "224.0.0.1",
@@ -580,22 +579,25 @@ mod tests {
         ];
         for address in blocked {
             assert!(
-                !is_public_ip(IpAddr::from_str(address).expect("valid test IP")),
+                !is_allowed_ip(IpAddr::from_str(address).expect("valid test IP")),
                 "{address}"
             );
         }
     }
 
     #[test]
-    fn permits_public_unicast_addresses() {
+    fn permits_public_and_fake_ip_addresses() {
         for address in [
             "1.1.1.1",
             "8.8.8.8",
+            "198.18.0.0",
+            "198.18.21.224",
+            "198.19.255.255",
             "2001:4860:4860::8888",
             "2606:4700:4700::1111",
         ] {
             assert!(
-                is_public_ip(IpAddr::from_str(address).expect("valid test IP")),
+                is_allowed_ip(IpAddr::from_str(address).expect("valid test IP")),
                 "{address}"
             );
         }
