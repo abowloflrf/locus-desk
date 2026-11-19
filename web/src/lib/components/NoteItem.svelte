@@ -9,6 +9,7 @@
 
   import { errorMessage } from '../api/client';
   import type { Note } from '../api/types';
+  import { getMemoDrafts } from '../memo-drafts';
   import { formatNoteTimestamp } from '../utils/date';
   import MarkdownEditor from './MarkdownEditor.svelte';
   import MarkdownContent from './MarkdownContent.svelte';
@@ -73,23 +74,38 @@
   let draft = $state('');
   let editError = $state<string | null>(null);
   let moreButton = $state<HTMLButtonElement | null>(null);
+  const drafts = getMemoDrafts();
+  const savedDraft = $derived(drafts?.read(note.uid) ?? null);
 
   function beginEdit(): void {
     // Keep the loading editor from shrinking the scroll range at the end of the list.
     editMinHeight = noteElement?.getBoundingClientRect().height ?? 0;
-    draft = note.content;
+    draft = savedDraft ?? note.content;
     editError = null;
     editing = true;
+  }
+
+  function updateDraft(value: string): void {
+    draft = value;
+    drafts?.write(note.uid, value === note.content ? null : value);
   }
 
   async function closeEditor(): Promise<void> {
     editing = false;
     editError = null;
     await tick();
-    moreButton?.focus();
+    moreButton?.focus({ preventScroll: true });
+  }
+
+  function cancelEdit(): void {
+    if (busy) return;
+    drafts?.write(note.uid, null);
+    void closeEditor();
   }
 
   async function save(): Promise<void> {
+    if (busy) return;
+    const uid = note.uid;
     const submittedDraft = draft;
     if (!submittedDraft.trim()) {
       editError = 'A memo cannot be empty.';
@@ -99,6 +115,7 @@
     editError = null;
     try {
       await onSave(note, submittedDraft);
+      if (drafts?.read(uid) === submittedDraft) drafts.write(uid, null);
       await closeEditor();
     } catch (cause) {
       editError = errorMessage(cause, 'Unable to save the memo.');
@@ -144,17 +161,15 @@
           label="Edit memo"
           invalid={Boolean(editError)}
           describedBy={editError ? `edit-note-error-${note.uid}` : undefined}
-          onCancel={() => void closeEditor()}
+          onCancel={cancelEdit}
           onSave={() => void save()}
-          bind:value={draft}
+          bind:value={() => draft, updateDraft}
         />
         {#if editError}
           <Field.Error class="mt-2" id={`edit-note-error-${note.uid}`}>{editError}</Field.Error>
         {/if}
         <div class="inline-form-actions">
-          <Button disabled={busy} onclick={() => void closeEditor()} variant="secondary"
-            >Cancel</Button
-          >
+          <Button disabled={busy} onclick={cancelEdit} variant="secondary">Cancel</Button>
           <Button disabled={busy || !draft.trim()} onclick={() => void save()}>
             {#if busy}<Spinner data-icon="inline-start" />{/if}
             {busy ? 'Saving…' : 'Save'}
@@ -202,6 +217,11 @@
             </Button>
           {/each}
         </div>
+      {/if}
+      {#if savedDraft !== null}
+        <Button class="mt-2" disabled={busy} onclick={beginEdit} size="sm" variant="secondary">
+          Resume draft
+        </Button>
       {/if}
     {/if}
   </div>

@@ -47,6 +47,54 @@ afterEach(() => {
 });
 
 describe('NotesPage request ordering', () => {
+  it('keeps loaded memos on a pagination failure and refreshes the full loaded range after saving', async () => {
+    const firstPage = Array.from({ length: 30 }, (_, index) => note(`Memo ${index}`));
+    const older = note('Older memo');
+    const saved = note('New memo');
+    vi.mocked(listNotes)
+      .mockResolvedValueOnce({ items: firstPage, page: 1, pageSize: 30, total: 31 })
+      .mockRejectedValueOnce(new Error('Could not fetch page two'))
+      .mockResolvedValueOnce({ items: [older], page: 2, pageSize: 30, total: 31 })
+      .mockResolvedValueOnce({
+        items: [saved, ...firstPage.slice(0, 29)],
+        page: 1,
+        pageSize: 30,
+        total: 32,
+      })
+      .mockResolvedValueOnce({ items: [firstPage[29], older], page: 2, pageSize: 30, total: 32 });
+    vi.mocked(listTags).mockResolvedValue({ items: [] });
+    vi.mocked(createNote).mockResolvedValue(saved);
+    const target = document.createElement('div');
+    document.body.append(target);
+    const component = mount(NotesPage, { props: { session }, target });
+    const rows = () => target.querySelectorAll('[data-focus-uid]');
+    const continuation = () => target.querySelector<HTMLButtonElement>('[data-list-continuation]');
+
+    try {
+      await vi.waitFor(() => expect(rows()).toHaveLength(30));
+      continuation()?.click();
+      await vi.waitFor(() => expect(target.textContent).toContain('Could not fetch page two'));
+      expect(rows()).toHaveLength(30);
+      continuation()?.click();
+      await vi.waitFor(() => expect(rows()).toHaveLength(31));
+
+      const composer = target.querySelector<HTMLTextAreaElement>('#note-composer-input')!;
+      composer.value = saved.content;
+      composer.dispatchEvent(new Event('input', { bubbles: true }));
+      const save = target.querySelector<HTMLButtonElement>('.composer-submit')!;
+      await vi.waitFor(() => expect(save.disabled).toBe(false));
+      save.click();
+      await vi.waitFor(() => expect(listNotes).toHaveBeenCalledTimes(5));
+      await vi.waitFor(() => expect(rows()).toHaveLength(32));
+      expect(target.textContent).toContain(older.content);
+      expect(vi.mocked(listNotes).mock.calls.map(([params]) => params?.page)).toEqual([
+        1, 2, 2, 1, 2,
+      ]);
+    } finally {
+      await unmount(component);
+    }
+  });
+
   it('shows every tag inline and filters by the third tag without opening a menu', async () => {
     const tags = ['dev', 'llm', 'visa'];
     vi.mocked(listNotes).mockResolvedValue(page([]));

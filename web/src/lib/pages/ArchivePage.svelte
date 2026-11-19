@@ -1,27 +1,45 @@
 <script lang="ts">
   import SearchField from '../components/SearchField.svelte';
-  import { onMount } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
 
   import { errorMessage } from '../api/client';
   import { deleteNote, listNotes, updateNote } from '../api/notes';
   import type { Note, SessionInfo } from '../api/types';
+  import type { MemoListView } from '../memo-view';
+  import { provideMemoDrafts } from '../memo-drafts';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import NoteTimeline from '../components/NoteTimeline.svelte';
+  import ListContinuation from '../components/ListContinuation.svelte';
   import StatusMessage from '../components/StatusMessage.svelte';
   import { Button } from '../components/ui/button';
   import * as Empty from '../components/ui/empty';
   import { Spinner } from '../components/ui/spinner';
-  import { captureListFocus, restoreListFocus, type ListFocusSnapshot } from '../utils/focus';
+  import {
+    captureListFocus,
+    captureListScroll,
+    focusAppendedRow,
+    restoreListFocus,
+    type ListFocusSnapshot,
+  } from '../utils/focus';
 
-  let { session }: { session: SessionInfo } = $props();
+  import {
+    fetchLoadedPages,
+    mergePageItems,
+    type ListContinuationError,
+    type ListLoad,
+  } from '../utils/pagination';
+
+  let { session, listView }: { session: SessionInfo; listView?: MemoListView } = $props();
 
   let notes = $state<Note[]>([]);
-  let query = $state('');
-  let page = $state(1);
+  const drafts = provideMemoDrafts(() => session);
+  let query = $state(untrack(() => listView?.query ?? ''));
+  let page = $state(0);
   let total = $state(0);
   let loading = $state(true);
   let loadingMore = $state(false);
   let loadError = $state<string | null>(null);
+  let continuationError = $state<ListContinuationError | null>(null);
   let operationError = $state<string | null>(null);
   let actionStatus = $state<string | null>(null);
   let busyUids = $state<Set<string>>(new Set());
@@ -33,35 +51,77 @@
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
   let deleteFocusSnapshot: ListFocusSnapshot | null = null;
   let requestId = 0;
+  let disposed = false;
 
   onMount(() => {
-    void loadArchive(true);
+    void restoreMemoList(listView?.pages ?? 1, listView?.scrollTop ?? 0);
     return () => {
-      controller?.abort();
+      disposed = true;
+      invalidateArchiveRequest();
       if (searchTimer) clearTimeout(searchTimer);
     };
   });
 
-  async function loadArchive(reset: boolean): Promise<void> {
-    const nextPage = reset ? 1 : page + 1;
+  async function restoreMemoList(pages: number, scrollTop: number): Promise<void> {
+    if (!(await loadArchive('reset'))) return;
+    if (pages > page && !(await loadArchive('refresh', pages))) return;
+    const id = requestId;
+    await tick();
+    if (id !== requestId) return;
+    const scroller = pageElement?.closest<HTMLElement>('.workspace-column');
+    if (scroller) scroller.scrollTop = scrollTop;
+  }
+
+  async function loadArchive(load: ListLoad, lastPage = Math.max(1, page)): Promise<boolean> {
+    if (disposed) return false;
+    if (load === 'append' && (loading || loadingMore || page === 0)) return false;
+    const continuation =
+      load === 'append' || load === 'refresh'
+        ? pageElement?.querySelector('[data-list-continuation]')
+        : null;
     const id = ++requestId;
     controller?.abort();
-    controller = new AbortController();
-    if (reset) loading = true;
-    else loadingMore = true;
+    const { signal } = (controller = new AbortController());
+    loading = load !== 'append';
+    loadingMore = load === 'append';
     loadError = null;
+    if (load === 'reset') continuationError = null;
+
+    const fetchPage = (nextPage: number) =>
+      listNotes({ page: nextPage, pageSize: 30, q: query, status: 'ARCHIVED' }, signal);
     try {
-      const response = await listNotes(
-        { page: nextPage, pageSize: 30, q: query, status: 'ARCHIVED' },
-        controller.signal,
-      );
-      if (id !== requestId) return;
-      notes = reset ? response.items : [...notes, ...response.items];
+      const response =
+        load === 'refresh'
+          ? await fetchLoadedPages(lastPage, fetchPage, signal)
+          : await fetchPage(load === 'reset' ? 1 : page + 1);
+      if (id !== requestId || signal.aborted) return false;
+
+      continuationError = null;
+      const restoreScroll = load === 'refresh' ? captureListScroll(pageElement) : undefined;
+      const nextFocusUid =
+        continuation === document.activeElement
+          ? response.items.find((item) => !notes.some((visible) => visible.uid === item.uid))?.uid
+          : undefined;
+      const result = load === 'append' ? mergePageItems(notes, response.items) : response.items;
+      notes = result;
       page = response.page;
       total = response.total;
+      if (listView) listView.pages = page;
+      if (restoreScroll) {
+        await tick();
+        if (id === requestId && !signal.aborted) restoreScroll();
+      }
+      if (continuation && nextFocusUid && id === requestId && !signal.aborted) {
+        await focusAppendedRow(pageElement, continuation, nextFocusUid);
+      }
+      return id === requestId && !signal.aborted;
     } catch (cause) {
-      if (cause instanceof DOMException && cause.name === 'AbortError') return;
-      if (id === requestId) loadError = errorMessage(cause, 'Unable to load the archive.');
+      if (id === requestId && !signal.aborted) {
+        const message = errorMessage(cause, 'Unable to load the archive.');
+        if (load === 'reset' || page === 0) loadError = message;
+        else continuationError = { load, message, lastPage };
+      }
+      return false;
     } finally {
       if (id === requestId) {
         loading = false;
@@ -72,10 +132,12 @@
 
   function handleSearch(event: Event): void {
     query = (event.currentTarget as HTMLInputElement).value;
+    if (listView) listView.query = query;
+    resetPagination();
     if (searchTimer) clearTimeout(searchTimer);
     invalidateArchiveRequest();
     loading = true;
-    searchTimer = setTimeout(() => void loadArchive(true), 250);
+    searchTimer = setTimeout(() => void loadArchive('reset'), 250);
   }
 
   async function handleRestore(note: Note): Promise<void> {
@@ -94,7 +156,7 @@
       notes = notes.filter((item) => item.uid !== note.uid);
       if (returnedDuringRequest) total = Math.max(0, total - 1);
       actionStatus = 'Memo restored.';
-      void loadArchive(true);
+      void loadArchive('refresh');
     } catch (cause) {
       const matchesQuery =
         !query.trim() ||
@@ -106,7 +168,7 @@
         total += 1;
       }
       operationError = errorMessage(cause, 'Unable to restore the memo.');
-      void loadArchive(true);
+      void loadArchive('refresh');
     } finally {
       markBusy(note.uid, false);
     }
@@ -131,10 +193,10 @@
           await restoreListFocus(pageElement, focusSnapshot);
         }
       }
-      void loadArchive(true);
+      void loadArchive('refresh');
     } catch (cause) {
       operationError = errorMessage(cause, 'Unable to save the memo.');
-      void loadArchive(true);
+      void loadArchive('refresh');
       throw cause;
     } finally {
       markBusy(note.uid, false);
@@ -149,15 +211,16 @@
     deleteError = null;
     try {
       await deleteNote(note.uid);
+      drafts.write(note.uid, null);
       notes = notes.filter((item) => item.uid !== note.uid);
       total = Math.max(0, total - 1);
       pendingDelete = null;
       deleteError = null;
       actionStatus = 'Memo deleted.';
-      void loadArchive(true);
+      void loadArchive('refresh');
     } catch (cause) {
       deleteError = errorMessage(cause, 'Unable to delete the memo.');
-      void loadArchive(true);
+      void loadArchive('refresh');
     } finally {
       deleteBusy = false;
     }
@@ -194,6 +257,12 @@
     if (busy) next.add(uid);
     else next.delete(uid);
     busyUids = next;
+  }
+
+  function resetPagination(): void {
+    page = 0;
+    continuationError = null;
+    if (listView) listView.pages = 1;
   }
 
   function invalidateArchiveRequest(): void {
@@ -239,7 +308,7 @@
         <Empty.Description>{loadError}</Empty.Description>
       </Empty.Header>
       <Empty.Content>
-        <Button onclick={() => void loadArchive(true)} variant="secondary">Try again</Button>
+        <Button onclick={() => void loadArchive('reset')} variant="secondary">Try again</Button>
       </Empty.Content>
     </Empty.Root>
   {:else if notes.length === 0}
@@ -263,18 +332,15 @@
       onSave={handleSave}
       timeZone={session.workspace.timezone}
     />
-    {#if notes.length < total}
-      <Button
-        class="load-more"
-        disabled={loadingMore}
-        onclick={() => void loadArchive(false)}
-        variant="secondary"
-      >
-        {#if loadingMore}<Spinner data-icon="inline-start" />{/if}
-        {loadingMore ? 'Loading…' : 'Load older memos'}
-      </Button>
-    {/if}
   {/if}
+  <ListContinuation
+    error={continuationError}
+    hasMore={page > 0 && !loadError && notes.length < total}
+    {loading}
+    {loadingMore}
+    label="Load older memos"
+    onLoad={loadArchive}
+  />
 </div>
 
 <ConfirmDialog

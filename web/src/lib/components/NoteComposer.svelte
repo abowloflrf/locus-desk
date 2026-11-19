@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import * as Field from '$lib/components/ui/field';
   import * as InputGroup from '$lib/components/ui/input-group';
   import { Spinner } from '$lib/components/ui/spinner';
@@ -7,14 +7,27 @@
 
   import { errorMessage } from '../api/client';
   import type { Note } from '../api/types';
+  import { getMemoDrafts } from '../memo-drafts';
 
   let { onCreate }: { onCreate: (content: string) => Promise<Note> } = $props();
 
-  let content = $state('');
+  const drafts = getMemoDrafts();
+  const draftKey = 'new';
+  let standaloneContent = $state('');
+  const content = $derived(drafts ? (drafts.read(draftKey) ?? '') : standaloneContent);
   let busy = $state(false);
   let error = $state<string | null>(null);
   let showActions = $derived(Boolean(content) || busy || Boolean(error));
   let textarea = $state<HTMLTextAreaElement | null>(null);
+
+  onMount(() => {
+    void tick().then(resizeTextarea);
+  });
+
+  function updateContent(value: string): void {
+    if (drafts) drafts.write(draftKey, value || null);
+    else standaloneContent = value;
+  }
 
   async function submit(): Promise<void> {
     if (busy) return;
@@ -30,7 +43,7 @@
     error = null;
     try {
       await onCreate(submittedContent);
-      if (content === submittedContent) content = '';
+      if (content === submittedContent) updateContent('');
     } catch (cause) {
       error = errorMessage(cause, 'Unable to save the memo.');
     } finally {
@@ -65,7 +78,7 @@
         aria-invalid={error ? 'true' : undefined}
         bind:ref={textarea}
         class="min-h-16 max-h-[280px] transition-[height] duration-150"
-        bind:value={content}
+        bind:value={() => content, updateContent}
         disabled={busy}
         id="note-composer-input"
         oninput={resizeTextarea}

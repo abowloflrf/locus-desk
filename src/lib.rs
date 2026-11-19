@@ -18,9 +18,10 @@ pub mod tasks;
 pub mod version;
 pub mod workspace;
 
-use axum::{Router, extract::Request, middleware};
+use axum::{Router, extract::Request, middleware, routing::any};
 use state::AppState;
 use tower_http::{
+    compression::CompressionLayer,
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, RequestId, SetRequestIdLayer},
     trace::{DefaultOnResponse, TraceLayer},
 };
@@ -51,7 +52,7 @@ pub fn app(state: AppState) -> Router {
 
     Router::new()
         .nest("/api", api)
-        .fallback(static_files::serve)
+        .fallback_service(any(static_files::serve).layer(CompressionLayer::new()))
         .layer(PropagateRequestIdLayer::x_request_id())
         .layer(trace)
         .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))

@@ -1,6 +1,5 @@
 <script lang="ts">
   import '../vitesse-light.css';
-  import '../reader-fonts.css';
   import ArrowLeft from '@lucide/svelte/icons/arrow-left';
   import BookOpenCheck from '@lucide/svelte/icons/book-open-check';
   import ExternalLink from '@lucide/svelte/icons/external-link';
@@ -117,6 +116,9 @@
   const plainText = $derived(content?.plainText.trim() ?? '');
 
   onMount(() => {
+    void import('../reader-fonts.css').catch(() => {
+      // The reader keeps its default font when the font styles cannot load.
+    });
     readerPreferences = loadReaderPreferences(window.localStorage);
     if (mode === 'full') void tick().then(() => readerHeading?.focus());
     readerScrollElement =
@@ -292,9 +294,14 @@
     onfocusout={handleToolbarFocusOut}
   >
     {#if mode === 'full'}
-      <Button onclick={() => void onBack()} variant="ghost">
+      <Button
+        aria-label="Back to Library"
+        class="reader-back"
+        onclick={() => void onBack()}
+        variant="ghost"
+      >
         <ArrowLeft data-icon="inline-start" />
-        Back to Library
+        <span class="reader-back-label">Back to Library</span>
       </Button>
     {:else}
       <span class="reader-toolbar-label">Article preview</span>
@@ -824,6 +831,7 @@
 
     .reader-toolbar {
       top: env(safe-area-inset-top);
+      flex-wrap: wrap;
       gap: 8px;
       margin-bottom: 34px;
     }
@@ -859,6 +867,17 @@
 
     .reader-content :global(pre) {
       font-size: 12px;
+    }
+  }
+
+  @media (max-width: 380px) {
+    .reader-toolbar :global(.reader-back) {
+      min-width: 44px;
+      padding-inline: 0;
+    }
+
+    .reader-back-label {
+      display: none;
     }
   }
 

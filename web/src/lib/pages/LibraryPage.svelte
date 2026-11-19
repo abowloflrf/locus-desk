@@ -30,6 +30,7 @@
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import LibraryCaptureForm from '../components/LibraryCaptureForm.svelte';
   import LibraryReader from '../components/LibraryReader.svelte';
+  import ListContinuation from '../components/ListContinuation.svelte';
   import StatusMessage from '../components/StatusMessage.svelte';
   import { Button } from '../components/ui/button';
   import * as DropdownMenu from '../components/ui/dropdown-menu';
@@ -39,8 +40,20 @@
   import * as Empty from '../components/ui/empty';
   import { Input } from '../components/ui/input';
   import { Spinner } from '../components/ui/spinner';
-  import { captureListFocus, restoreListFocus } from '../utils/focus';
+  import {
+    captureListFocus,
+    captureListScroll,
+    focusAppendedRow,
+    restoreListFocus,
+  } from '../utils/focus';
   import { formatCompactDate } from '../utils/date';
+
+  import {
+    fetchLoadedPages,
+    mergePageItems,
+    type ListContinuationError,
+    type ListLoad,
+  } from '../utils/pagination';
 
   let {
     onImmersiveChange = () => {},
@@ -62,11 +75,12 @@
   let filterLabel = $derived(
     [status === 'ARCHIVED' ? 'Archived' : '', tag ? `#${tag}` : ''].filter(Boolean).join(' · '),
   );
-  let page = $state(1);
+  let page = $state(0);
   let total = $state(0);
   let loading = $state(true);
   let loadingMore = $state(false);
   let loadError = $state<string | null>(null);
+  let continuationError = $state<ListContinuationError | null>(null);
   let operationError = $state<string | null>(null);
   let actionStatus = $state<string | null>(null);
   let busyUids = $state<Set<string>>(new Set());
@@ -94,6 +108,7 @@
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
   let requestId = 0;
+  let disposed = false;
   let detailRequestId = 0;
   let retryRequestId = 0;
   let pollGeneration = 0;
@@ -116,13 +131,14 @@
     updateMedia();
     listOnlyMedia.addEventListener('change', updateMedia);
     window.addEventListener('popstate', handlePopState);
-    void loadItems(true);
+    void loadItems('reset');
 
     return () => {
+      disposed = true;
       listOnlyMedia.removeEventListener('change', updateMedia);
       window.removeEventListener('popstate', handlePopState);
       if (immersiveReader) onImmersiveChange(false);
-      listController?.abort();
+      invalidateListRequest();
       detailController?.abort();
       cancelRetry();
       stopPolling();
@@ -130,17 +146,23 @@
     };
   });
 
-  async function loadItems(reset: boolean): Promise<void> {
-    const nextPage = reset ? 1 : page + 1;
+  async function loadItems(load: ListLoad, lastPage = Math.max(1, page)): Promise<boolean> {
+    if (disposed) return false;
+    if (load === 'append' && (loading || loadingMore || page === 0)) return false;
+    const continuation =
+      load === 'append' || load === 'refresh'
+        ? pageElement?.querySelector('[data-list-continuation]')
+        : null;
     const id = ++requestId;
     listController?.abort();
-    listController = new AbortController();
-    if (reset) loading = true;
-    else loadingMore = true;
+    const { signal } = (listController = new AbortController());
+    loading = load !== 'append';
+    loadingMore = load === 'append';
     loadError = null;
+    if (load === 'reset') continuationError = null;
 
-    try {
-      const response = await listLibraryItems(
+    const fetchPage = (nextPage: number) =>
+      listLibraryItems(
         {
           page: nextPage,
           pageSize: 30,
@@ -150,13 +172,25 @@
           read: view === 'unread' ? false : undefined,
           starred: view === 'starred' ? true : undefined,
         },
-        listController.signal,
+        signal,
       );
-      if (id !== requestId) return;
-      items = reset ? response.items : [...items, ...response.items];
+    try {
+      const response =
+        load === 'refresh'
+          ? await fetchLoadedPages(lastPage, fetchPage, signal)
+          : await fetchPage(load === 'reset' ? 1 : page + 1);
+      if (id !== requestId || signal.aborted) return false;
+
+      continuationError = null;
+      const restoreScroll = load === 'refresh' ? captureListScroll(pageElement) : undefined;
+      const nextFocusUid =
+        continuation === document.activeElement
+          ? response.items.find((item) => !items.some((visible) => visible.uid === item.uid))?.uid
+          : undefined;
+      const result = load === 'append' ? mergePageItems(items, response.items) : response.items;
+      items = result;
       page = response.page;
       total = response.total;
-
       if (selectedUid) {
         const visible = items.find((item) => item.uid === selectedUid);
         if (!visible) closeDetail(false);
@@ -168,9 +202,21 @@
           startPolling(visible);
         }
       }
+      if (restoreScroll) {
+        await tick();
+        if (id === requestId && !signal.aborted) restoreScroll();
+      }
+      if (continuation && nextFocusUid && id === requestId && !signal.aborted) {
+        await focusAppendedRow(pageElement, continuation, nextFocusUid);
+      }
+      return id === requestId && !signal.aborted;
     } catch (cause) {
-      if (cause instanceof DOMException && cause.name === 'AbortError') return;
-      if (id === requestId) loadError = errorMessage(cause, 'Unable to load the Library.');
+      if (id === requestId && !signal.aborted) {
+        const message = errorMessage(cause, 'Unable to load the Library.');
+        if (load === 'reset' || page === 0) loadError = message;
+        else continuationError = { load, message, lastPage };
+      }
+      return false;
     } finally {
       if (id === requestId) {
         loading = false;
@@ -197,10 +243,10 @@
       detailProcessingError = null;
       startPolling(item);
       actionStatus = 'Link saved to Library.';
-      void loadItems(true);
+      void loadItems('refresh');
       return item;
     } catch (cause) {
-      void loadItems(true);
+      void loadItems('refresh');
       throw cause;
     }
   }
@@ -211,7 +257,7 @@
     clearVisibleResults();
     searchTimer = setTimeout(() => {
       searchTimer = null;
-      void loadItems(true);
+      void loadItems('reset');
     }, 250);
   }
 
@@ -220,7 +266,7 @@
     searchTimer = null;
     void closeDetail(false);
     clearVisibleResults();
-    void loadItems(true);
+    void loadItems('reset');
   }
 
   function selectView(next: string): void {
@@ -259,10 +305,11 @@
   function clearVisibleResults(): void {
     invalidateListRequest();
     items = [];
-    page = 1;
+    page = 0;
     total = 0;
     loading = true;
     loadError = null;
+    continuationError = null;
   }
 
   async function openDetail(item: LibraryItem): Promise<void> {
@@ -525,7 +572,7 @@
       await updateLibraryItem(item.uid, { status: nextStatus });
       actionStatus =
         nextStatus === 'ARCHIVED' ? 'Library item archived.' : 'Library item restored.';
-      void loadItems(true);
+      void loadItems('refresh');
     } catch (cause) {
       if (matchesFilters(item) && !items.some((entry) => entry.uid === item.uid)) {
         const restored = [...items];
@@ -571,7 +618,7 @@
       if (selectedUid === item.uid) await closeDetail(false);
       pendingDelete = null;
       actionStatus = 'Library item deleted.';
-      void loadItems(true);
+      void loadItems('refresh');
     } catch (cause) {
       deleteError = errorMessage(cause, 'Unable to delete this Library item.');
     } finally {
@@ -609,7 +656,7 @@
         if (wasVisible) total = Math.max(0, total - 1);
         if (!readerItem && selectedUid === updated.uid) await closeDetail(false);
         if (wasVisible && !readerItem) await restoreListFocus(pageElement, focusSnapshot);
-        void loadItems(true);
+        void loadItems('refresh');
       }
     } catch (cause) {
       replaceItem(item);
@@ -844,7 +891,7 @@
               <Empty.Description>{loadError}</Empty.Description>
             </Empty.Header>
             <Empty.Content>
-              <Button onclick={() => void loadItems(true)} variant="secondary">Try again</Button>
+              <Button onclick={() => void loadItems('reset')} variant="secondary">Try again</Button>
             </Empty.Content>
           </Empty.Root>
         {:else if items.length === 0}
@@ -984,19 +1031,15 @@
               </li>
             {/each}
           </ol>
-
-          {#if items.length < total}
-            <Button
-              class="load-more"
-              disabled={loadingMore}
-              onclick={() => void loadItems(false)}
-              variant="secondary"
-            >
-              {#if loadingMore}<Spinner data-icon="inline-start" />{/if}
-              {loadingMore ? 'Loading…' : 'Load more'}
-            </Button>
-          {/if}
         {/if}
+        <ListContinuation
+          error={continuationError}
+          hasMore={page > 0 && !loadError && items.length < total}
+          {loading}
+          {loadingMore}
+          label="Load more"
+          onLoad={loadItems}
+        />
       </div>
     </section>
   </div>

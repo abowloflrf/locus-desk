@@ -1,31 +1,62 @@
 <script lang="ts">
+  import Archive from '@lucide/svelte/icons/archive';
   import SearchField from '../components/SearchField.svelte';
-  import { onMount } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
 
   import { errorMessage } from '../api/client';
   import { createNote, deleteNote, listNotes, listTags, updateNote } from '../api/notes';
   import type { Note, SessionInfo, UpdateNoteRequest } from '../api/types';
+  import type { MemoListView } from '../memo-view';
+  import { provideMemoDrafts } from '../memo-drafts';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import NoteComposer from '../components/NoteComposer.svelte';
   import NoteTimeline from '../components/NoteTimeline.svelte';
+  import ListContinuation from '../components/ListContinuation.svelte';
   import StatusMessage from '../components/StatusMessage.svelte';
   import { Button } from '../components/ui/button';
   import * as Empty from '../components/ui/empty';
   import { Spinner } from '../components/ui/spinner';
   import * as ToggleGroup from '../components/ui/toggle-group';
-  import { captureListFocus, restoreListFocus, type ListFocusSnapshot } from '../utils/focus';
+  import {
+    captureListFocus,
+    captureListScroll,
+    focusAppendedRow,
+    restoreListFocus,
+    type ListFocusSnapshot,
+  } from '../utils/focus';
 
-  let { session }: { session: SessionInfo } = $props();
+  import {
+    fetchLoadedPages,
+    mergePageItems,
+    type ListContinuationError,
+    type ListLoad,
+  } from '../utils/pagination';
+
+  let {
+    session,
+    listView,
+    onOpenArchive,
+    focusSearchRequested = false,
+    onSearchFocused,
+  }: {
+    session: SessionInfo;
+    listView?: MemoListView;
+    onOpenArchive?: () => void;
+    focusSearchRequested?: boolean;
+    onSearchFocused?: () => void;
+  } = $props();
 
   let notes = $state<Note[]>([]);
   let tags = $state<string[]>([]);
-  let query = $state('');
-  let selectedTag = $state('');
-  let page = $state(1);
+  const drafts = provideMemoDrafts(() => session);
+  let query = $state(untrack(() => listView?.query ?? ''));
+  let selectedTag = $state(untrack(() => listView?.tag ?? ''));
+  let page = $state(0);
   let total = $state(0);
   let loading = $state(true);
   let loadingMore = $state(false);
   let loadError = $state<string | null>(null);
+  let continuationError = $state<ListContinuationError | null>(null);
   let operationError = $state<string | null>(null);
   let actionStatus = $state<string | null>(null);
   let busyUids = $state<Set<string>>(new Set());
@@ -39,49 +70,91 @@
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
   let deleteFocusSnapshot: ListFocusSnapshot | null = null;
   let requestId = 0;
+  let disposed = false;
   let tagRequestId = 0;
 
+  $effect(() => {
+    if (focusSearchRequested && searchInput) {
+      searchInput.focus();
+      onSearchFocused?.();
+    }
+  });
+
   onMount(() => {
-    void loadNotesPage(true);
+    void restoreMemoList(listView?.pages ?? 1, listView?.scrollTop ?? 0);
     void refreshTags();
 
-    const focusSearch = () => searchInput?.focus();
-    window.addEventListener('locus:focus-search', focusSearch);
     return () => {
-      activeController?.abort();
+      disposed = true;
+      invalidateListRequest();
       tagController?.abort();
       if (searchTimer) clearTimeout(searchTimer);
-      window.removeEventListener('locus:focus-search', focusSearch);
     };
   });
 
-  async function loadNotesPage(reset: boolean): Promise<void> {
-    const nextPage = reset ? 1 : page + 1;
+  async function restoreMemoList(pages: number, scrollTop: number): Promise<void> {
+    if (!(await loadNotesPage('reset'))) return;
+    if (pages > page && !(await loadNotesPage('refresh', pages))) return;
+    const id = requestId;
+    await tick();
+    if (id !== requestId) return;
+    const scroller = pageElement?.closest<HTMLElement>('.workspace-column');
+    if (scroller) scroller.scrollTop = scrollTop;
+  }
+
+  async function loadNotesPage(load: ListLoad, lastPage = Math.max(1, page)): Promise<boolean> {
+    if (disposed) return false;
+    if (load === 'append' && (loading || loadingMore || page === 0)) return false;
+    const continuation =
+      load === 'append' || load === 'refresh'
+        ? pageElement?.querySelector('[data-list-continuation]')
+        : null;
     const id = ++requestId;
     activeController?.abort();
-    activeController = new AbortController();
-    if (reset) loading = true;
-    else loadingMore = true;
+    const { signal } = (activeController = new AbortController());
+    loading = load !== 'append';
+    loadingMore = load === 'append';
     loadError = null;
+    if (load === 'reset') continuationError = null;
 
-    try {
-      const response = await listNotes(
-        {
-          page: nextPage,
-          pageSize: 30,
-          q: query,
-          status: 'ACTIVE',
-          tag: selectedTag,
-        },
-        activeController.signal,
+    const fetchPage = (nextPage: number) =>
+      listNotes(
+        { page: nextPage, pageSize: 30, q: query, status: 'ACTIVE', tag: selectedTag },
+        signal,
       );
-      if (id !== requestId) return;
-      notes = sortNotes(reset ? response.items : [...notes, ...response.items]);
+    try {
+      const response =
+        load === 'refresh'
+          ? await fetchLoadedPages(lastPage, fetchPage, signal)
+          : await fetchPage(load === 'reset' ? 1 : page + 1);
+      if (id !== requestId || signal.aborted) return false;
+
+      continuationError = null;
+      const restoreScroll = load === 'refresh' ? captureListScroll(pageElement) : undefined;
+      const nextFocusUid =
+        continuation === document.activeElement
+          ? response.items.find((item) => !notes.some((visible) => visible.uid === item.uid))?.uid
+          : undefined;
+      const result = load === 'append' ? mergePageItems(notes, response.items) : response.items;
+      notes = sortNotes(result);
       page = response.page;
       total = response.total;
+      if (listView) listView.pages = page;
+      if (restoreScroll) {
+        await tick();
+        if (id === requestId && !signal.aborted) restoreScroll();
+      }
+      if (continuation && nextFocusUid && id === requestId && !signal.aborted) {
+        await focusAppendedRow(pageElement, continuation, nextFocusUid);
+      }
+      return id === requestId && !signal.aborted;
     } catch (cause) {
-      if (cause instanceof DOMException && cause.name === 'AbortError') return;
-      if (id === requestId) loadError = errorMessage(cause, 'Unable to load memos.');
+      if (id === requestId && !signal.aborted) {
+        const message = errorMessage(cause, 'Unable to load memos.');
+        if (load === 'reset' || page === 0) loadError = message;
+        else continuationError = { load, message, lastPage };
+      }
+      return false;
     } finally {
       if (id === requestId) {
         loading = false;
@@ -105,22 +178,28 @@
 
   function handleSearch(event: Event): void {
     query = (event.currentTarget as HTMLInputElement).value;
+    if (listView) listView.query = query;
+    resetPagination();
     if (searchTimer) clearTimeout(searchTimer);
     invalidateListRequest();
     loading = true;
     searchTimer = setTimeout(() => {
       searchTimer = null;
-      void loadNotesPage(true);
+      void loadNotesPage('reset');
     }, 250);
   }
 
   function selectTag(tag: string): void {
     selectedTag = selectedTag === tag ? '' : tag;
-    void loadNotesPage(true);
+    handleTagFilterChange();
   }
 
   function handleTagFilterChange(): void {
-    void loadNotesPage(true);
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = null;
+    if (listView) listView.tag = selectedTag;
+    resetPagination();
+    void loadNotesPage('reset');
   }
 
   async function handleCreate(content: string): Promise<Note> {
@@ -133,10 +212,10 @@
         total += 1;
       }
       void refreshTags();
-      void loadNotesPage(true);
+      void loadNotesPage('refresh');
       return note;
     } catch (cause) {
-      void loadNotesPage(true);
+      void loadNotesPage('refresh');
       throw cause;
     }
   }
@@ -161,10 +240,10 @@
         }
       }
       void refreshTags();
-      void loadNotesPage(true);
+      void loadNotesPage('refresh');
     } catch (cause) {
       operationError = errorMessage(cause, 'Unable to save the memo.');
-      void loadNotesPage(true);
+      void loadNotesPage('refresh');
       throw cause;
     } finally {
       markBusy(note.uid, false);
@@ -193,14 +272,14 @@
       if (returnedDuringRequest) total = Math.max(0, total - 1);
       actionStatus = 'Memo archived.';
       void refreshTags();
-      void loadNotesPage(true);
+      void loadNotesPage('refresh');
     } catch (cause) {
       if (matchesCurrentFilter(note) && !notes.some((item) => item.uid === note.uid)) {
         notes = sortNotes([note, ...notes]);
         total += 1;
       }
       operationError = errorMessage(cause, 'Unable to archive the memo.');
-      void loadNotesPage(true);
+      void loadNotesPage('refresh');
     } finally {
       markBusy(note.uid, false);
     }
@@ -216,11 +295,11 @@
     try {
       const updated = await updateNote(note.uid, payload);
       notes = sortNotes(notes.map((item) => (item.uid === note.uid ? updated : item)));
-      void loadNotesPage(true);
+      void loadNotesPage('refresh');
     } catch (cause) {
       notes = sortNotes(notes.map((item) => (item.uid === note.uid ? note : item)));
       operationError = errorMessage(cause, 'Unable to update the memo.');
-      void loadNotesPage(true);
+      void loadNotesPage('refresh');
     } finally {
       markBusy(note.uid, false);
     }
@@ -234,16 +313,17 @@
     deleteError = null;
     try {
       await deleteNote(note.uid);
+      drafts.write(note.uid, null);
       notes = notes.filter((item) => item.uid !== note.uid);
       total = Math.max(0, total - 1);
       pendingDelete = null;
       deleteError = null;
       actionStatus = 'Memo deleted.';
       void refreshTags();
-      void loadNotesPage(true);
+      void loadNotesPage('refresh');
     } catch (cause) {
       deleteError = errorMessage(cause, 'Unable to delete the memo.');
-      void loadNotesPage(true);
+      void loadNotesPage('refresh');
     } finally {
       deleteBusy = false;
     }
@@ -291,6 +371,12 @@
     busyUids = next;
   }
 
+  function resetPagination(): void {
+    page = 0;
+    continuationError = null;
+    if (listView) listView.pages = 1;
+  }
+
   function invalidateListRequest(): void {
     requestId += 1;
     activeController?.abort();
@@ -311,6 +397,27 @@
       bind:ref={searchInput}
       shortcut="⌘K"
     />
+    <Button
+      class="md:hidden"
+      href="/archive"
+      onclick={(event) => {
+        if (
+          !onOpenArchive ||
+          event.button !== 0 ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.shiftKey ||
+          event.altKey
+        )
+          return;
+        event.preventDefault();
+        onOpenArchive();
+      }}
+      variant="ghost"
+    >
+      <Archive data-icon="inline-start" />
+      Archive
+    </Button>
   </header>
 
   <NoteComposer onCreate={handleCreate} />
@@ -355,7 +462,7 @@
         <Empty.Description>{loadError}</Empty.Description>
       </Empty.Header>
       <Empty.Content>
-        <Button onclick={() => void loadNotesPage(true)} variant="secondary">Try again</Button>
+        <Button onclick={() => void loadNotesPage('reset')} variant="secondary">Try again</Button>
       </Empty.Content>
     </Empty.Root>
   {:else if notes.length === 0}
@@ -382,18 +489,15 @@
       onTag={selectTag}
       timeZone={session.workspace.timezone}
     />
-    {#if notes.length < total}
-      <Button
-        class="load-more"
-        disabled={loadingMore}
-        onclick={() => void loadNotesPage(false)}
-        variant="secondary"
-      >
-        {#if loadingMore}<Spinner data-icon="inline-start" />{/if}
-        {loadingMore ? 'Loading…' : 'Load older memos'}
-      </Button>
-    {/if}
   {/if}
+  <ListContinuation
+    error={continuationError}
+    hasMore={page > 0 && !loadError && notes.length < total}
+    {loading}
+    {loadingMore}
+    label="Load older memos"
+    onLoad={loadNotesPage}
+  />
 </div>
 
 <ConfirmDialog

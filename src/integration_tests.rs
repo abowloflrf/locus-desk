@@ -107,6 +107,37 @@ async fn response_json(response: Response<Body>) -> Value {
 }
 
 #[tokio::test]
+async fn negotiates_gzip_for_static_pages() {
+    use std::io::Read;
+
+    let test = TestApp::new().await;
+    let identity = test.request(Method::GET, "/notes", None, None).await;
+    assert!(!identity.headers().contains_key(header::CONTENT_ENCODING));
+    let identity = to_bytes(identity.into_body(), 1024 * 1024).await.unwrap();
+
+    let compressed = test
+        .router
+        .oneshot(
+            Request::builder()
+                .uri("/notes")
+                .header(header::ACCEPT_ENCODING, "gzip")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(compressed.headers()[header::CONTENT_ENCODING], "gzip");
+    assert_eq!(compressed.headers()[header::VARY], "accept-encoding");
+    assert_eq!(compressed.headers()[header::CACHE_CONTROL], "no-cache");
+    let body = to_bytes(compressed.into_body(), 1024 * 1024).await.unwrap();
+    let mut decoded = Vec::new();
+    flate2::read::GzDecoder::new(body.as_ref())
+        .read_to_end(&mut decoded)
+        .unwrap();
+    assert_eq!(decoded.as_slice(), identity.as_ref());
+}
+
+#[tokio::test]
 async fn phase_one_migration_backfills_object_identity_without_losing_data() {
     use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 

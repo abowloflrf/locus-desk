@@ -1,7 +1,5 @@
 import { mount } from 'svelte';
 
-import '@fontsource-variable/ibm-plex-sans/wght.css';
-import '@fontsource-variable/ibm-plex-sans/wght-italic.css';
 import '@fontsource-variable/work-sans/wght.css';
 import '@fontsource-variable/work-sans/wght-italic.css';
 import '@fontsource/ibm-plex-mono/400.css';

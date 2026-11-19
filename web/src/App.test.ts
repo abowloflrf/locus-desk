@@ -137,6 +137,36 @@ describe('App session generations', () => {
 });
 
 describe('App navigation focus', () => {
+  it('restores the memo draft and private search when returning to a history entry', async () => {
+    vi.mocked(getSession).mockResolvedValue(oldSession);
+    const { component, target } = mountApp();
+    const getComposer = () => target.querySelector<HTMLTextAreaElement>('#note-composer-input');
+    const getSearch = () =>
+      target.querySelector<HTMLInputElement>('.notes-page input[type="search"]');
+
+    try {
+      await vi.waitFor(() => expect(getComposer()).not.toBeNull());
+      const draft = getComposer()!;
+      draft.value = 'Unsubmitted draft';
+      draft.dispatchEvent(new Event('input', { bubbles: true }));
+      const search = getSearch()!;
+      search.value = 'private query';
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+
+      const memoEntry = window.history.state;
+      target.querySelector<HTMLAnchorElement>('.nav-item[title="Tasks"]')?.click();
+      await vi.waitFor(() => expect(target.querySelector('.tasks-page')).not.toBeNull());
+      window.history.replaceState(memoEntry, '', '/');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+
+      await vi.waitFor(() => expect(getComposer()?.value).toBe('Unsubmitted draft'));
+      expect(getSearch()?.value).toBe('private query');
+      expect(JSON.stringify(memoEntry)).not.toContain('private query');
+    } finally {
+      await unmount(component);
+    }
+  });
+
   it('offers a skip link and focuses main content after SPA navigation', async () => {
     vi.mocked(getSession).mockResolvedValue(oldSession);
     const { component, target } = mountApp();

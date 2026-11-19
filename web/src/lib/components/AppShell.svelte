@@ -17,21 +17,25 @@
 
   let {
     current,
+    mainContent = $bindable(),
     immersive = false,
     session,
     refreshToken = 0,
     children,
     onNavigate,
+    onSearch,
     onLogout,
     notice = null,
     onDismissNotice,
   }: {
     current: ProtectedRoute;
+    mainContent?: HTMLElement;
     immersive?: boolean;
     session: SessionInfo;
     refreshToken?: number;
     children: Snippet;
     onNavigate: (route: ProtectedRoute, replace?: boolean) => void;
+    onSearch?: () => void;
     onLogout: () => void | Promise<void>;
     notice?: string | null;
     onDismissNotice: () => void;
@@ -151,6 +155,7 @@
     {mobile}
     {onLogout}
     {onNavigate}
+    {onSearch}
     onToggleCollapsed={toggleSidebar}
     {session}
     {todoOpen}
@@ -240,7 +245,9 @@
           </Button>
         </div>
       </header>
-      <main class="workspace-main" id="main-content" tabindex="-1">{@render children()}</main>
+      <main bind:this={mainContent} class="workspace-main" id="main-content" tabindex="-1">
+        {@render children()}
+      </main>
     </div>
 
     {#if current === 'home' && !compact}
@@ -507,8 +514,19 @@
       padding-left: calc(16px + env(safe-area-inset-left));
     }
 
-    .compact-topbar.topbar-hidden {
+    .compact-topbar.topbar-hidden:not(:focus-within) {
       transform: translateY(-100%);
+    }
+
+    .compact-topbar:focus-within {
+      transition: none;
+    }
+
+    .compact-topbar > a {
+      display: inline-flex;
+      min-width: 44px;
+      min-height: 44px;
+      align-items: center;
     }
 
     .compact-topbar-actions :global(button) {
@@ -520,6 +538,10 @@
       padding-bottom: calc(
         var(--mobile-navigation-content-height) + var(--mobile-navigation-safe-space)
       );
+      scroll-padding-top: calc(48px + env(safe-area-inset-top));
+      scroll-padding-bottom: calc(
+        var(--mobile-navigation-content-height) + var(--mobile-navigation-safe-space)
+      );
     }
 
     .app-shell.immersive :global(.sidebar),
@@ -529,6 +551,7 @@
 
     .app-shell.immersive .workspace-column {
       padding-bottom: 0;
+      scroll-padding-block: 0;
     }
   }
 

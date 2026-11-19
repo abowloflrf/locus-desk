@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onMount } from 'svelte';
 
   import { getSession, login, logout } from './lib/api/auth';
   import {
@@ -9,15 +9,10 @@
     setUnauthorizedHandler,
   } from './lib/api/client';
   import type { SessionInfo } from './lib/api/types';
-  import AppShell from './lib/components/AppShell.svelte';
+  import type { MemoListView } from './lib/memo-view';
   import { Button } from './lib/components/ui/button';
   import { Spinner } from './lib/components/ui/spinner';
-  import ArchivePage from './lib/pages/ArchivePage.svelte';
-  import LibraryPage from './lib/pages/LibraryPage.svelte';
   import LoginPage from './lib/pages/LoginPage.svelte';
-  import NotesPage from './lib/pages/NotesPage.svelte';
-  import SettingsPage from './lib/pages/SettingsPage.svelte';
-  import TasksPage from './lib/pages/TasksPage.svelte';
   import {
     pathForRoute,
     routeFromPath,
@@ -35,6 +30,14 @@
   let returnPath = $state(safeReturnPath(window.location.pathname));
   let taskRefreshToken = $state(0);
   let immersive = $state(false);
+  let mainContent = $state<HTMLElement>();
+  let focusMainRequested = $state(false);
+  let focusSearchRequested = $state(false);
+  const historyKey = 'locusMemoView';
+  const historyStart = Date.now();
+  const memoViews = new Map<string, MemoListView>();
+  let nextHistoryId = 0;
+  let memoView = $state.raw<MemoListView | undefined>(undefined);
   let sessionGeneration = 0;
   let sessionRefresh: { controller: AbortController; generation: number } | null = null;
 
@@ -60,13 +63,25 @@
     }
   });
 
+  $effect(() => {
+    if (focusMainRequested && mainContent) {
+      mainContent.focus({ preventScroll: true });
+      focusMainRequested = false;
+    }
+  });
+
   onMount(() => {
     setUnauthorizedHandler(handleUnauthorized);
+    memoView = getMemoView(route);
     const handlePopState = () => {
       const next = routeFromPath(window.location.pathname);
+      const view = getMemoView(next, route === next ? memoView : undefined);
       const focusMain = authStatus === 'authenticated' && route !== next;
+      if (memoView !== view) saveMemoScroll();
+      memoView = view;
+      focusSearchRequested = false;
       route = next;
-      if (focusMain) void focusMainContent();
+      focusMainRequested = focusMain;
     };
     const handleFocus = () => {
       if (authStatus === 'authenticated') void refreshSession();
@@ -176,6 +191,8 @@
   function handleUnauthorized(): void {
     advanceSessionGeneration();
     if (route !== 'login') returnPath = pathForRoute(route);
+    memoViews.clear();
+    memoView = undefined;
     session = null;
     authStatus = 'anonymous';
     navigate('login', true);
@@ -188,27 +205,55 @@
     advanceAuthGeneration();
   }
 
-  function navigate(next: AppRoute, replace = false): void {
-    immersive = false;
-    const focusMain = authStatus === 'authenticated' && route !== next;
-    const path = pathForRoute(next);
-    if (replace) window.history.replaceState({}, '', path);
-    else if (window.location.pathname !== path) window.history.pushState({}, '', path);
-    route = next;
-    if (focusMain) void focusMainContent();
+  function getMemoView(next: AppRoute, currentView?: MemoListView): MemoListView | undefined {
+    if (next !== 'home' && next !== 'notes' && next !== 'archive') return;
+    let id: string | undefined = window.history.state?.[historyKey];
+    if (!id || !memoViews.has(id)) {
+      id = `${historyStart}-${++nextHistoryId}`;
+      window.history.replaceState({ ...window.history.state, [historyKey]: id }, '');
+      memoViews.set(id, currentView ?? { query: '', tag: '', pages: 1, scrollTop: 0 });
+    }
+    return memoViews.get(id);
   }
 
-  async function focusMainContent(): Promise<void> {
-    await tick();
-    document.getElementById('main-content')?.focus();
+  function saveMemoScroll(): void {
+    if (!memoView) return;
+    const scroller = document
+      .getElementById('main-content')
+      ?.closest<HTMLElement>('.workspace-column');
+    if (scroller) memoView.scrollTop = scroller.scrollTop;
+  }
+
+  function navigate(next: AppRoute, replace = false): void {
+    immersive = false;
+    focusSearchRequested = false;
+    const focusMain = authStatus === 'authenticated' && route !== next;
+    const path = pathForRoute(next);
+    if (window.location.pathname !== path) {
+      saveMemoScroll();
+      const keepMemoView = replace && route === 'home' && next === 'notes';
+      if (replace) {
+        window.history.replaceState(keepMemoView ? window.history.state : {}, '', path);
+      } else {
+        window.history.pushState({}, '', path);
+      }
+      memoView = getMemoView(next);
+    }
+    route = next;
+    focusMainRequested = focusMain;
+  }
+
+  function focusMemoSearch(): void {
+    navigate('notes');
+    focusMainRequested = false;
+    focusSearchRequested = true;
   }
 
   function handleGlobalKeydown(event: KeyboardEvent): void {
     if (authStatus !== 'authenticated') return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === 'k') {
       event.preventDefault();
-      navigate('notes');
-      setTimeout(() => window.dispatchEvent(new Event('locus:focus-search')), 0);
+      focusMemoSearch();
     }
   }
 </script>
@@ -217,19 +262,7 @@
 <svelte:window onkeydown={handleGlobalKeydown} />
 
 {#if authStatus === 'checking'}
-  <main
-    class="boot-screen grid min-h-dvh place-content-center justify-items-center gap-4 px-8 py-[calc(2rem+env(safe-area-inset-top))] text-center"
-    aria-live="polite"
-  >
-    <span
-      class="grid size-8 place-items-center rounded-lg bg-primary text-sm font-bold text-primary-foreground"
-      aria-hidden="true">L</span
-    >
-    <p class="flex items-center gap-2 text-sm text-muted-foreground">
-      <Spinner />
-      Opening your workspace…
-    </p>
-  </main>
+  {@render openingWorkspace()}
 {:else if authStatus === 'error'}
   <main
     class="boot-screen grid min-h-dvh place-content-center justify-items-center gap-4 px-8 py-[calc(2rem+env(safe-area-inset-top))] text-center"
@@ -247,26 +280,104 @@
 {:else if authStatus === 'anonymous' || !session}
   <LoginPage onLogin={handleLogin} />
 {:else}
-  <AppShell
-    current={route as ProtectedRoute}
-    {immersive}
-    notice={authError}
-    onDismissNotice={() => (authError = null)}
-    onLogout={handleLogout}
-    onNavigate={(next, replace = false) => navigate(next, replace)}
-    refreshToken={taskRefreshToken}
-    {session}
-  >
-    {#if route === 'tasks'}
-      <TasksPage refreshToken={taskRefreshToken} {session} />
-    {:else if route === 'library'}
-      <LibraryPage onImmersiveChange={(open) => (immersive = open)} {session} />
-    {:else if route === 'settings'}
-      <SettingsPage />
-    {:else if route === 'archive'}
-      <ArchivePage {session} />
-    {:else}
-      <NotesPage {session} />
-    {/if}
-  </AppShell>
+  {#await import('./lib/components/AppShell.svelte')}
+    {@render openingWorkspace()}
+  {:then { default: AppShell }}
+    <AppShell
+      bind:mainContent
+      current={route as ProtectedRoute}
+      {immersive}
+      notice={authError}
+      onDismissNotice={() => (authError = null)}
+      onLogout={handleLogout}
+      onNavigate={navigate}
+      onSearch={focusMemoSearch}
+      refreshToken={taskRefreshToken}
+      {session}
+    >
+      {#if route === 'tasks'}
+        {#await import('./lib/pages/TasksPage.svelte')}
+          {@render openingPage()}
+        {:then { default: TasksPage }}
+          <TasksPage refreshToken={taskRefreshToken} {session} />
+        {:catch}
+          {@render pageUnavailable()}
+        {/await}
+      {:else if route === 'library'}
+        {#await import('./lib/pages/LibraryPage.svelte')}
+          {@render openingPage()}
+        {:then { default: LibraryPage }}
+          <LibraryPage onImmersiveChange={(open) => (immersive = open)} {session} />
+        {:catch}
+          {@render pageUnavailable()}
+        {/await}
+      {:else if route === 'settings'}
+        {#await import('./lib/pages/SettingsPage.svelte')}
+          {@render openingPage()}
+        {:then { default: SettingsPage }}
+          <SettingsPage />
+        {:catch}
+          {@render pageUnavailable()}
+        {/await}
+      {:else if route === 'archive'}
+        {#await import('./lib/pages/ArchivePage.svelte')}
+          {@render openingPage()}
+        {:then { default: ArchivePage }}
+          {#key memoView}
+            <ArchivePage listView={memoView} {session} />
+          {/key}
+        {:catch}
+          {@render pageUnavailable()}
+        {/await}
+      {:else}
+        {#await import('./lib/pages/NotesPage.svelte')}
+          {@render openingPage()}
+        {:then { default: NotesPage }}
+          {#key memoView}
+            <NotesPage
+              listView={memoView}
+              onOpenArchive={() => navigate('archive')}
+              {focusSearchRequested}
+              onSearchFocused={() => (focusSearchRequested = false)}
+              {session}
+            />
+          {/key}
+        {:catch}
+          {@render pageUnavailable()}
+        {/await}
+      {/if}
+    </AppShell>
+  {:catch}
+    <main>{@render pageUnavailable()}</main>
+  {/await}
 {/if}
+
+{#snippet openingWorkspace()}
+  <main
+    class="boot-screen grid min-h-dvh place-content-center justify-items-center gap-4 px-8 py-[calc(2rem+env(safe-area-inset-top))] text-center"
+    aria-live="polite"
+  >
+    <span
+      class="grid size-8 place-items-center rounded-lg bg-primary text-sm font-bold text-primary-foreground"
+      aria-hidden="true">L</span
+    >
+    <p class="flex items-center gap-2 text-sm text-muted-foreground">
+      <Spinner />
+      Opening your workspace…
+    </p>
+  </main>
+{/snippet}
+
+{#snippet openingPage()}
+  <div class="loading-state flex items-center justify-center gap-2" role="status">
+    <Spinner />
+    Opening page…
+  </div>
+{/snippet}
+
+{#snippet pageUnavailable()}
+  <div class="grid justify-items-center gap-3 px-6 py-12 text-center" role="alert">
+    <p class="m-0 text-sm">Unable to load this page.</p>
+    <Button onclick={() => window.location.reload()} variant="secondary">Reload page</Button>
+  </div>
+{/snippet}

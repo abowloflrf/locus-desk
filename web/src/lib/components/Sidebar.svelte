@@ -20,6 +20,7 @@
     current,
     session,
     onNavigate,
+    onSearch,
     onLogout,
     onToggleCollapsed,
     todoOpen,
@@ -30,6 +31,7 @@
     current: ProtectedRoute;
     session: SessionInfo;
     onNavigate: (route: ProtectedRoute) => void;
+    onSearch?: () => void;
     onLogout: () => void | Promise<void>;
     onToggleCollapsed: () => void;
     todoOpen: boolean;
@@ -57,8 +59,8 @@
   }
 
   function focusSearch(): void {
-    onNavigate('notes');
-    setTimeout(() => window.dispatchEvent(new Event('locus:focus-search')), 0);
+    if (onSearch) onSearch();
+    else onNavigate('notes');
   }
 </script>
 
