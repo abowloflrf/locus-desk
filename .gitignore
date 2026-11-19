@@ -1,5 +1,6 @@
 /target/
 /var/
+/artifacts/
 /web/var/
 /web/node_modules/
 /.pnpm-store/
